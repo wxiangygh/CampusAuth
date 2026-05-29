@@ -263,9 +263,19 @@ def check_ipv4_enabled(interface_name):
 
 def portal_logout():
     """注销Portal认证"""
-    print("  检测到AC认证失败，正在注销...")
+    print("  正在注销...")
     local_ip = get_local_ip()
     mac_addr = get_mac_address()
+    
+    if not local_ip:
+        # 如果 get_local_ip() 返回空，尝试从 ipconfig 获取
+        code, output, _ = run_command('ipconfig')
+        for line in output.split('\n'):
+            if 'IPv4' in line and '10.' in line:
+                local_ip = line.split(':', 1)[1].strip()
+                break
+    
+    print(f"  注销IP: {local_ip}")
     
     url = f"http://{PORTAL_SERVER}/eportal/portal/logout"
     
@@ -309,15 +319,24 @@ def portal_logout():
         return False  # Return False but caller should still retry
 
 def wait_for_network_ready(portal_server, max_retries=5):
-    """等待网络连通（能ping通Portal服务器）"""
+    """等待网络连通（通过访问portal页面检测）"""
     print("\n  等待网络连通...")
     for i in range(max_retries):
-        code, _, _ = run_command(f'ping -n 1 -w 1000 {portal_server}')
-        if code == 0:
-            print(f"  网络已连通（{i+1}/{max_retries}次检测成功）")
+        try:
+            req = urllib.request.Request(f'http://{portal_server}/a79.htm', method='GET')
+            req.add_header('User-Agent', 'Mozilla/5.0')
+            response = urllib.request.urlopen(req, timeout=3)
+            # Any response (200, 302, etc.) means network is ready
+            print(f"  网络已连通（{i+1}/{max_retries}次检测，HTTP {response.status}）")
             return True
+        except urllib.error.HTTPError as e:
+            # HTTP error (4xx, 5xx) still means network is connected
+            print(f"  网络已连通（{i+1}/{max_retries}次检测，HTTP {e.code}）")
+            return True
+        except:
+            pass
         print(f"  等待中... ({i+1}/{max_retries})")
-        time.sleep(3)
+        time.sleep(2)
     print("  网络可能未完全连通，继续尝试认证...")
     return False
 
@@ -383,17 +402,13 @@ def portal_login():
             print("  IP已经在线，无需重复认证")
             return True
         elif 'AC' in result:
-            # AC认证失败，先注销再重新认证
+            # AC认证失败，等待后注销再重新认证
             progress.finish()
-            print("  检测到AC认证失败，尝试注销后重新认证...")
-            if portal_logout():
-                print("  注销成功，正在重新认证...")
-                time.sleep(2)
-                # 递归调用重新认证（只递归一次）
-                return portal_login_retry()
-            else:
-                print("  注销失败，重新认证...")
-                return portal_login_retry()
+            print("  检测到AC认证失败，等待3秒后注销...")
+            time.sleep(3)
+            portal_logout()  # 尝试注销，但不管成功与否都继续
+            print("  正在重新认证...")
+            return portal_login_retry()
         else:
             progress.finish()
             print("  Portal认证失败")
@@ -504,11 +519,22 @@ def connect_warp():
         code, svc_output, _ = run_command('sc query "warp-svc"')
         if 'RUNNING' not in svc_output:
             print("  正在启动 Cloudflare WARP 服务...")
-            # Launch the WARP GUI app which auto-starts the service and auto-connects
-            run_command(r'start "" "C:\Program Files\Cloudflare\Cloudflare WARP\Cloudflare WARP.exe"')
+            run_command('net start "warp-svc"')
+            time.sleep(5)
         
-        # Poll for WARP connection status (don't call connect, let GUI auto-connect)
-        print("  等待WARP自动连接...")
+        # Check if already connected
+        code, output, _ = run_command(warp_cli + ' status')
+        if code == 0 and ('Network: healthy' in output or 'Status update: Connected' in output):
+            progress.update()
+            progress.finish()
+            print("  Cloudflare WARP 已连接且网络健康")
+            return True
+        
+        # Connect using warp-cli
+        progress.update()
+        run_command(warp_cli + ' connect')
+        print("  等待WARP连接建立...")
+        
         for i in range(15):  # Up to 45 seconds
             time.sleep(3)
             code, output, _ = run_command(warp_cli + ' status')

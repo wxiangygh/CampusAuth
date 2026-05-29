@@ -585,6 +585,18 @@
                         </div>
                     </div>
                     <div class="form-group">
+                        <div class="toggle-group">
+                            <div class="toggle-label">
+                                <span>静默启动</span>
+                                <span>开机自启时不显示主窗口，仅驻留托盘</span>
+                            </div>
+                            <label class="toggle">
+                                <input type="checkbox" id="silentStartup">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
                         <label>WARP-CLI 路径</label>
                         <div class="input-row">
                             <input type="text" id="warpCliPath" placeholder="留空则自动检测" />
@@ -633,6 +645,7 @@
                 document.getElementById('password').value = config.password || '';
                 document.getElementById('autoAuth').checked = config.auto_auth || false;
                 document.getElementById('warpCliPath').value = config.warp_cli_path || '';
+                document.getElementById('silentStartup').checked = config.silent_startup || false;
                 console.log('Config loaded:', JSON.stringify(config));
             } catch (e) { console.error('Failed to load config:', e); }
             try {
@@ -675,7 +688,8 @@
                 username: document.getElementById('username').value.trim(),
                 password: document.getElementById('password').value,
                 auto_auth: document.getElementById('autoAuth').checked,
-                warp_cli_path: document.getElementById('warpCliPath').value.trim()
+                warp_cli_path: document.getElementById('warpCliPath').value.trim(),
+                silent_startup: document.getElementById('silentStartup').checked
             };
             window.pywebview.api.auto_save_form(config);
         }
@@ -708,6 +722,18 @@
                 } catch (e) {
                     _autoStartupEl.checked = !enabled;
                     showAlert('错误', '设置失败: ' + e.message, 'error');
+                }
+            });
+        }
+        var _silentStartupEl = document.getElementById('silentStartup');
+        if (_silentStartupEl) {
+            _silentStartupEl.addEventListener('change', async function() {
+                clearTimeout(_autoSaveTimer);
+                _doAutoSave();
+                try {
+                    await window.pywebview.api.refresh_startup_task();
+                } catch (e) {
+                    console.error('refresh_startup_task failed:', e);
                 }
             });
         }

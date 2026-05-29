@@ -90,6 +90,7 @@ def load_config():
         'auto_auth': False,
         'portal_server': '10.21.221.98:801',
         'warp_cli_path': '',
+        'silent_startup': False,
         'window_x': None,
         'window_y': None
     }
@@ -631,7 +632,8 @@ def setup_startup_task():
         logger.info("Already running as admin, setting up startup task")
         exe_path = sys.executable if getattr(sys, 'frozen', False) else sys.executable
         script = str(SCRIPT_DIR / 'tray_app.py') if not getattr(sys, 'frozen', False) else exe_path
-        cmd = f'Schtasks /Create /TN "{TASK_NAME_STARTUP}" /TR "\\"{script}\\"" /SC ONLOGON /RL HIGHEST /F'
+        args = '--silent' if CONFIG.get('silent_startup') else ''
+        cmd = f'Schtasks /Create /TN "{TASK_NAME_STARTUP}" /TR "\\"{script}\\" {args}" /SC ONLOGON /RL HIGHEST /F'
         code, output, err = run_command(cmd, shell=True)
         if code == 0:
             logger.info("Startup task created successfully")
@@ -745,7 +747,7 @@ class ApiBridge:
 
     def auto_save_form(self, form_data):
         cfg = load_config()
-        for key in ('wifi_name', 'username', 'password', 'auto_auth', 'warp_cli_path'):
+        for key in ('wifi_name', 'username', 'password', 'auto_auth', 'warp_cli_path', 'silent_startup'):
             if key in form_data:
                 cfg[key] = form_data[key]
         save_config_to_file(cfg)
@@ -848,6 +850,15 @@ class ApiBridge:
             logger.error(f"browse_folder failed: {e}")
             return ''
 
+    def refresh_startup_task(self):
+        logger.info("refresh_startup_task called")
+        if check_startup_status():
+            if is_admin():
+                setup_startup_task()
+                return {'success': True, 'message': '自启任务已更新'}
+            return {'success': False, 'message': '需要管理员权限'}
+        return {'success': True, 'message': '无需更新'}
+
 icon_instance = None
 _tray_app_instance = None
 
@@ -941,11 +952,12 @@ class TrayApp:
     WIN_W = 400
     WIN_H = 560
 
-    def __init__(self):
+    def __init__(self, silent=False):
         self.icon = None
         self.api = ApiBridge()
         self.settings_window = None
         self._should_exit = False
+        self._silent = silent
 
     def create_tray(self):
         self.icon = pystray.Icon('wifi_auto_auth')
@@ -1101,6 +1113,17 @@ class TrayApp:
 
         self.settings_window.events.shown += set_window_icon
 
+        if self._silent:
+            def hide_on_shown():
+                try:
+                    time.sleep(0.3)
+                    if self.settings_window:
+                        self.settings_window.hide()
+                        logger.info("Silent mode: window hidden on startup")
+                except Exception as e:
+                    logger.error(f"Silent mode hide failed: {e}")
+            threading.Thread(target=hide_on_shown, daemon=True).start()
+
         webview.start(debug=False)
         
         if self.icon:
@@ -1122,7 +1145,10 @@ def main():
         return
     TRAY_MUTEX = check_single_instance()
     hide_console()
-    app = TrayApp()
+    silent = '--silent' in sys.argv
+    if silent:
+        logger.info("Silent startup mode enabled")
+    app = TrayApp(silent=silent)
     app.run()
 
 if __name__ == '__main__':

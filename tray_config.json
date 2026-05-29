@@ -5,6 +5,7 @@
   "auto_auth": true,
   "portal_server": "10.21.221.98:801",
   "warp_cli_path": "C:\\Program Files\\Cloudflare\\Cloudflare WARP\\warp-cli.exe",
+  "silent_startup": true,
   "window_x": 1116,
-  "window_y": 317
+  "window_y": 316
 }

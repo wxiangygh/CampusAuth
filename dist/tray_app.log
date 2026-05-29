@@ -1,0 +1,1005 @@
+2026-05-29 18:16:10 [INFO] ==================================================
+2026-05-29 18:16:10 [INFO] WiFi Auto-Auth Tray App Starting
+2026-05-29 18:16:10 [INFO] ==================================================
+2026-05-29 18:16:10 [INFO] Running as admin: 0
+2026-05-29 18:16:11 [INFO] Showing settings window - config incomplete
+2026-05-29 18:16:11 [INFO] Tray app started, running main loop (admin: 0)
+2026-05-29 18:16:26 [INFO] ==================================================
+2026-05-29 18:16:26 [INFO] WiFi Auto-Auth Tray App Starting
+2026-05-29 18:16:26 [INFO] ==================================================
+2026-05-29 18:16:26 [INFO] Running as admin: 0
+2026-05-29 18:16:26 [INFO] Showing settings window - config incomplete
+2026-05-29 18:16:26 [INFO] Tray app started, running main loop (admin: 0)
+2026-05-29 18:24:48 [INFO] ==================================================
+2026-05-29 18:24:48 [INFO] WiFi Auto-Auth Tray App Starting
+2026-05-29 18:24:48 [INFO] ==================================================
+2026-05-29 18:24:48 [INFO] Running as admin: 0
+2026-05-29 18:24:48 [INFO] Config incomplete, opening settings window via subprocess...
+2026-05-29 18:24:48 [INFO] Tray app started, running main loop (admin: 0)
+2026-05-29 18:25:43 [INFO] Not admin, elevating...
+2026-05-29 18:25:46 [INFO] Elevated process started
+2026-05-29 18:25:46 [ERROR] An error occurred when calling message handler
+Traceback (most recent call last):
+  File "pystray\_win32.py", line 412, in _dispatcher
+  File "pystray\_win32.py", line 224, in _on_notify
+  File "pystray\_base.py", line 328, in inner
+  File "pystray\_base.py", line 453, in __call__
+  File "tray_app.py", line 857, in <lambda>
+  File "tray_app.py", line 567, in elevate_if_needed
+SystemExit: 0
+2026-05-29 18:25:48 [INFO] ==================================================
+2026-05-29 18:25:48 [INFO] WiFi Auto-Auth Tray App Starting
+2026-05-29 18:25:48 [INFO] ==================================================
+2026-05-29 18:25:48 [INFO] Running as admin: 1
+2026-05-29 18:25:48 [INFO] Config incomplete, opening settings window via subprocess...
+2026-05-29 18:25:48 [INFO] Tray app started, running main loop (admin: 1)
+2026-05-29 18:26:12 [INFO] User clicked: Exit
+2026-05-29 18:26:12 [INFO] Tray app exited
+2026-05-29 18:26:25 [INFO] User clicked: Exit
+2026-05-29 18:26:25 [INFO] Tray app exited
+2026-05-29 18:40:15 [INFO] ==================================================
+2026-05-29 18:40:15 [INFO] WiFi Auto-Auth Tray App Starting
+2026-05-29 18:40:15 [INFO] ==================================================
+2026-05-29 18:40:15 [INFO] Running as admin: 0
+2026-05-29 18:40:15 [INFO] Config incomplete, opening settings window...
+2026-05-29 18:40:16 [INFO] Tray started (admin: 0)
+2026-05-29 18:53:26 [INFO] ==================================================
+2026-05-29 18:53:26 [INFO] WiFi Auto-Auth Tray App Starting
+2026-05-29 18:53:26 [INFO] ==================================================
+2026-05-29 18:53:26 [INFO] Running as admin: 0
+2026-05-29 18:53:26 [INFO] Config incomplete, opening settings window...
+2026-05-29 18:53:37 [INFO] ==================================================
+2026-05-29 18:53:37 [INFO] WiFi Auto-Auth Tray App Starting
+2026-05-29 18:53:37 [INFO] ==================================================
+2026-05-29 18:53:37 [INFO] Running as admin: 0
+2026-05-29 18:53:37 [INFO] Config incomplete, opening settings window...
+2026-05-29 19:00:44 [INFO] ==================================================
+2026-05-29 19:00:44 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:00:44 [INFO] ==================================================
+2026-05-29 19:00:44 [INFO] Running as admin: 0
+2026-05-29 19:00:44 [INFO] Tray started (admin: 0)
+2026-05-29 19:03:05 [INFO] ==================================================
+2026-05-29 19:03:05 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:03:05 [INFO] ==================================================
+2026-05-29 19:03:05 [INFO] Running as admin: 0
+2026-05-29 19:03:05 [INFO] Tray started (admin: 0)
+2026-05-29 19:09:36 [INFO] ==================================================
+2026-05-29 19:09:36 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:09:36 [INFO] ==================================================
+2026-05-29 19:09:36 [INFO] Running as admin: 0
+2026-05-29 19:09:36 [INFO] Tray started (admin: 0)
+2026-05-29 19:12:41 [INFO] ==================================================
+2026-05-29 19:12:41 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:12:41 [INFO] ==================================================
+2026-05-29 19:12:41 [INFO] Running as admin: 0
+2026-05-29 19:12:41 [INFO] Tray started (admin: 0)
+2026-05-29 19:16:42 [INFO] ==================================================
+2026-05-29 19:16:42 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:16:42 [INFO] ==================================================
+2026-05-29 19:16:42 [INFO] Running as admin: 0
+2026-05-29 19:16:42 [INFO] Tray started (admin: 0)
+2026-05-29 19:19:49 [INFO] ==================================================
+2026-05-29 19:19:49 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:19:49 [INFO] ==================================================
+2026-05-29 19:19:49 [INFO] Running as admin: 0
+2026-05-29 19:19:49 [INFO] Tray started (admin: 0)
+2026-05-29 19:20:34 [INFO] ==================================================
+2026-05-29 19:20:34 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:20:34 [INFO] ==================================================
+2026-05-29 19:20:34 [INFO] Running as admin: 0
+2026-05-29 19:20:34 [INFO] Tray started (admin: 0)
+2026-05-29 19:20:40 [INFO] Another instance already running, exiting
+2026-05-29 19:23:30 [INFO] ==================================================
+2026-05-29 19:23:30 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:23:30 [INFO] ==================================================
+2026-05-29 19:23:30 [INFO] Running as admin: 0
+2026-05-29 19:23:30 [INFO] Tray started (admin: 0)
+2026-05-29 19:23:50 [INFO] ==================================================
+2026-05-29 19:23:50 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:23:50 [INFO] ==================================================
+2026-05-29 19:23:50 [INFO] Running as admin: 0
+2026-05-29 19:23:50 [INFO] Tray started (admin: 0)
+2026-05-29 19:23:58 [INFO] User clicked: Exit
+2026-05-29 19:24:08 [INFO] Another instance already running, exiting
+2026-05-29 19:26:13 [INFO] ==================================================
+2026-05-29 19:26:13 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:26:13 [INFO] ==================================================
+2026-05-29 19:26:13 [INFO] Running as admin: 0
+2026-05-29 19:26:13 [INFO] Tray started (admin: 0)
+2026-05-29 19:32:50 [INFO] ==================================================
+2026-05-29 19:32:50 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:32:50 [INFO] ==================================================
+2026-05-29 19:32:50 [INFO] Running as admin: 0
+2026-05-29 19:32:50 [INFO] Tray started (admin: 0)
+2026-05-29 19:37:34 [INFO] User clicked: Exit
+2026-05-29 19:38:50 [INFO] ==================================================
+2026-05-29 19:38:50 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:38:50 [INFO] ==================================================
+2026-05-29 19:38:50 [INFO] Running as admin: 0
+2026-05-29 19:38:50 [INFO] Tray started (admin: 0)
+2026-05-29 19:43:14 [INFO] ==================================================
+2026-05-29 19:43:14 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:43:14 [INFO] ==================================================
+2026-05-29 19:43:14 [INFO] Running as admin: 0
+2026-05-29 19:43:14 [INFO] Tray started (admin: 0)
+2026-05-29 19:45:02 [INFO] ==================================================
+2026-05-29 19:45:02 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:45:02 [INFO] ==================================================
+2026-05-29 19:45:02 [INFO] Running as admin: 0
+2026-05-29 19:45:02 [INFO] Tray started (admin: 0)
+2026-05-29 19:45:24 [INFO] User clicked: Exit
+2026-05-29 19:45:27 [INFO] Another instance already running, exiting
+2026-05-29 19:45:34 [INFO] Another instance already running, exiting
+2026-05-29 19:49:25 [INFO] Another instance already running, exiting
+2026-05-29 19:49:36 [INFO] Another instance already running, exiting
+2026-05-29 19:49:59 [INFO] ==================================================
+2026-05-29 19:49:59 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:49:59 [INFO] ==================================================
+2026-05-29 19:49:59 [INFO] Running as admin: 0
+2026-05-29 19:49:59 [INFO] Tray started (admin: 0)
+2026-05-29 19:50:18 [INFO] User clicked: Exit
+2026-05-29 19:50:22 [INFO] ==================================================
+2026-05-29 19:50:22 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:50:22 [INFO] ==================================================
+2026-05-29 19:50:22 [INFO] Running as admin: 0
+2026-05-29 19:50:22 [INFO] Tray started (admin: 0)
+2026-05-29 19:50:38 [INFO] User clicked: Exit
+2026-05-29 19:50:41 [INFO] ==================================================
+2026-05-29 19:50:41 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:50:41 [INFO] ==================================================
+2026-05-29 19:50:41 [INFO] Running as admin: 0
+2026-05-29 19:50:41 [INFO] Tray started (admin: 0)
+2026-05-29 19:57:15 [INFO] ==================================================
+2026-05-29 19:57:15 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:57:15 [INFO] ==================================================
+2026-05-29 19:57:15 [INFO] Running as admin: 0
+2026-05-29 19:57:15 [INFO] Tray started (admin: 0)
+2026-05-29 19:57:16 [ERROR] Failed to restore window position: 'Window' object has no attribute '_impl'
+2026-05-29 19:57:25 [INFO] User clicked: Exit
+2026-05-29 19:57:28 [INFO] ==================================================
+2026-05-29 19:57:28 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:57:28 [INFO] ==================================================
+2026-05-29 19:57:28 [INFO] Running as admin: 0
+2026-05-29 19:57:28 [INFO] Tray started (admin: 0)
+2026-05-29 19:57:29 [ERROR] Failed to restore window position: 'Window' object has no attribute '_impl'
+2026-05-29 19:58:06 [INFO] User clicked: Exit
+2026-05-29 19:58:21 [INFO] ==================================================
+2026-05-29 19:58:21 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 19:58:21 [INFO] ==================================================
+2026-05-29 19:58:21 [INFO] Running as admin: 0
+2026-05-29 19:58:21 [INFO] Tray started (admin: 0)
+2026-05-29 19:58:22 [ERROR] Failed to restore window position: 'Window' object has no attribute '_impl'
+2026-05-29 20:04:54 [INFO] ==================================================
+2026-05-29 20:04:54 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:04:54 [INFO] ==================================================
+2026-05-29 20:04:54 [INFO] Running as admin: 0
+2026-05-29 20:04:54 [INFO] Tray started (admin: 0)
+2026-05-29 20:05:02 [INFO] User clicked: Exit
+2026-05-29 20:05:02 [INFO] save_window_position: x=481, y=243
+2026-05-29 20:05:02 [INFO] Window position saved: (481, 243)
+2026-05-29 20:05:08 [INFO] ==================================================
+2026-05-29 20:05:08 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:05:08 [INFO] ==================================================
+2026-05-29 20:05:08 [INFO] Running as admin: 0
+2026-05-29 20:05:08 [INFO] Tray started (admin: 0)
+2026-05-29 20:05:09 [INFO] Restoring window position to (481, 243)
+2026-05-29 20:05:09 [INFO] Window position restored: (481, 243)
+2026-05-29 20:05:24 [INFO] User clicked: Exit
+2026-05-29 20:05:24 [INFO] save_window_position: x=1103, y=406
+2026-05-29 20:05:24 [INFO] Window position saved: (1103, 406)
+2026-05-29 20:05:29 [INFO] ==================================================
+2026-05-29 20:05:29 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:05:29 [INFO] ==================================================
+2026-05-29 20:05:29 [INFO] Running as admin: 0
+2026-05-29 20:05:29 [INFO] Tray started (admin: 0)
+2026-05-29 20:05:30 [INFO] Restoring window position to (1103, 406)
+2026-05-29 20:05:30 [INFO] Window position restored: (1103, 406)
+2026-05-29 20:05:33 [INFO] save_window_position: x=1102, y=405
+2026-05-29 20:05:33 [INFO] Window position saved: (1102, 405)
+2026-05-29 20:06:49 [INFO] User clicked: Exit
+2026-05-29 20:06:49 [INFO] save_window_position: x=1102, y=405
+2026-05-29 20:06:49 [INFO] Window position saved: (1102, 405)
+2026-05-29 20:07:48 [INFO] ==================================================
+2026-05-29 20:07:48 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:07:48 [INFO] ==================================================
+2026-05-29 20:07:48 [INFO] Running as admin: 0
+2026-05-29 20:07:48 [INFO] Tray started (admin: 0)
+2026-05-29 20:07:48 [INFO] Window will be created at (1102, 405)
+2026-05-29 20:15:52 [INFO] ==================================================
+2026-05-29 20:15:52 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:15:52 [INFO] ==================================================
+2026-05-29 20:15:52 [INFO] Running as admin: 0
+2026-05-29 20:15:52 [INFO] Tray started (admin: 0)
+2026-05-29 20:15:57 [INFO] Another instance already running, exiting
+2026-05-29 20:16:05 [INFO] User clicked: Exit
+2026-05-29 20:16:11 [INFO] Another instance already running, exiting
+2026-05-29 20:16:34 [INFO] ==================================================
+2026-05-29 20:16:34 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:16:34 [INFO] ==================================================
+2026-05-29 20:16:34 [INFO] Running as admin: 0
+2026-05-29 20:16:34 [INFO] Tray started (admin: 0)
+2026-05-29 20:18:44 [INFO] ==================================================
+2026-05-29 20:18:44 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:18:44 [INFO] ==================================================
+2026-05-29 20:18:44 [INFO] Running as admin: 0
+2026-05-29 20:18:44 [INFO] Tray started (admin: 0)
+2026-05-29 20:18:45 [INFO] Window position restored: (1102, 405)
+2026-05-29 20:19:10 [INFO] save_window_position: x=1101, y=404
+2026-05-29 20:19:10 [INFO] Window position saved: (1101, 404)
+2026-05-29 20:19:15 [INFO] User clicked: Exit
+2026-05-29 20:19:15 [INFO] save_window_position: x=1101, y=404
+2026-05-29 20:19:15 [INFO] Window position saved: (1101, 404)
+2026-05-29 20:19:25 [INFO] ==================================================
+2026-05-29 20:19:25 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:19:25 [INFO] ==================================================
+2026-05-29 20:19:25 [INFO] Running as admin: 0
+2026-05-29 20:19:25 [INFO] Tray started (admin: 0)
+2026-05-29 20:19:26 [INFO] Window position restored: (1101, 404)
+2026-05-29 20:24:28 [INFO] ==================================================
+2026-05-29 20:24:28 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:24:28 [INFO] ==================================================
+2026-05-29 20:24:28 [INFO] Running as admin: 0
+2026-05-29 20:24:28 [INFO] Tray started (admin: 0)
+2026-05-29 20:24:28 [INFO] Window moved to (1101, 404)
+2026-05-29 20:24:34 [INFO] save_window_position: x=471, y=313
+2026-05-29 20:24:34 [INFO] Window position saved: (471, 313)
+2026-05-29 20:24:42 [INFO] User clicked: Exit
+2026-05-29 20:24:42 [INFO] save_window_position: x=471, y=313
+2026-05-29 20:24:42 [INFO] Window position saved: (471, 313)
+2026-05-29 20:24:48 [INFO] ==================================================
+2026-05-29 20:24:48 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:24:48 [INFO] ==================================================
+2026-05-29 20:24:48 [INFO] Running as admin: 0
+2026-05-29 20:24:48 [INFO] Tray started (admin: 0)
+2026-05-29 20:24:48 [INFO] Window moved to (471, 313)
+2026-05-29 20:24:54 [INFO] save_window_position: x=128, y=128
+2026-05-29 20:24:54 [INFO] Window position saved: (128, 128)
+2026-05-29 20:26:51 [INFO] ==================================================
+2026-05-29 20:26:51 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:26:51 [INFO] ==================================================
+2026-05-29 20:26:51 [INFO] Running as admin: 0
+2026-05-29 20:26:51 [INFO] Tray started (admin: 0)
+2026-05-29 20:26:51 [INFO] Window moved to (128, 128)
+2026-05-29 20:27:08 [INFO] save_window_position: x=859, y=193
+2026-05-29 20:27:08 [INFO] Window position saved: (859, 193)
+2026-05-29 20:29:53 [INFO] ==================================================
+2026-05-29 20:29:53 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:29:53 [INFO] ==================================================
+2026-05-29 20:29:53 [INFO] Running as admin: 0
+2026-05-29 20:29:53 [INFO] Tray started (admin: 0)
+2026-05-29 20:29:53 [INFO] Window moved to (859, 193)
+2026-05-29 20:29:59 [INFO] save_window_position: x=102, y=102
+2026-05-29 20:29:59 [INFO] Window position saved: (102, 102)
+2026-05-29 20:30:16 [INFO] save_window_position: x=572, y=344
+2026-05-29 20:30:16 [INFO] Window position saved: (572, 344)
+2026-05-29 20:30:23 [INFO] save_window_position: x=572, y=344
+2026-05-29 20:30:23 [INFO] Window position saved: (572, 344)
+2026-05-29 20:32:56 [INFO] ==================================================
+2026-05-29 20:32:56 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:32:56 [INFO] ==================================================
+2026-05-29 20:32:56 [INFO] Running as admin: 0
+2026-05-29 20:32:56 [INFO] Tray started (admin: 0)
+2026-05-29 20:32:56 [INFO] Window created at (572, 344)
+2026-05-29 20:33:02 [INFO] save_window_position: x=958, y=420
+2026-05-29 20:33:02 [INFO] Window position saved: (958, 420)
+2026-05-29 20:33:11 [INFO] User clicked: Exit
+2026-05-29 20:33:11 [INFO] save_window_position: x=958, y=420
+2026-05-29 20:33:11 [INFO] Window position saved: (958, 420)
+2026-05-29 20:33:14 [INFO] ==================================================
+2026-05-29 20:33:14 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:33:14 [INFO] ==================================================
+2026-05-29 20:33:14 [INFO] Running as admin: 0
+2026-05-29 20:33:14 [INFO] Tray started (admin: 0)
+2026-05-29 20:33:14 [INFO] Window created at (958, 420)
+2026-05-29 20:33:18 [INFO] save_window_position: x=957, y=420
+2026-05-29 20:33:18 [INFO] Window position saved: (957, 420)
+2026-05-29 20:33:35 [INFO] Another instance already running, exiting
+2026-05-29 20:35:50 [INFO] User clicked: Exit
+2026-05-29 20:35:50 [INFO] save_window_position: x=957, y=420
+2026-05-29 20:35:50 [INFO] Window position saved: (957, 420)
+2026-05-29 20:37:58 [INFO] ==================================================
+2026-05-29 20:37:58 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:37:58 [INFO] ==================================================
+2026-05-29 20:37:58 [INFO] Running as admin: 0
+2026-05-29 20:37:58 [INFO] Tray started (admin: 0)
+2026-05-29 20:37:58 [INFO] Window created at (957, 420)
+2026-05-29 20:38:04 [INFO] Another instance already running, bringing window to front
+2026-05-29 20:38:08 [INFO] Another instance already running, bringing window to front
+2026-05-29 20:38:13 [INFO] save_window_position: x=956, y=420
+2026-05-29 20:38:13 [INFO] Window position saved: (956, 420)
+2026-05-29 20:38:16 [INFO] Another instance already running, bringing window to front
+2026-05-29 20:38:19 [INFO] Another instance already running, bringing window to front
+2026-05-29 20:38:22 [ERROR] An error occurred when calling message handler
+Traceback (most recent call last):
+  File "pystray\_win32.py", line 412, in _dispatcher
+  File "pystray\_win32.py", line 201, in _on_notify
+  File "pystray\_base.py", line 110, in __call__
+  File "pystray\_base.py", line 632, in __call__
+  File "pystray\_base.py", line 453, in __call__
+  File "tray_app.py", line 646, in <lambda>
+  File "tray_app.py", line 663, in show_settings
+TypeError: 'bool' object is not callable
+2026-05-29 20:38:50 [INFO] save_window_position: x=956, y=420
+2026-05-29 20:38:50 [INFO] Window position saved: (956, 420)
+2026-05-29 20:38:53 [INFO] User clicked: Exit
+2026-05-29 20:38:53 [INFO] save_window_position: x=956, y=420
+2026-05-29 20:38:53 [INFO] Window position saved: (956, 420)
+2026-05-29 20:38:56 [INFO] ==================================================
+2026-05-29 20:38:56 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:38:56 [INFO] ==================================================
+2026-05-29 20:38:56 [INFO] Running as admin: 0
+2026-05-29 20:38:56 [INFO] Tray started (admin: 0)
+2026-05-29 20:38:56 [INFO] Window created at (956, 420)
+2026-05-29 20:45:55 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 20:45:55 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 20:45:55 [INFO] ==================================================
+2026-05-29 20:45:55 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:45:55 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 20:45:55 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 20:45:55 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 20:45:55 [INFO] Running as admin: 0
+2026-05-29 20:45:55 [INFO] sys.frozen: True
+2026-05-29 20:45:55 [INFO] ==================================================
+2026-05-29 20:45:55 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 20:45:55 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 20:45:55 [INFO] Tray started (admin: 0)
+2026-05-29 20:45:55 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 20:45:55 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 20:45:55 [INFO] Window created at (956, 420)
+2026-05-29 20:46:03 [INFO] save_window_position: x=956, y=420
+2026-05-29 20:46:03 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 20:46:03 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 20:46:03 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=, username=, auto_auth=False
+2026-05-29 20:46:03 [INFO] Config saved successfully
+2026-05-29 20:46:03 [INFO] Window position saved: (956, 420)
+2026-05-29 20:46:08 [INFO] User clicked: Exit
+2026-05-29 20:46:08 [INFO] save_window_position: x=956, y=420
+2026-05-29 20:46:08 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 20:46:08 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 20:46:08 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=, username=, auto_auth=False
+2026-05-29 20:46:08 [INFO] Config saved successfully
+2026-05-29 20:46:08 [INFO] Window position saved: (956, 420)
+2026-05-29 20:46:12 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 20:46:12 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 20:46:12 [INFO] ==================================================
+2026-05-29 20:46:12 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 20:46:12 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 20:46:12 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 20:46:12 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 20:46:12 [INFO] Running as admin: 0
+2026-05-29 20:46:12 [INFO] sys.frozen: True
+2026-05-29 20:46:12 [INFO] ==================================================
+2026-05-29 20:46:12 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 20:46:12 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 20:46:12 [INFO] Tray started (admin: 0)
+2026-05-29 20:46:12 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 20:46:12 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 20:46:12 [INFO] Window created at (956, 420)
+2026-05-29 21:04:01 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:01 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:01 [INFO] ==================================================
+2026-05-29 21:04:01 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:04:01 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:04:01 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:01 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:04:01 [INFO] Running as admin: 0
+2026-05-29 21:04:01 [INFO] sys.frozen: True
+2026-05-29 21:04:01 [INFO] ==================================================
+2026-05-29 21:04:01 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:01 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:01 [INFO] Tray started (admin: 0)
+2026-05-29 21:04:01 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:01 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:01 [INFO] Window created at (956, 420)
+2026-05-29 21:04:07 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:04:07 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:07 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:07 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:07 [INFO] Config saved successfully
+2026-05-29 21:04:07 [INFO] Window position saved: (956, 420)
+2026-05-29 21:04:12 [INFO] User clicked: Exit
+2026-05-29 21:04:12 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:04:12 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:12 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:12 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:12 [INFO] Config saved successfully
+2026-05-29 21:04:12 [INFO] Window position saved: (956, 420)
+2026-05-29 21:04:18 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:18 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:18 [INFO] ==================================================
+2026-05-29 21:04:18 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:04:18 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:04:18 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:18 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:04:18 [INFO] Running as admin: 0
+2026-05-29 21:04:18 [INFO] sys.frozen: True
+2026-05-29 21:04:18 [INFO] ==================================================
+2026-05-29 21:04:18 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:18 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:18 [INFO] Tray started (admin: 0)
+2026-05-29 21:04:18 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:18 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:18 [INFO] Window created at (956, 420)
+2026-05-29 21:04:28 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:04:28 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:28 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:28 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:28 [INFO] Config saved successfully
+2026-05-29 21:04:28 [INFO] Window position saved: (956, 420)
+2026-05-29 21:04:42 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:42 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:42 [INFO] ==================================================
+2026-05-29 21:04:42 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:04:42 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:04:42 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:42 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:04:42 [INFO] Running as admin: 0
+2026-05-29 21:04:42 [INFO] sys.frozen: True
+2026-05-29 21:04:42 [INFO] ==================================================
+2026-05-29 21:04:42 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:42 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:42 [INFO] Tray started (admin: 0)
+2026-05-29 21:04:42 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:42 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:42 [INFO] Window created at (956, 420)
+2026-05-29 21:04:49 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:04:49 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:04:49 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:49 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=, username=, auto_auth=False
+2026-05-29 21:04:49 [INFO] Config saved successfully
+2026-05-29 21:04:49 [INFO] Window position saved: (956, 420)
+2026-05-29 21:15:45 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:15:45 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:15:45 [INFO] ==================================================
+2026-05-29 21:15:45 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:15:45 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:15:45 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:15:45 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:15:45 [INFO] Running as admin: 0
+2026-05-29 21:15:45 [INFO] sys.frozen: True
+2026-05-29 21:15:45 [INFO] ==================================================
+2026-05-29 21:15:45 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:15:45 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:15:45 [INFO] Tray started (admin: 0)
+2026-05-29 21:15:45 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:15:45 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:15:45 [INFO] Window created at (956, 420)
+2026-05-29 21:17:53 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:17:53 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:17:53 [INFO] ==================================================
+2026-05-29 21:17:53 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:17:53 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:17:53 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:17:53 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:17:53 [INFO] Running as admin: 0
+2026-05-29 21:17:53 [INFO] sys.frozen: True
+2026-05-29 21:17:53 [INFO] ==================================================
+2026-05-29 21:17:53 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:17:53 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:17:53 [INFO] Tray started (admin: 0)
+2026-05-29 21:17:53 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:17:53 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:17:53 [INFO] Window created at (956, 420)
+2026-05-29 21:19:12 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:19:12 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:19:12 [INFO] ==================================================
+2026-05-29 21:19:12 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:19:12 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:19:12 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:19:12 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:19:12 [INFO] Running as admin: 0
+2026-05-29 21:19:12 [INFO] sys.frozen: True
+2026-05-29 21:19:12 [INFO] ==================================================
+2026-05-29 21:19:12 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:19:12 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:19:12 [INFO] Tray started (admin: 0)
+2026-05-29 21:19:12 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:19:12 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:19:12 [INFO] Window created at (956, 420)
+2026-05-29 21:19:18 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:19:18 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:19:18 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:19:18 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=, username=, auto_auth=False
+2026-05-29 21:19:18 [INFO] Config saved successfully
+2026-05-29 21:19:18 [INFO] Window position saved: (956, 420)
+2026-05-29 21:19:18 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:19:18 [INFO] Config loaded: wifi_name=, username=, auto_auth=False
+2026-05-29 21:19:18 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:19:18 [INFO] Config saved successfully
+2026-05-29 21:19:18 [INFO] Form data saved: wifi=CMCC_BJUT_SUSHE_H1010-5G, user=, auto=False
+2026-05-29 21:19:33 [INFO] User clicked: Exit
+2026-05-29 21:19:33 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:19:33 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:19:33 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:19:33 [INFO] Config saved successfully
+2026-05-29 21:19:33 [INFO] Form data saved: wifi=CMCC_BJUT_SUSHE_H1010-5G, user=, auto=False
+2026-05-29 21:19:33 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:19:33 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:19:33 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:19:33 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:19:33 [INFO] Config saved successfully
+2026-05-29 21:19:33 [INFO] Window position saved: (956, 420)
+2026-05-29 21:19:38 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:19:38 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:19:38 [INFO] ==================================================
+2026-05-29 21:19:38 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:19:38 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:19:38 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:19:38 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:19:38 [INFO] Running as admin: 0
+2026-05-29 21:19:38 [INFO] sys.frozen: True
+2026-05-29 21:19:38 [INFO] ==================================================
+2026-05-29 21:19:38 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:19:38 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:19:38 [INFO] Tray started (admin: 0)
+2026-05-29 21:19:38 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:19:38 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:19:38 [INFO] Window created at (956, 420)
+2026-05-29 21:19:56 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:19:56 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:19:56 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:19:56 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:19:56 [INFO] Config saved successfully
+2026-05-29 21:19:56 [INFO] Window position saved: (956, 420)
+2026-05-29 21:20:35 [INFO] Another instance already running, bringing window to front
+2026-05-29 21:20:41 [INFO] Another instance already running, bringing window to front
+2026-05-29 21:20:51 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:20:51 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:20:51 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:20:51 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:20:51 [INFO] Config saved successfully
+2026-05-29 21:20:51 [INFO] Window position saved: (956, 420)
+2026-05-29 21:20:53 [INFO] Another instance already running, bringing window to front
+2026-05-29 21:21:46 [INFO] Another instance already running, bringing window to front
+2026-05-29 21:23:29 [INFO] User clicked: Exit
+2026-05-29 21:23:29 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:23:29 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:23:29 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:23:29 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:23:29 [INFO] Config saved successfully
+2026-05-29 21:23:29 [INFO] Window position saved: (956, 420)
+2026-05-29 21:25:30 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:25:30 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:25:30 [INFO] ==================================================
+2026-05-29 21:25:30 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:25:30 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:25:30 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:25:30 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:25:30 [INFO] Running as admin: 0
+2026-05-29 21:25:30 [INFO] sys.frozen: True
+2026-05-29 21:25:30 [INFO] ==================================================
+2026-05-29 21:25:30 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:25:30 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:25:30 [INFO] Tray started (admin: 0)
+2026-05-29 21:25:30 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:25:30 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:25:30 [INFO] Window created at (956, 420)
+2026-05-29 21:25:46 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:25:46 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:25:46 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:25:46 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:25:46 [INFO] Config saved successfully
+2026-05-29 21:25:46 [INFO] Window position saved: (956, 420)
+2026-05-29 21:25:46 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:25:46 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:25:46 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:25:46 [INFO] Config saved successfully
+2026-05-29 21:25:46 [INFO] Form data saved: wifi=CMCC_BJUT_SUSHE_H1010-5G, user=, auto=False
+2026-05-29 21:25:59 [INFO] Another instance already running, bringing window to front
+2026-05-29 21:26:11 [INFO] Another instance already running, bringing window to front
+2026-05-29 21:26:16 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:26:16 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:26:16 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:16 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:16 [INFO] Config saved successfully
+2026-05-29 21:26:16 [INFO] Window position saved: (956, 420)
+2026-05-29 21:26:16 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:26:16 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:16 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:16 [INFO] Config saved successfully
+2026-05-29 21:26:16 [INFO] Form data saved: wifi=CMCC_BJUT_SUSHE_H1010-5G, user=, auto=False
+2026-05-29 21:26:20 [INFO] User clicked: Exit
+2026-05-29 21:26:20 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:26:20 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:20 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:20 [INFO] Config saved successfully
+2026-05-29 21:26:20 [INFO] Form data saved: wifi=CMCC_BJUT_SUSHE_H1010-5G, user=, auto=False
+2026-05-29 21:26:20 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:26:20 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:26:20 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:20 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:20 [INFO] Config saved successfully
+2026-05-29 21:26:20 [INFO] Window position saved: (956, 420)
+2026-05-29 21:26:25 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:26:25 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:25 [INFO] ==================================================
+2026-05-29 21:26:25 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:26:25 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:26:25 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:26:25 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:26:25 [INFO] Running as admin: 0
+2026-05-29 21:26:25 [INFO] sys.frozen: True
+2026-05-29 21:26:25 [INFO] ==================================================
+2026-05-29 21:26:25 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:26:25 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:25 [INFO] Tray started (admin: 0)
+2026-05-29 21:26:25 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:26:25 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:25 [INFO] Window created at (956, 420)
+2026-05-29 21:26:43 [INFO] Another instance already running, bringing window to front
+2026-05-29 21:26:48 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:26:48 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:26:48 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:48 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:48 [INFO] Config saved successfully
+2026-05-29 21:26:48 [INFO] Window position saved: (956, 420)
+2026-05-29 21:26:48 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:26:48 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:48 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:26:48 [INFO] Config saved successfully
+2026-05-29 21:26:48 [INFO] Form data saved: wifi=CMCC_BJUT_SUSHE_H1010-5G, user=, auto=False
+2026-05-29 21:26:54 [INFO] Another instance already running, bringing window to front
+2026-05-29 21:27:02 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:27:02 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:27:02 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:27:02 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:27:02 [INFO] Config saved successfully
+2026-05-29 21:27:02 [INFO] Window position saved: (956, 420)
+2026-05-29 21:27:02 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:27:02 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:27:02 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:27:02 [INFO] Config saved successfully
+2026-05-29 21:27:02 [INFO] Form data saved: wifi=CMCC_BJUT_SUSHE_H1010-5G, user=, auto=False
+2026-05-29 21:27:07 [INFO] User clicked: Exit
+2026-05-29 21:27:07 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:27:07 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:27:07 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:27:07 [INFO] Config saved successfully
+2026-05-29 21:27:07 [INFO] Form data saved: wifi=CMCC_BJUT_SUSHE_H1010-5G, user=, auto=False
+2026-05-29 21:27:07 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:27:07 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:27:07 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:27:07 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:27:07 [INFO] Config saved successfully
+2026-05-29 21:27:07 [INFO] Window position saved: (956, 420)
+2026-05-29 21:27:11 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:27:11 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:27:11 [INFO] ==================================================
+2026-05-29 21:27:11 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:27:11 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:27:11 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:27:11 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:27:11 [INFO] Running as admin: 0
+2026-05-29 21:27:11 [INFO] sys.frozen: True
+2026-05-29 21:27:11 [INFO] ==================================================
+2026-05-29 21:27:11 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:27:11 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:27:11 [INFO] Tray started (admin: 0)
+2026-05-29 21:27:11 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:27:11 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:27:11 [INFO] Window created at (956, 420)
+2026-05-29 21:30:52 [INFO] User clicked: Exit
+2026-05-29 21:30:52 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:30:52 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:30:52 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:30:52 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:30:52 [INFO] Config saved successfully
+2026-05-29 21:30:52 [INFO] Window position saved: (956, 420)
+2026-05-29 21:33:36 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:33:36 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:33:36 [INFO] ==================================================
+2026-05-29 21:33:36 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:33:36 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:33:36 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:33:36 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:33:36 [INFO] Running as admin: 0
+2026-05-29 21:33:36 [INFO] sys.frozen: True
+2026-05-29 21:33:36 [INFO] ==================================================
+2026-05-29 21:33:36 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:33:36 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:33:36 [INFO] Tray started (admin: 0)
+2026-05-29 21:33:36 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:33:36 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:33:36 [INFO] Window created at (956, 420)
+2026-05-29 21:33:48 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:33:48 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=, auto_auth=False
+2026-05-29 21:33:48 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:33:48 [INFO] Config saved successfully
+2026-05-29 21:33:48 [INFO] Auto-saved: wifi=CMCC_BJUT_SUSHE_H1010-5G, user=111, auto=False
+2026-05-29 21:33:49 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:33:49 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:33:49 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:33:49 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:33:49 [INFO] Config saved successfully
+2026-05-29 21:33:49 [INFO] Window position saved: (956, 420)
+2026-05-29 21:33:54 [INFO] User clicked: Exit
+2026-05-29 21:33:54 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:33:54 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:33:54 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:33:54 [INFO] Config saved successfully
+2026-05-29 21:33:54 [INFO] Form data saved: wifi=CMCC_BJUT_SUSHE_H1010-5G, user=111, auto=False
+2026-05-29 21:33:54 [INFO] save_window_position: x=956, y=420
+2026-05-29 21:33:54 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:33:54 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:33:54 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:33:54 [INFO] Config saved successfully
+2026-05-29 21:33:54 [INFO] Window position saved: (956, 420)
+2026-05-29 21:33:57 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:33:57 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:33:57 [INFO] ==================================================
+2026-05-29 21:33:57 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:33:57 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:33:57 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:33:57 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:33:57 [INFO] Running as admin: 0
+2026-05-29 21:33:57 [INFO] sys.frozen: True
+2026-05-29 21:33:57 [INFO] ==================================================
+2026-05-29 21:33:57 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:33:57 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:33:57 [INFO] Tray started (admin: 0)
+2026-05-29 21:33:57 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:33:57 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:33:57 [INFO] Window created at (956, 420)
+2026-05-29 21:34:06 [INFO] User clicked: Exit
+2026-05-29 21:34:43 [ERROR] save_form_data failed: Main window failed to start
+2026-05-29 21:34:48 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:34:48 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:34:48 [INFO] ==================================================
+2026-05-29 21:34:48 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:34:48 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:34:48 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:34:48 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:34:48 [INFO] Running as admin: 0
+2026-05-29 21:34:48 [INFO] sys.frozen: True
+2026-05-29 21:34:48 [INFO] ==================================================
+2026-05-29 21:34:48 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:34:48 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:34:48 [INFO] Tray started (admin: 0)
+2026-05-29 21:34:48 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:34:48 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:34:48 [INFO] Window created at (956, 420)
+2026-05-29 21:38:02 [ERROR] An error occurred when calling message handler
+Traceback (most recent call last):
+  File "pystray\_win32.py", line 412, in _dispatcher
+  File "pystray\_win32.py", line 201, in _on_notify
+  File "pystray\_base.py", line 110, in __call__
+  File "pystray\_base.py", line 632, in __call__
+  File "pystray\_base.py", line 453, in __call__
+  File "tray_app.py", line 685, in <lambda>
+  File "tray_app.py", line 700, in show_settings
+  File "webview\window.py", line 44, in wrapper
+webview.errors.WebViewException: Main window failed to start
+2026-05-29 21:39:13 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:39:13 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:39:13 [INFO] ==================================================
+2026-05-29 21:39:13 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 21:39:13 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 21:39:13 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:39:13 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 21:39:13 [INFO] Running as admin: 0
+2026-05-29 21:39:13 [INFO] sys.frozen: True
+2026-05-29 21:39:13 [INFO] ==================================================
+2026-05-29 21:39:13 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:39:13 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:39:13 [INFO] Tray started (admin: 0)
+2026-05-29 21:39:13 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 21:39:13 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 21:39:13 [INFO] Window created at (956, 420)
+2026-05-29 21:39:22 [INFO] Another instance already running
+2026-05-29 21:39:22 [WARNING] No 'CampusAuth' window found for PID 43972
+2026-05-29 22:06:00 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:06:00 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:00 [INFO] ==================================================
+2026-05-29 22:06:00 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 22:06:00 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 22:06:00 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:06:00 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 22:06:00 [INFO] Running as admin: 0
+2026-05-29 22:06:00 [INFO] sys.frozen: True
+2026-05-29 22:06:00 [INFO] ==================================================
+2026-05-29 22:06:00 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:06:00 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:00 [INFO] Tray started (admin: 0)
+2026-05-29 22:06:00 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:06:00 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:00 [INFO] Window created at (956, 420)
+2026-05-29 22:06:27 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:06:27 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:06:27 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:27 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:27 [INFO] Config saved successfully
+2026-05-29 22:06:27 [INFO] Window position saved: (956, 420)
+2026-05-29 22:06:29 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:06:29 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:06:29 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:29 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:29 [INFO] Config saved successfully
+2026-05-29 22:06:29 [INFO] Window position saved: (956, 420)
+2026-05-29 22:06:29 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:06:29 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:06:29 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:29 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:29 [INFO] Config saved successfully
+2026-05-29 22:06:29 [INFO] Window position saved: (956, 420)
+2026-05-29 22:06:30 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:06:30 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:06:30 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:30 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:30 [INFO] Config saved successfully
+2026-05-29 22:06:30 [INFO] Window position saved: (956, 420)
+2026-05-29 22:06:30 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:06:30 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:06:30 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:30 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:30 [INFO] Config saved successfully
+2026-05-29 22:06:30 [INFO] Window position saved: (956, 420)
+2026-05-29 22:06:32 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:06:32 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:06:32 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:32 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:32 [INFO] Config saved successfully
+2026-05-29 22:06:32 [INFO] Window position saved: (956, 420)
+2026-05-29 22:06:32 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:06:32 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:06:32 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:32 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:06:32 [INFO] Config saved successfully
+2026-05-29 22:06:32 [INFO] Window position saved: (956, 420)
+2026-05-29 22:11:46 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:11:46 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:11:46 [INFO] ==================================================
+2026-05-29 22:11:46 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 22:11:46 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 22:11:46 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:11:46 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 22:11:46 [INFO] Running as admin: 0
+2026-05-29 22:11:46 [INFO] sys.frozen: True
+2026-05-29 22:11:46 [INFO] ==================================================
+2026-05-29 22:11:46 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:11:46 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:11:46 [INFO] Tray started (admin: 0)
+2026-05-29 22:11:46 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:11:46 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:11:46 [INFO] Window created at (956, 420)
+2026-05-29 22:12:20 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:12:20 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:12:20 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:20 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:20 [INFO] Config saved successfully
+2026-05-29 22:12:20 [INFO] Window position saved: (956, 420)
+2026-05-29 22:12:21 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:12:21 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:12:21 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:21 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:21 [INFO] Config saved successfully
+2026-05-29 22:12:21 [INFO] Window position saved: (956, 420)
+2026-05-29 22:12:21 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:12:21 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:12:21 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:21 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:21 [INFO] Config saved successfully
+2026-05-29 22:12:21 [INFO] Window position saved: (956, 420)
+2026-05-29 22:12:21 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:12:21 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:12:21 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:21 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:21 [INFO] Config saved successfully
+2026-05-29 22:12:21 [INFO] Window position saved: (956, 420)
+2026-05-29 22:12:31 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:12:31 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:12:31 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:31 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:31 [INFO] Config saved successfully
+2026-05-29 22:12:31 [INFO] Window position saved: (956, 420)
+2026-05-29 22:12:31 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:12:31 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:12:31 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:31 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:31 [INFO] Config saved successfully
+2026-05-29 22:12:31 [INFO] Window position saved: (956, 420)
+2026-05-29 22:12:34 [INFO] User clicked: Exit
+2026-05-29 22:12:34 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:12:34 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:12:34 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:34 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:34 [INFO] Config saved successfully
+2026-05-29 22:12:34 [INFO] Window position saved: (956, 420)
+2026-05-29 22:12:34 [ERROR] An error occurred when calling message handler
+Traceback (most recent call last):
+  File "pystray\_win32.py", line 412, in _dispatcher
+  File "pystray\_win32.py", line 224, in _on_notify
+  File "pystray\_base.py", line 328, in inner
+  File "pystray\_base.py", line 453, in __call__
+  File "tray_app.py", line 610, in on_exit
+AttributeError: module 'webview' has no attribute 'stop'
+2026-05-29 22:12:40 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:12:40 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:12:40 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:40 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:40 [INFO] Config saved successfully
+2026-05-29 22:12:40 [INFO] Window position saved: (956, 420)
+2026-05-29 22:12:41 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:12:41 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:12:41 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:41 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:41 [INFO] Config saved successfully
+2026-05-29 22:12:41 [INFO] Window position saved: (956, 420)
+2026-05-29 22:12:43 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:12:43 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:12:43 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:43 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:43 [INFO] Config saved successfully
+2026-05-29 22:12:43 [INFO] Window position saved: (956, 420)
+2026-05-29 22:12:43 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:12:43 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:12:43 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:43 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:43 [INFO] Config saved successfully
+2026-05-29 22:12:43 [INFO] Window position saved: (956, 420)
+2026-05-29 22:12:45 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:12:45 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:12:45 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:45 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:45 [INFO] Config saved successfully
+2026-05-29 22:12:45 [INFO] Window position saved: (956, 420)
+2026-05-29 22:12:46 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:12:46 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:12:46 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:46 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:12:46 [INFO] Config saved successfully
+2026-05-29 22:12:46 [INFO] Window position saved: (956, 420)
+2026-05-29 22:14:11 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:14:11 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:14:11 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:14:11 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:14:11 [INFO] Config saved successfully
+2026-05-29 22:14:11 [INFO] Window position saved: (956, 420)
+2026-05-29 22:14:14 [INFO] save_window_position: x=956, y=420
+2026-05-29 22:14:14 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:14:14 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:14:14 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:14:14 [INFO] Config saved successfully
+2026-05-29 22:14:14 [INFO] Window position saved: (956, 420)
+2026-05-29 22:14:20 [INFO] Another instance already running, bringing window to front
+2026-05-29 22:14:24 [INFO] save_window_position: x=-25600, y=-25600
+2026-05-29 22:14:24 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:14:24 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:14:24 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:14:24 [INFO] Config saved successfully
+2026-05-29 22:14:24 [INFO] Window position saved: (-25600, -25600)
+2026-05-29 22:14:37 [INFO] save_window_position: x=-25600, y=-25600
+2026-05-29 22:14:37 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:14:37 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:14:37 [INFO] Saving config to: D:\project_code\ipv6\dist\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:14:37 [INFO] Config saved successfully
+2026-05-29 22:14:37 [INFO] Window position saved: (-25600, -25600)
+2026-05-29 22:14:41 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:14:41 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:14:41 [INFO] ==================================================
+2026-05-29 22:14:41 [INFO] WiFi Auto-Auth App Starting
+2026-05-29 22:14:41 [INFO] SCRIPT_DIR: D:\project_code\ipv6\dist
+2026-05-29 22:14:41 [INFO] CONFIG_FILE: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:14:41 [INFO] LOG_FILE: D:\project_code\ipv6\dist\tray_app.log
+2026-05-29 22:14:41 [INFO] Running as admin: 0
+2026-05-29 22:14:41 [INFO] sys.frozen: True
+2026-05-29 22:14:41 [INFO] ==================================================
+2026-05-29 22:14:41 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:14:41 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:14:41 [INFO] Tray started (admin: 0)
+2026-05-29 22:14:41 [INFO] Loading config from: D:\project_code\ipv6\dist\tray_config.json
+2026-05-29 22:14:41 [INFO] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=111, auto_auth=False
+2026-05-29 22:14:41 [INFO] Window created at (-25600, -25600)
+2026-05-29 22:14:44 [INFO] User clicked: Restore Normal
+2026-05-29 22:14:44 [INFO] ============================================================
+2026-05-29 22:14:44 [INFO] Restoring normal network mode
+2026-05-29 22:14:44 [INFO] ============================================================
+2026-05-29 22:14:44 [INFO] [1/3] Disconnecting WARP...
+2026-05-29 22:14:44 [INFO] Disconnecting WARP...
+2026-05-29 22:14:46 [INFO] Terminating WARP processes...
+2026-05-29 22:14:50 [INFO] Waiting for WARP interface to disappear...
+2026-05-29 22:14:50 [INFO] WARP interface disappeared (1 checks)
+2026-05-29 22:14:50 [INFO] WiFi interface: WLAN
+2026-05-29 22:14:50 [INFO] [2/3] Enabling IPv4...
+2026-05-29 22:14:53 [INFO] IPv4 enabled on WLAN
+2026-05-29 22:14:53 [INFO] [3/3] Verifying network...
+2026-05-29 22:14:56 [INFO] IPv4 enabled with valid IP

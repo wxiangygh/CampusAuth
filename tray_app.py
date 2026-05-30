@@ -459,14 +459,11 @@ def disconnect_warp():
         run_command([warp_cli, 'set-mode', 'warp+doh'], shell=False)
         run_command([warp_cli, 'disable-wifi'], shell=False)
         run_command([warp_cli, 'disable-ethernet'], shell=False)
-    logger.info("Terminating WARP processes...")
-    run_command('taskkill /F /IM "Cloudflare WARP.exe" 2>nul')
-    run_command('taskkill /F /IM "warp-svc.exe" 2>nul')
-    run_command('taskkill /F /IM "Cloudflare WARP Notification.exe" 2>nul')
-    time.sleep(3)
+    # 不要使用 taskkill 杀死 WARP 服务进程，避免内部状态不一致
+    # 只停止服务即可
+    logger.info("Stopping WARP service...")
     code, svc_output, _ = run_command('sc query "CloudflareWARP"')
     if 'RUNNING' in svc_output:
-        logger.info("Stopping WARP service...")
         run_command('net stop "CloudflareWARP"')
         time.sleep(2)
     # 禁用 WARP 服务自动启动
@@ -673,9 +670,11 @@ def connect_warp():
         if code == 0 and ('Network: healthy' in output or 'Status update: Connected' in output):
             logger.info("WARP already connected")
             return True
-        # 如果状态是 "Manual Disconnection"，先执行一次 disconnect 重置状态
+        # 如果状态是 "Manual Disconnection"，需要重新启用网络并重置
         if 'Manual Disconnection' in output or 'Account is disconnected' in output:
-            logger.info("WARP in disconnected state, resetting...")
+            logger.info("WARP in disconnected state, re-enabling networks and resetting...")
+            run_command([warp_cli, 'enable-wifi'], shell=False)
+            run_command([warp_cli, 'enable-ethernet'], shell=False)
             run_command([warp_cli, 'disconnect'], shell=False)
             time.sleep(2)
         logger.info("WARP not connected, issuing connect command...")

@@ -3,7 +3,6 @@ import sys
 import json
 import ctypes
 import ctypes.wintypes
-import base64
 import threading
 import subprocess
 import logging
@@ -32,33 +31,6 @@ if getattr(sys, 'frozen', False):
 
 LOG_FILE = SCRIPT_DIR / 'tray_app.log'
 CONFIG_FILE = SCRIPT_DIR / 'tray_config.json'
-
-class DATA_BLOB(ctypes.Structure):
-    _fields_ = [('cbData', ctypes.wintypes.DWORD), ('pbData', ctypes.POINTER(ctypes.c_char))]
-
-def _dpapi_encrypt(data):
-    if isinstance(data, str):
-        data = data.encode('utf-8')
-    blob_in = DATA_BLOB(len(data), ctypes.create_string_buffer(data, len(data)))
-    blob_out = DATA_BLOB()
-    if ctypes.windll.crypt32.CryptProtectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
-        encrypted = ctypes.string_at(blob_out.pbData, blob_out.cbData)
-        ctypes.windll.kernel32.LocalFree(blob_out.pbData)
-        return base64.b64encode(encrypted).decode('ascii')
-    return None
-
-def _dpapi_decrypt(encrypted_b64):
-    try:
-        encrypted = base64.b64decode(encrypted_b64)
-    except Exception:
-        return None
-    blob_in = DATA_BLOB(len(encrypted), ctypes.create_string_buffer(encrypted, len(encrypted)))
-    blob_out = DATA_BLOB()
-    if ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
-        decrypted = ctypes.string_at(blob_out.pbData, blob_out.cbData)
-        ctypes.windll.kernel32.LocalFree(blob_out.pbData)
-        return decrypted.decode('utf-8')
-    return None
 TASK_NAME_STARTUP = "WiFiAutoAuthStartup"
 
 logging.basicConfig(
@@ -138,11 +110,6 @@ def load_config():
                     save_config_to_file(cfg)
                     logger.info(f"Migrated portal_server -> portal_ip={cfg['portal_ip']}, portal_port={cfg['portal_port']}")
                 merged = {**defaults, **cfg}
-                if merged.get('password') and not merged.get('_pwd_encrypted'):
-                    decrypted = _dpapi_decrypt(merged['password'])
-                    if decrypted is not None:
-                        merged['password'] = decrypted
-                    merged['_pwd_encrypted'] = False
                 logger.info(f"Config loaded: wifi_name={merged.get('wifi_name')}, username={merged.get('username')}, auto_auth={merged.get('auto_auth')}")
                 return merged
         except Exception as e:
@@ -153,14 +120,8 @@ def load_config():
 def save_config_to_file(cfg):
     logger.info(f"Saving config to: {CONFIG_FILE}, wifi_name={cfg.get('wifi_name')}, username={cfg.get('username')}, auto_auth={cfg.get('auto_auth')}")
     try:
-        save_cfg = dict(cfg)
-        if save_cfg.get('password'):
-            encrypted = _dpapi_encrypt(save_cfg['password'])
-            if encrypted:
-                save_cfg['password'] = encrypted
-                save_cfg['_pwd_encrypted'] = True
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(save_cfg, f, indent=2, ensure_ascii=False)
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
         logger.info("Config saved successfully")
     except Exception as e:
         logger.error(f"Failed to save config: {e}")
@@ -248,33 +209,49 @@ def run_command(cmd, shell=True, timeout=30):
     # 读取输出文件
     stdout = ''
     stderr = ''
-    try:
-        if os.path.exists(tmp_out):
-            with open(tmp_out, 'r', encoding='utf-8', errors='replace') as f:
-                stdout = f.read()
-            if '\ufffd' in stdout:
+    for _attempt in range(3):
+        try:
+            if os.path.exists(tmp_out):
+                with open(tmp_out, 'r', encoding='utf-8', errors='replace') as f:
+                    stdout = f.read()
+                if '\ufffd' in stdout:
+                    try:
+                        with open(tmp_out, 'r', encoding='gbk', errors='replace') as f:
+                            stdout = f.read()
+                    except Exception:
+                        pass
                 try:
-                    with open(tmp_out, 'r', encoding='gbk', errors='replace') as f:
-                        stdout = f.read()
+                    os.remove(tmp_out)
                 except Exception:
                     pass
-            os.remove(tmp_out)
-    except Exception as e:
-        logger.debug(f"run_command: failed to read stdout: {e}")
+            break
+        except Exception as e:
+            if _attempt < 2:
+                time.sleep(0.3)
+            else:
+                logger.debug(f"run_command: failed to read stdout: {e}")
 
-    try:
-        if os.path.exists(tmp_err):
-            with open(tmp_err, 'r', encoding='utf-8', errors='replace') as f:
-                stderr = f.read()
-            if '\ufffd' in stderr:
+    for _attempt in range(3):
+        try:
+            if os.path.exists(tmp_err):
+                with open(tmp_err, 'r', encoding='utf-8', errors='replace') as f:
+                    stderr = f.read()
+                if '\ufffd' in stderr:
+                    try:
+                        with open(tmp_err, 'r', encoding='gbk', errors='replace') as f:
+                            stderr = f.read()
+                    except Exception:
+                        pass
                 try:
-                    with open(tmp_err, 'r', encoding='gbk', errors='replace') as f:
-                        stderr = f.read()
+                    os.remove(tmp_err)
                 except Exception:
                     pass
-            os.remove(tmp_err)
-    except Exception as e:
-        logger.debug(f"run_command: failed to read stderr: {e}")
+            break
+        except Exception as e:
+            if _attempt < 2:
+                time.sleep(0.3)
+            else:
+                logger.debug(f"run_command: failed to read stderr: {e}")
 
     if exit_code == -1:
         stderr = "Command timed out" if not stderr else stderr
@@ -588,17 +565,24 @@ def enable_ipv4(interface_name):
     logger.error(f"enable_ipv4: failed to enable IPv4 on {interface_name} (both methods)")
     return False
 
-def wait_for_network_ready(portal_ip, max_retries=5):
+def wait_for_network_ready(portal_ip, portal_port='801', max_retries=5):
     logger.info("Waiting for network to be ready...")
+    portal_addr = f"{portal_ip}:{portal_port}" if portal_port else portal_ip
     for i in range(max_retries):
         if _check_cancel(): return False
         try:
             import urllib.request
-            req = urllib.request.Request(f'http://{portal_ip}/a79.htm', method='GET')
+            req = urllib.request.Request(f'http://{portal_addr}/eportal/portal/login', method='GET')
             req.add_header('User-Agent', 'Mozilla/5.0')
-            response = urllib.request.urlopen(req, timeout=3)
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            response = opener.open(req, timeout=5)
             logger.info(f"Network ready ({i+1}/{max_retries}, HTTP {response.status})")
             return True
+        except urllib.error.HTTPError as e:
+            if e.code in (200, 302, 401, 403):
+                logger.info(f"Network ready ({i+1}/{max_retries}, HTTP {e.code})")
+                return True
+            logger.info(f"Network not ready ({i+1}/{max_retries}): HTTP {e.code}")
         except Exception as e:
             logger.info(f"Network not ready ({i+1}/{max_retries}): {e}")
         if not _interruptible_sleep(2): return False
@@ -629,7 +613,7 @@ def portal_login():
     portal_ip = CONFIG.get('portal_ip', '10.21.221.98')
     portal_port = CONFIG.get('portal_port', '801')
     portal_addr = f"{portal_ip}:{portal_port}" if portal_port else portal_ip
-    wait_for_network_ready(portal_ip)
+    wait_for_network_ready(portal_ip, portal_port)
     local_ip = get_local_ip()
     mac_addr = get_mac_address()
     import urllib.request
@@ -651,26 +635,42 @@ def portal_login():
         'lang': 'zh-cn',
         'v': '9171'
     }
+    logger.info(f"portal_login: username='{username}', password_len={len(password)}, password_prefix='{password[:20]}...' if len(password)>20 else password")
+    logger.info(f"portal_login: _pwd_encrypted={CONFIG.get('_pwd_encrypted')}")
     query_string = urllib.parse.urlencode(params)
     full_url = f"{url}?{query_string}"
-    logger.info(f"Login URL: {full_url[:80]}...")
-    try:
-        req = urllib.request.Request(full_url)
-        req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
-        req.add_header('Referer', f'http://{portal_addr}/eportal/portal.jsp')
-        response = urllib.request.urlopen(req, timeout=10)
-        result = response.read().decode('utf-8')
-        logger.info(f"Response: {result}")
-        if '"result":1' in result or '"result": 1' in result:
-            return True, "认证成功"
-        elif '已经在线' in result or 'already online' in result or '"ret_code":2' in result:
-            return True, "IP已经在线"
-        elif 'AC' in result:
-            return False, "AC认证失败"
-        else:
-            return False, f"认证失败: {result[:100]}"
-    except Exception as e:
-        return False, f"认证请求失败: {e}"
+    logger.info(f"Login URL length: {len(full_url)}")
+    logger.info(f"Login URL: {full_url[:200]}...")
+    logger.info(f"Login URL (password param): user_password={params['user_password'][:30]}{'...' if len(params['user_password'])>30 else ''}")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    for _attempt in range(3):
+        try:
+            req = urllib.request.Request(full_url)
+            req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
+            req.add_header('Referer', f'http://{portal_addr}/eportal/portal.jsp')
+            response = opener.open(req, timeout=10)
+            result = response.read().decode('utf-8')
+            logger.info(f"Response: {result}")
+            if '"result":1' in result or '"result": 1' in result:
+                return True, "认证成功"
+            elif '已经在线' in result or 'already online' in result or '"ret_code":2' in result:
+                return True, "IP已经在线"
+            elif 'AC' in result:
+                return False, "AC认证失败"
+            else:
+                return False, f"认证失败: {result[:100]}"
+        except urllib.error.HTTPError as e:
+            if e.code in (502, 503) and _attempt < 2:
+                logger.warning(f"Portal login got HTTP {e.code}, retrying ({_attempt+1}/3)...")
+                if not _interruptible_sleep(3): return False, "已取消"
+                continue
+            return False, f"认证请求失败: HTTP Error {e.code}: {e.reason}"
+        except Exception as e:
+            if _attempt < 2 and ('timed out' in str(e) or 'Connection' in str(e)):
+                logger.warning(f"Portal login error, retrying ({_attempt+1}/3): {e}")
+                if not _interruptible_sleep(3): return False, "已取消"
+                continue
+            return False, f"认证请求失败: {e}"
 
 def portal_logout():
     username = CONFIG.get('username', '')
@@ -709,7 +709,8 @@ def portal_logout():
         req.add_header('Accept', '*/*')
         req.add_header('Referer', f'http://{portal_addr}/eportal/portal.jsp')
         req.add_header('Connection', 'keep-alive')
-        response = urllib.request.urlopen(req, timeout=15)
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        response = opener.open(req, timeout=15)
         result = response.read().decode('utf-8')
         logger.info(f"Logout response: {result}")
         _interruptible_sleep(3)
@@ -1164,10 +1165,11 @@ def run_auth_task():
     logger.info("[1/5] Checking WARP...")
     disconnect_warp(full=False)
     code, svc_output, _ = run_command('sc query "CloudflareWARP"')
-    if 'RUNNING' in svc_output:
-        logger.info("Stopping WARP service to release network filter...")
-        run_command('net stop "CloudflareWARP"')
-        _interruptible_sleep(2)
+    warp_service_was_running = 'RUNNING' in svc_output
+    if warp_service_was_running:
+        logger.info("Disabling WARP virtual adapter to release network filter...")
+        run_command('netsh interface set interface "CloudflareWARP" disable')
+        _interruptible_sleep(1)
     if _check_cancel(): return False, "已取消"
     _push_auth_progress(2, 5, '启用IPv4...')
     logger.info("[2/5] Checking IPv4 status...")
@@ -1178,10 +1180,22 @@ def run_auth_task():
         if not enable_ipv4(interface_name):
             _push_auth_progress(2, 5, 'IPv4启用失败', 'error')
             return False, "IPv4启用失败"
-        if not _interruptible_sleep(5): return False, "已取消"
+        for ip_retry in range(6):
+            if _check_cancel(): return False, "已取消"
+            try:
+                import socket
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.settimeout(1)
+                s.connect(('8.8.8.8', 80))
+                ip = s.getsockname()[0]
+                s.close()
+                if ip and not ip.startswith('127.'):
+                    logger.info(f"IPv4 address obtained: {ip}")
+                    break
+            except Exception:
+                pass
+            if not _interruptible_sleep(1): return False, "已取消"
     if _check_cancel(): return False, "已取消"
-    logger.info("Waiting for IP assignment...")
-    if not _interruptible_sleep(3): return False, "已取消"
     _push_auth_progress(3, 5, 'Portal认证...')
     logger.info("[3/5] Portal authentication...")
     success, msg = portal_login()
@@ -1196,6 +1210,8 @@ def run_auth_task():
             _push_auth_progress(3, 5, msg, 'error')
             logger.warning("Portal auth failed, rolling back: reconnecting WARP")
             disable_ipv4(interface_name)
+            if warp_service_was_running:
+                run_command('netsh interface set interface "CloudflareWARP" enable')
             connect_warp()
             return False, msg
     if _check_cancel(): return False, "已取消"
@@ -1207,6 +1223,9 @@ def run_auth_task():
     if _check_cancel(): return False, "已取消"
     _push_auth_progress(5, 5, '连接WARP...')
     logger.info("[5/5] Connecting WARP...")
+    if warp_service_was_running:
+        logger.info("Re-enabling WARP virtual adapter...")
+        run_command('netsh interface set interface "CloudflareWARP" enable')
     _set_warp_endpoint_ipv6(True)
     if not connect_warp():
         _set_warp_endpoint_ipv6(False)

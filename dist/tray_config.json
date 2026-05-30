@@ -1,6 +1,6 @@
 {
   "username": "S202588273",
-  "password": "AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAA8jbn5yYfoEunPBQs6aQYGAAAAAACAAAAAAAQZgAAAAEAACAAAADHh3sCywI6Z8+AgyjpOWfB7L/DVMrYX8YSNvZXvhnBAwAAAAAOgAAAAAIAACAAAAAmGsmT93Kg2UCHyTBKp19i1pSHckodp98skfh9J0/55hAAAACvhSquT6wmPiqVkmEfvwrwQAAAAD939Pb3jeP2/eCJFveibF5n+fNrV19Ado/p5unK7bOL/sGc6tqffV5p5SNGz/7wMibIHoGlsgPzXBr/Mo67c+M=",
+  "password": "Wozijidebjgy31!",
   "wifi_name": "CMCC_BJUT_SUSHE_H1010-5G",
   "auto_auth": true,
   "auto_startup": true,
@@ -9,7 +9,7 @@
   "portal_port": "801",
   "warp_cli_path": "C:\\Program Files\\Cloudflare\\Cloudflare WARP\\warp-cli.exe",
   "silent_startup": true,
-  "window_x": 1582,
-  "window_y": 426,
+  "window_x": 291,
+  "window_y": 473,
   "_pwd_encrypted": true
 }

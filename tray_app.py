@@ -3,6 +3,7 @@ import sys
 import json
 import ctypes
 import ctypes.wintypes
+import base64
 import threading
 import subprocess
 import logging
@@ -31,6 +32,33 @@ if getattr(sys, 'frozen', False):
 
 LOG_FILE = SCRIPT_DIR / 'tray_app.log'
 CONFIG_FILE = SCRIPT_DIR / 'tray_config.json'
+
+class DATA_BLOB(ctypes.Structure):
+    _fields_ = [('cbData', ctypes.wintypes.DWORD), ('pbData', ctypes.POINTER(ctypes.c_char))]
+
+def _dpapi_encrypt(data):
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    blob_in = DATA_BLOB(len(data), ctypes.create_string_buffer(data, len(data)))
+    blob_out = DATA_BLOB()
+    if ctypes.windll.crypt32.CryptProtectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
+        encrypted = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+        ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+        return base64.b64encode(encrypted).decode('ascii')
+    return None
+
+def _dpapi_decrypt(encrypted_b64):
+    try:
+        encrypted = base64.b64decode(encrypted_b64)
+    except Exception:
+        return None
+    blob_in = DATA_BLOB(len(encrypted), ctypes.create_string_buffer(encrypted, len(encrypted)))
+    blob_out = DATA_BLOB()
+    if ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
+        decrypted = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+        ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+        return decrypted.decode('utf-8')
+    return None
 TASK_NAME_STARTUP = "WiFiAutoAuthStartup"
 
 logging.basicConfig(
@@ -110,6 +138,11 @@ def load_config():
                     save_config_to_file(cfg)
                     logger.info(f"Migrated portal_server -> portal_ip={cfg['portal_ip']}, portal_port={cfg['portal_port']}")
                 merged = {**defaults, **cfg}
+                if merged.get('password') and not merged.get('_pwd_encrypted'):
+                    decrypted = _dpapi_decrypt(merged['password'])
+                    if decrypted is not None:
+                        merged['password'] = decrypted
+                    merged['_pwd_encrypted'] = False
                 logger.info(f"Config loaded: wifi_name={merged.get('wifi_name')}, username={merged.get('username')}, auto_auth={merged.get('auto_auth')}")
                 return merged
         except Exception as e:
@@ -120,8 +153,14 @@ def load_config():
 def save_config_to_file(cfg):
     logger.info(f"Saving config to: {CONFIG_FILE}, wifi_name={cfg.get('wifi_name')}, username={cfg.get('username')}, auto_auth={cfg.get('auto_auth')}")
     try:
+        save_cfg = dict(cfg)
+        if save_cfg.get('password'):
+            encrypted = _dpapi_encrypt(save_cfg['password'])
+            if encrypted:
+                save_cfg['password'] = encrypted
+                save_cfg['_pwd_encrypted'] = True
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(cfg, f, indent=2, ensure_ascii=False)
+            json.dump(save_cfg, f, indent=2, ensure_ascii=False)
         logger.info("Config saved successfully")
     except Exception as e:
         logger.error(f"Failed to save config: {e}")

@@ -1,0 +1,37 @@
+TR: "C:\Users\wxy\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe" "D:\project_code\ipv6\tray_app.py" --wifi-event
+cmd: schtasks /Create /TN WiFiAutoAuthEvent /TR "C:\Users\wxy\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe" "D:\project_code\ipv6\tray_app.py" --wifi-event /SC ONEVENT /EC Security /MO *[System[Provider[@Name='Microsoft-Windows-WLAN-AutoConfig'] and EventID=8001]] /RL HIGHEST /F
+Return code: 0
+stdout: ɹ: ɹƻ "WiFiAutoAuthEvent"
+
+stderr: 
+Query code: 0
+Query stdout: 
+ļ: \
+:                             DESKTOP-SAB1BV0
+:                             \WiFiAutoAuthEvent
+´ʱ:                       N/A
+ģʽ:                               
+¼״̬:                           ֻʹýʽ
+ϴʱ:                       1999/11/30 0:00:00
+ϴν:                           267011
+:                             DESKTOP-SAB1BV0\wxy
+Ҫе:                       "C:\Users\wxy\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe" "D:\project_code\ipv6\tray_app.py" --wifi-event
+ʼ:                             N/A
+ע:                               N/A
+ƻ״̬:                       
+ʱ:                           ѽ
+Դ:                           ڵģʽֹͣ, õ
+Ϊû:                       wxy
+ɾûмƻ:                 ѽ
+ X Сʱ X ӣֹͣ: 72:00:00
+ƻ:                               ƻڴ˸ʽвá
+ƻ:                           ¼ʱ
+ʼʱ:                           N/A
+ʼ:                           N/A
+:                           N/A
+:                                 N/A
+:                                 N/A
+ظ: ÿ:                           N/A
+ظ: ֹ: ʱ:                   N/A
+ظ: ֹ: ʱ:               N/A
+ظ: Уֹͣ:           N/A

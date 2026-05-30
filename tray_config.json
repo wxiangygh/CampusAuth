@@ -3,9 +3,10 @@
   "password": "Wozijidebjgy31!",
   "wifi_name": "CMCC_BJUT_SUSHE_H1010-5G",
   "auto_auth": true,
-  "portal_server": "10.21.221.98:801",
+  "portal_ip": "10.21.221.98",
+  "portal_port": "801",
   "warp_cli_path": "C:\\Program Files\\Cloudflare\\Cloudflare WARP\\warp-cli.exe",
   "silent_startup": true,
-  "window_x": 1116,
-  "window_y": 316
+  "window_x": null,
+  "window_y": null
 }

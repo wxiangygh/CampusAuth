@@ -281,6 +281,10 @@
             background: linear-gradient(90deg, #FF3B30, #FF6B5E);
         }
 
+        .progress-bar-fill.cancelled {
+            background: linear-gradient(90deg, #8E8E93, #AEAEB2);
+        }
+
         .status-actions {
             display: flex;
             gap: 12px;
@@ -508,6 +512,15 @@
             background: #EBEBEB;
         }
 
+        .btn-danger {
+            background: #FF3B30;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #E0342B;
+        }
+
         .btn-primary {
             background: #F68320;
             color: white;
@@ -627,6 +640,7 @@
                 <div class="status-actions">
                     <button class="btn btn-primary" id="authBtn" onclick="startAuth()">开始认证</button>
                     <button class="btn btn-secondary" id="restoreBtn" onclick="startRestore()">恢复网络</button>
+                    <button class="btn btn-danger" id="cancelBtn" onclick="cancelOperation()" style="display:none;">取消</button>
                 </div>
             </div>
         </div>
@@ -709,7 +723,6 @@
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                             </button>
                         </div>
-                        <div class="hint">选择 warp-cli.exe 文件，留空则自动检测</div>
                     </div>
                 </div>
             </div>
@@ -775,6 +788,7 @@
         });
 
         function updateStatusFromCheck(status) {
+            if (_authRunning) return;
             hideProgress();
             const authBtn = document.getElementById('authBtn');
             const restoreBtn = document.getElementById('restoreBtn');
@@ -1127,6 +1141,7 @@
 
         /* ===== Auth Progress ===== */
         let _authRunning = false;
+        let _currentAction = null;
 
         const SVG_ICONS = {
             wifi: '<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l22 22"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>',
@@ -1166,7 +1181,17 @@
 
         function finishAuth(success, message, action) {
             _authRunning = false;
+            _currentAction = null;
             stopParticleAnim();
+            document.getElementById('authBtn').textContent = '开始认证';
+            document.getElementById('authBtn').onclick = startAuth;
+            document.getElementById('authBtn').disabled = false;
+            document.getElementById('restoreBtn').textContent = '恢复网络';
+            document.getElementById('restoreBtn').onclick = startRestore;
+            document.getElementById('restoreBtn').disabled = false;
+            document.getElementById('cancelBtn').style.display = 'none';
+
+            var isCancelled = (message === '已取消');
             if (success) {
                 if (action === 'restore') {
                     setOrbState('normal', 'check', '正常模式', 'green');
@@ -1177,11 +1202,18 @@
                 }
                 document.getElementById('statusSubtitle').textContent = message;
                 showProgress(100, 'success');
-                document.getElementById('authBtn').disabled = false;
-                document.getElementById('restoreBtn').disabled = false;
                 setTimeout(() => {
-                    window.pywebview.api.check_network_status().then(s => updateStatusFromCheck(s)).catch(() => {});
+                    if (_authRunning) return;
+                    window.pywebview.api.check_network_status().then(s => {
+                        if (_authRunning) return;
+                        updateStatusFromCheck(s);
+                    }).catch(() => {});
                 }, 1500);
+            } else if (isCancelled) {
+                setOrbState('idle', 'wifi-off', '已取消', null);
+                document.getElementById('statusTitle').textContent = '已取消';
+                document.getElementById('statusSubtitle').textContent = '操作已取消';
+                showProgress(100, 'cancelled');
             } else {
                 setOrbState('error', 'cross', '失败', null);
                 if (action === 'restore') {
@@ -1191,8 +1223,6 @@
                 }
                 document.getElementById('statusSubtitle').textContent = message;
                 showProgress(100, 'error');
-                document.getElementById('authBtn').disabled = false;
-                document.getElementById('restoreBtn').disabled = false;
             }
         }
 
@@ -1205,6 +1235,11 @@
             }
             if (status === 'error') {
                 finishAuth(false, message, action);
+                return;
+            }
+            if (status === 'cancelled') {
+                if (!_authRunning) return;
+                finishAuth(false, message || '已取消', action);
                 return;
             }
 
@@ -1224,10 +1259,15 @@
         }
 
         async function startAuth() {
-            if (_authRunning) return;
+            if (_authRunning) {
+                await cancelOperation();
+                return;
+            }
             _authRunning = true;
+            _currentAction = 'auth';
             document.getElementById('authBtn').disabled = true;
             document.getElementById('restoreBtn').disabled = true;
+            document.getElementById('cancelBtn').style.display = '';
 
             setOrbState('running', 'loader', '准备中', 'orange');
             document.getElementById('statusTitle').textContent = '认证中...';
@@ -1257,10 +1297,15 @@
         }
 
         async function startRestore() {
-            if (_authRunning) return;
+            if (_authRunning) {
+                await cancelOperation();
+                return;
+            }
             _authRunning = true;
+            _currentAction = 'restore';
             document.getElementById('authBtn').disabled = true;
             document.getElementById('restoreBtn').disabled = true;
+            document.getElementById('cancelBtn').style.display = '';
 
             setOrbState('running', 'loader', '恢复中', 'green');
             document.getElementById('statusTitle').textContent = '恢复网络...';
@@ -1274,6 +1319,15 @@
             } catch (e) {
                 finishAuth(false, e.message);
             }
+        }
+
+        async function cancelOperation() {
+            try {
+                await window.pywebview.api.cancel_operation();
+            } catch (e) {
+                console.error('cancel failed:', e);
+            }
+            finishAuth(false, '已取消', _currentAction);
         }
     </script>
 </body>

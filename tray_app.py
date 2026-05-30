@@ -161,7 +161,7 @@ def run_command(cmd, shell=True, timeout=30):
     tmp_err = os.path.join(tempfile.gettempdir(), f'cmd_err_{os.getpid()}_{unique_id}.txt')
 
     # 构建重定向命令
-    redirect_cmd = f'{cmd_str} > "{tmp_out}" 2> "{tmp_err}"'
+    redirect_cmd = f'chcp 65001 >nul & {cmd_str} > "{tmp_out}" 2> "{tmp_err}"'
 
     # 使用 subprocess.Popen 避免窗口弹窗
     si = subprocess.STARTUPINFO()
@@ -178,9 +178,29 @@ def run_command(cmd, shell=True, timeout=30):
             creationflags=subprocess.CREATE_NO_WINDOW
         )
         try:
-            exit_code = proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+            poll_interval = 0.5
+            elapsed = 0.0
+            exit_code = None
+            while elapsed < timeout:
+                exit_code = proc.poll()
+                if exit_code is not None:
+                    break
+                if _auth_cancelled.is_set():
+                    proc.kill()
+                    logger.info(f"run_command: killed due to cancellation: {cmd_str[:80]}")
+                    exit_code = -1
+                    break
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+            if exit_code is None:
+                proc.kill()
+                exit_code = -1
+        except Exception as e2:
+            logger.error(f"run_command wait error: {e2}")
+            try:
+                proc.kill()
+            except:
+                pass
             exit_code = -1
     except Exception as e:
         logger.error(f"run_command Popen error: {e}")
@@ -191,16 +211,28 @@ def run_command(cmd, shell=True, timeout=30):
     stderr = ''
     try:
         if os.path.exists(tmp_out):
-            with open(tmp_out, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(tmp_out, 'r', encoding='utf-8', errors='replace') as f:
                 stdout = f.read()
+            if '\ufffd' in stdout:
+                try:
+                    with open(tmp_out, 'r', encoding='gbk', errors='replace') as f:
+                        stdout = f.read()
+                except Exception:
+                    pass
             os.remove(tmp_out)
     except Exception as e:
         logger.debug(f"run_command: failed to read stdout: {e}")
 
     try:
         if os.path.exists(tmp_err):
-            with open(tmp_err, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(tmp_err, 'r', encoding='utf-8', errors='replace') as f:
                 stderr = f.read()
+            if '\ufffd' in stderr:
+                try:
+                    with open(tmp_err, 'r', encoding='gbk', errors='replace') as f:
+                        stderr = f.read()
+                except Exception:
+                    pass
             os.remove(tmp_err)
     except Exception as e:
         logger.debug(f"run_command: failed to read stderr: {e}")
@@ -446,40 +478,39 @@ def get_mac_address():
             return mac
     return '000000000000'
 
-def disconnect_warp():
+def disconnect_warp(full=True):
     warp_cli = get_warp_cli()
     if warp_cli:
         code, output, _ = run_command([warp_cli, 'status'], shell=False)
         if code == 0 and ('Status update: Connected' in output or 'Network: healthy' in output):
             logger.info("Disconnecting WARP...")
             run_command([warp_cli, 'disconnect'], shell=False)
-            time.sleep(2)
-        # 禁用 WARP 自动连接
-        logger.info("Disabling WARP auto-connect...")
-        run_command([warp_cli, 'set-mode', 'warp+doh'], shell=False)
-        run_command([warp_cli, 'disable-wifi'], shell=False)
-        run_command([warp_cli, 'disable-ethernet'], shell=False)
-    # 不要使用 taskkill 杀死 WARP 服务进程，避免内部状态不一致
-    # 只停止服务即可
-    logger.info("Stopping WARP service...")
-    code, svc_output, _ = run_command('sc query "CloudflareWARP"')
-    if 'RUNNING' in svc_output:
-        run_command('net stop "CloudflareWARP"')
-        time.sleep(2)
-    # 禁用 WARP 服务自动启动
-    logger.info("Disabling WARP service auto-start...")
-    run_command('sc config "CloudflareWARP" start= disabled')
-    logger.info("Waiting for WARP interface to disappear...")
-    for i in range(10):
-        code, output, _ = run_command('netsh interface ipv4 show interfaces')
-        if 'CloudflareWARP' not in output:
-            logger.info(f"WARP interface disappeared ({i+1} checks)")
-            return True
-        time.sleep(2)
-    logger.info("WARP interface still exists, trying to disable...")
-    run_command('netsh interface ipv4 set interface "CloudflareWARP" disabled')
-    run_command('netsh interface set interface "CloudflareWARP" disable')
-    time.sleep(3)
+            if not _interruptible_sleep(1): return False
+    if _check_cancel(): return False
+    if full:
+        logger.info("Stopping WARP service...")
+        code, svc_output, _ = run_command('sc query "CloudflareWARP"')
+        if 'RUNNING' in svc_output:
+            run_command('net stop "CloudflareWARP"')
+        if _check_cancel(): return False
+        logger.info("Disabling WARP service auto-start...")
+        run_command('sc config "CloudflareWARP" start= disabled')
+        if warp_cli:
+            run_command([warp_cli, 'set-mode', 'warp+doh'], shell=False)
+            run_command([warp_cli, 'disable-wifi'], shell=False)
+            run_command([warp_cli, 'disable-ethernet'], shell=False)
+        logger.info("Waiting for WARP interface to disappear...")
+        for i in range(10):
+            if _check_cancel(): return False
+            code, output, _ = run_command('netsh interface ipv4 show interfaces')
+            if 'CloudflareWARP' not in output:
+                logger.info(f"WARP interface disappeared ({i+1} checks)")
+                return True
+            if not _interruptible_sleep(1): return False
+        logger.info("WARP interface still exists, trying to disable...")
+        run_command('netsh interface ipv4 set interface "CloudflareWARP" disabled')
+        run_command('netsh interface set interface "CloudflareWARP" disable')
+        _interruptible_sleep(2)
     return True
 
 @log_func_call
@@ -521,6 +552,7 @@ def enable_ipv4(interface_name):
 def wait_for_network_ready(portal_ip, max_retries=5):
     logger.info("Waiting for network to be ready...")
     for i in range(max_retries):
+        if _check_cancel(): return False
         try:
             import urllib.request
             req = urllib.request.Request(f'http://{portal_ip}/a79.htm', method='GET')
@@ -530,13 +562,14 @@ def wait_for_network_ready(portal_ip, max_retries=5):
             return True
         except Exception as e:
             logger.info(f"Network not ready ({i+1}/{max_retries}): {e}")
-        time.sleep(2)
+        if not _interruptible_sleep(2): return False
     logger.info("Network may not be fully connected, continuing...")
     return False
 
 def _wait_for_ipv6_ready(max_retries=8):
     logger.info("Waiting for IPv6 to be ready...")
     for i in range(max_retries):
+        if _check_cancel(): return False
         try:
             import socket
             sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
@@ -547,7 +580,7 @@ def _wait_for_ipv6_ready(max_retries=8):
             return True
         except Exception as e:
             logger.debug(f"IPv6 not ready ({i+1}/{max_retries}): {e}")
-        time.sleep(2)
+        if not _interruptible_sleep(2): return False
     logger.warning(f"IPv6 not ready after {max_retries} retries")
     return False
 
@@ -640,10 +673,48 @@ def portal_logout():
         response = urllib.request.urlopen(req, timeout=15)
         result = response.read().decode('utf-8')
         logger.info(f"Logout response: {result}")
-        time.sleep(3)
+        _interruptible_sleep(3)
         return True
     except Exception as e:
         logger.error(f"Logout failed: {e}")
+        return False
+
+_conf_json_backup = None
+
+def _set_warp_endpoint_ipv6(enable):
+    global _conf_json_backup
+    conf_path = os.path.join(os.environ.get('ProgramData', r'C:\ProgramData'),
+                              'Cloudflare', 'conf.json')
+    try:
+        if not os.path.exists(conf_path):
+            logger.warning(f"WARP conf.json not found at {conf_path}")
+            return False
+        with open(conf_path, 'r', encoding='utf-8') as f:
+            conf = json.load(f)
+        if enable:
+            _conf_json_backup = json.dumps(conf)
+            if 'endpoints' in conf:
+                for ep in conf['endpoints']:
+                    ep['v4'] = ''
+                logger.info(f"Cleared IPv4 endpoints in conf.json ({len(conf['endpoints'])} endpoints)")
+            else:
+                logger.warning("No endpoints found in conf.json")
+        else:
+            if _conf_json_backup:
+                conf = json.loads(_conf_json_backup)
+                _conf_json_backup = None
+                logger.info("Restored original conf.json endpoints")
+            else:
+                if 'endpoints' in conf:
+                    for ep in conf['endpoints']:
+                        if not ep.get('v4'):
+                            ep['v4'] = '162.159.198.2:443'
+                    logger.info("Reconstructed IPv4 endpoints in conf.json")
+        with open(conf_path, 'w', encoding='utf-8') as f:
+            json.dump(conf, f)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update WARP conf.json: {e}")
         return False
 
 def connect_warp():
@@ -652,44 +723,63 @@ def connect_warp():
     if not warp_cli:
         logger.error("warp-cli not found")
         return False
-    # 确保 WARP 服务可以自动启动
     run_command('sc config "CloudflareWARP" start= auto')
-    for attempt in range(3):
+    return _connect_warp_inner(warp_cli)
+
+def _connect_warp_inner(warp_cli):
+    for attempt in range(2):
+        if _check_cancel(): return False
         code, svc_output, _ = run_command('sc query "CloudflareWARP"')
         if 'RUNNING' not in svc_output:
             logger.info(f"Starting WARP service (attempt {attempt+1})...")
             run_command('net start "CloudflareWARP"')
-            time.sleep(5)
+            if not _interruptible_sleep(5): return False
             code, svc_output, _ = run_command('sc query "CloudflareWARP"')
             if 'RUNNING' not in svc_output:
                 logger.warning(f"WARP service failed to start, retrying...")
-                time.sleep(3)
+                if not _interruptible_sleep(3): return False
                 continue
         code, output, _ = run_command([warp_cli, 'status'], shell=False)
         logger.debug(f"connect_warp: initial status: {output.strip()[:150]}")
         if code == 0 and ('Network: healthy' in output or 'Status update: Connected' in output):
             logger.info("WARP already connected")
             return True
-        # 如果状态是 "Manual Disconnection"，需要重新启用网络并重置
         if 'Manual Disconnection' in output or 'Account is disconnected' in output:
-            logger.info("WARP in disconnected state, re-enabling networks and resetting...")
+            logger.info("WARP in disconnected state, re-enabling networks...")
             run_command([warp_cli, 'enable-wifi'], shell=False)
             run_command([warp_cli, 'enable-ethernet'], shell=False)
-            run_command([warp_cli, 'disconnect'], shell=False)
-            time.sleep(2)
+            if not _interruptible_sleep(1): return False
+            if attempt > 0:
+                logger.info("Still stuck in Manual Disconnection, restarting WARP service...")
+                run_command('net stop "CloudflareWARP"')
+                if not _interruptible_sleep(3): return False
+                run_command('net start "CloudflareWARP"')
+                if not _interruptible_sleep(5): return False
+                code, output, _ = run_command([warp_cli, 'status'], shell=False)
+                logger.debug(f"connect_warp: status after restart: {output.strip()[:150]}")
+                if code == 0 and ('Network: healthy' in output or 'Status update: Connected' in output):
+                    logger.info("WARP connected after service restart")
+                    return True
+        if _check_cancel(): return False
         logger.info("WARP not connected, issuing connect command...")
         run_command([warp_cli, 'connect'], shell=False)
         logger.info("Waiting for WARP connection...")
-        for i in range(20):
-            time.sleep(3)
+        for i in range(10):
+            if not _interruptible_sleep(3): return False
             code, output, _ = run_command([warp_cli, 'status'], shell=False)
             if code == 0 and ('Network: healthy' in output or 'Status update: Connected' in output):
                 logger.info(f"WARP connected ({i+1} checks)")
                 return True
-            if i % 5 == 4:
-                logger.info(f"WARP still connecting... ({i+1}/20 checks, status: {output.strip()[:100]})")
+            if 'Manual Disconnection' in output or 'Account is disconnected' in output:
+                logger.info(f"WARP fell back to disconnected state ({i+1}/10), breaking inner loop")
+                break
+            if 'Unable' in output:
+                logger.info(f"WARP unable to connect ({i+1}/10), breaking inner loop")
+                break
+            if i % 3 == 2:
+                logger.info(f"WARP still connecting... ({i+1}/10 checks, status: {output.strip()[:100]})")
         logger.warning(f"WARP connection timeout (attempt {attempt+1})")
-    logger.warning("WARP connection failed after 3 attempts")
+    logger.warning("WARP connection failed after 2 attempts")
     return False
 
 def is_warp_connected():
@@ -735,10 +825,30 @@ def update_tray_icon_restore(success, message=''):
 
 WIFI_EVENT_NAME = "Global\\WiFiAutoAuth_WiFiEvent"
 _auth_lock = threading.Lock()
+_auth_cancelled = threading.Event()
 _wifi_event_handle = None
 
 def _js_escape(s):
     return json.dumps(str(s), ensure_ascii=False)
+
+def _is_cancelled():
+    return _auth_cancelled.is_set()
+
+def _check_cancel():
+    if _auth_cancelled.is_set():
+        logger.info("Operation cancelled by user")
+        return True
+    return False
+
+def _interruptible_sleep(seconds, check_interval=0.5):
+    elapsed = 0.0
+    while elapsed < seconds:
+        if _auth_cancelled.is_set():
+            return False
+        sleep_time = min(check_interval, seconds - elapsed)
+        time.sleep(sleep_time)
+        elapsed += sleep_time
+    return True
 
 def _create_event_with_acl(name):
     kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -955,6 +1065,7 @@ def run_auth_task():
     logger.info("=" * 60)
     logger.info("Starting authentication process")
     logger.info("=" * 60)
+    _auth_cancelled.clear()
     wifi_name = CONFIG.get('wifi_name', '')
     if not wifi_name:
         logger.error("WiFi name not configured")
@@ -965,7 +1076,9 @@ def run_auth_task():
     _push_auth_progress(0, 5, '检查WiFi连接...')
     logger.info(f"[0/5] Checking WiFi connection to: {wifi_name}")
     code, output, err = run_command('netsh wlan show interfaces')
-    if wifi_name not in output or "已连接" not in output:
+    logger.debug(f"netsh wlan show interfaces output:\n{output[:500]}")
+    wifi_connected = wifi_name in output and ("已连接" in output or "connected" in output.lower())
+    if not wifi_connected:
         logger.info(f"Not connected to {wifi_name}, attempting to connect...")
         code, output, err = run_command(f'netsh wlan connect name="{wifi_name}"')
         if code != 0:
@@ -973,12 +1086,18 @@ def run_auth_task():
             logger.error(f"Failed to connect to WiFi: {error_detail}")
             _push_auth_progress(0, 5, f'WiFi连接失败: {error_detail}', 'error')
             return False, f"WiFi连接失败: {error_detail}"
-        time.sleep(3)
-        code, output, _ = run_command('netsh wlan show interfaces')
-        if wifi_name not in output or "已连接" not in output:
+        for retry in range(8):
+            if not _interruptible_sleep(2): return False, "已取消"
+            code, output, _ = run_command('netsh wlan show interfaces')
+            if wifi_name in output and ("已连接" in output or "connected" in output.lower()):
+                wifi_connected = True
+                break
+            logger.debug(f"WiFi not ready yet (check {retry+1}/8)")
+        if not wifi_connected:
             logger.error(f"WiFi connected but target SSID not confirmed")
             _push_auth_progress(0, 5, f'未检测到目标网络 {wifi_name}', 'error')
             return False, f"WiFi连接后未检测到目标网络 {wifi_name}"
+    if _check_cancel(): return False, "已取消"
     logger.info(f"Connected to target WiFi: {wifi_name}")
     interface_name = get_wifi_interface_name()
     if not interface_name:
@@ -1000,10 +1119,17 @@ def run_auth_task():
         else:
             _push_auth_progress(5, 5, 'WARP已连接，但IPv4禁用失败', 'error')
             return False, "WARP已连接，但IPv4禁用失败"
+    if _check_cancel(): return False, "已取消"
     logger.info(f"WiFi interface: {interface_name}")
     _push_auth_progress(1, 5, '断开WARP...')
     logger.info("[1/5] Checking WARP...")
-    disconnect_warp()
+    disconnect_warp(full=False)
+    code, svc_output, _ = run_command('sc query "CloudflareWARP"')
+    if 'RUNNING' in svc_output:
+        logger.info("Stopping WARP service to release network filter...")
+        run_command('net stop "CloudflareWARP"')
+        _interruptible_sleep(2)
+    if _check_cancel(): return False, "已取消"
     _push_auth_progress(2, 5, '启用IPv4...')
     logger.info("[2/5] Checking IPv4 status...")
     ps_cmd = f'(Get-NetAdapterBinding -Name "{interface_name}" -ComponentID ms_tcpip).Enabled'
@@ -1013,9 +1139,10 @@ def run_auth_task():
         if not enable_ipv4(interface_name):
             _push_auth_progress(2, 5, 'IPv4启用失败', 'error')
             return False, "IPv4启用失败"
-        time.sleep(5)
+        if not _interruptible_sleep(5): return False, "已取消"
+    if _check_cancel(): return False, "已取消"
     logger.info("Waiting for IP assignment...")
-    time.sleep(3)
+    if not _interruptible_sleep(3): return False, "已取消"
     _push_auth_progress(3, 5, 'Portal认证...')
     logger.info("[3/5] Portal authentication...")
     success, msg = portal_login()
@@ -1023,7 +1150,8 @@ def run_auth_task():
         if 'AC' in msg:
             logger.info("AC auth failed, logging out and retrying...")
             portal_logout()
-            time.sleep(2)
+            if not _interruptible_sleep(2): return False, "已取消"
+            if _check_cancel(): return False, "已取消"
             success, msg = portal_login()
         if not success:
             _push_auth_progress(3, 5, msg, 'error')
@@ -1031,20 +1159,21 @@ def run_auth_task():
             disable_ipv4(interface_name)
             connect_warp()
             return False, msg
+    if _check_cancel(): return False, "已取消"
     _push_auth_progress(4, 5, '禁用IPv4...')
     logger.info("[4/5] Disabling IPv4...")
     if not disable_ipv4(interface_name):
         _push_auth_progress(4, 5, '禁用IPv4失败', 'error')
         return False, "禁用IPv4失败"
-    _push_auth_progress(5, 5, '等待IPv6就绪...')
-    logger.info("[4.5/5] Waiting for IPv6 to be ready...")
-    if not _wait_for_ipv6_ready():
-        logger.warning("IPv6 may not be ready, but continuing with WARP connect...")
+    if _check_cancel(): return False, "已取消"
     _push_auth_progress(5, 5, '连接WARP...')
     logger.info("[5/5] Connecting WARP...")
+    _set_warp_endpoint_ipv6(True)
     if not connect_warp():
+        _set_warp_endpoint_ipv6(False)
         _push_auth_progress(5, 5, 'WARP连接超时，请手动检查', 'error')
         return False, "WARP连接超时，请手动检查"
+    _set_warp_endpoint_ipv6(False)
     logger.info("=" * 60)
     logger.info("Authentication completed successfully")
     logger.info("=" * 60)
@@ -1055,35 +1184,51 @@ def run_restore_task():
     logger.info("=" * 60)
     logger.info("Restoring normal network mode")
     logger.info("=" * 60)
-    _push_auth_progress(1, 3, '断开WARP...', action='restore')
-    logger.info("[1/3] Disconnecting WARP...")
-    disconnect_warp()
+    _auth_cancelled.clear()
     interface_name = get_wifi_interface_name()
     if not interface_name:
         interface_name = "WLAN"
     logger.info(f"WiFi interface: {interface_name}")
-    _push_auth_progress(2, 3, '启用IPv4...', action='restore')
-    logger.info("[2/3] Enabling IPv4...")
-    if not enable_ipv4(interface_name):
+    _push_auth_progress(1, 2, '恢复网络...', action='restore')
+    logger.info("[1/2] Disconnecting WARP and enabling IPv4 in parallel...")
+
+    warp_result = [None]
+    ipv4_result = [None]
+
+    def _disconnect_warp_thread():
+        warp_result[0] = disconnect_warp()
+
+    def _enable_ipv4_thread():
+        ipv4_result[0] = enable_ipv4(interface_name)
+
+    t_warp = threading.Thread(target=_disconnect_warp_thread, daemon=True)
+    t_ipv4 = threading.Thread(target=_enable_ipv4_thread, daemon=True)
+    t_warp.start()
+    t_ipv4.start()
+    t_warp.join()
+    t_ipv4.join()
+
+    if _check_cancel(): return False, "已取消"
+    if not ipv4_result[0]:
         logger.warning("enable_ipv4 failed, rolling back: reconnecting WARP")
         connect_warp()
-        _push_auth_progress(3, 3, '启用IPv4失败，已恢复WARP', 'error', action='restore')
+        _push_auth_progress(2, 2, '启用IPv4失败，已恢复WARP', 'error', action='restore')
         return False, "启用IPv4失败，已恢复WARP"
-    _push_auth_progress(3, 3, '验证网络...', action='restore')
-    logger.info("[3/3] Verifying network...")
-    time.sleep(3)
+    _push_auth_progress(2, 2, '验证网络...', action='restore')
+    logger.info("[2/2] Verifying network...")
+    if not _interruptible_sleep(3): return False, "已取消"
     code, output, _ = run_command(f'netsh interface ipv4 show config name="{interface_name}"')
     has_ipv4 = any(ip in output for ip in ['192.168.', '10.'])
     if not has_ipv4:
         logger.warning("No valid IPv4 address found after enabling")
-        _push_auth_progress(3, 3, 'IPv4未获取到有效地址', 'error', action='restore')
+        _push_auth_progress(2, 2, 'IPv4未获取到有效地址', 'error', action='restore')
         return False, "IPv4未获取到有效地址"
     try:
         import urllib.request
         req = urllib.request.Request('http://www.baidu.com', method='HEAD')
         urllib.request.urlopen(req, timeout=5)
         logger.info("Network connectivity verified")
-        _push_auth_progress(3, 3, '网络已恢复正常模式', 'success', action='restore')
+        _push_auth_progress(2, 2, '网络已恢复正常模式', 'success', action='restore')
         return True, "网络已恢复正常模式"
     except Exception as e:
         logger.warning(f"IPv4 has IP but no internet: {e}")
@@ -1261,6 +1406,17 @@ class ApiBridge:
             unregister_wifi_event_task()
             return {'success': True, 'message': '设置已保存'}
 
+    def cancel_operation(self):
+        logger.info("cancel_operation called")
+        if _auth_lock.locked():
+            _auth_cancelled.set()
+            logger.info("Cancel flag set, notifying frontend immediately")
+            if _tray_app_instance and _tray_app_instance.settings_window:
+                js_code = f"onAuthProgress({{step:0, total:1, message:{_js_escape('已取消')}, status:{_js_escape('cancelled')}}})"
+                _tray_app_instance.settings_window.evaluate_js(js_code)
+            return {'success': True, 'message': '已取消'}
+        return {'success': True, 'message': '没有正在进行的操作'}
+
     def test_auth(self):
         def _do_auth():
             if not _auth_lock.acquire(blocking=False):
@@ -1270,18 +1426,23 @@ class ApiBridge:
                 return
             try:
                 success, msg = run_auth_task()
-                status = "success" if success else "error"
-                js_code = f"onAuthProgress({{step:5, total:5, message:{_js_escape(msg)}, status:{_js_escape(status)}}})"
-                if _tray_app_instance and _tray_app_instance.settings_window:
-                    _tray_app_instance.settings_window.evaluate_js(js_code)
-                update_tray_icon(success, msg)
+                if _auth_cancelled.is_set():
+                    logger.info("test_auth: operation was cancelled, skipping final notification")
+                else:
+                    status = "success" if success else "error"
+                    js_code = f"onAuthProgress({{step:5, total:5, message:{_js_escape(msg)}, status:{_js_escape(status)}}})"
+                    if _tray_app_instance and _tray_app_instance.settings_window:
+                        _tray_app_instance.settings_window.evaluate_js(js_code)
+                    update_tray_icon(success, msg)
             except Exception as e:
                 logger.error(f"test_auth thread error: {e}")
-                js_code = f"onAuthProgress({{step:5, total:5, message:{_js_escape(str(e))}, status:{_js_escape('error')}}})"
-                if _tray_app_instance and _tray_app_instance.settings_window:
-                    _tray_app_instance.settings_window.evaluate_js(js_code)
-                update_tray_icon(False, str(e))
+                if not _auth_cancelled.is_set():
+                    js_code = f"onAuthProgress({{step:5, total:5, message:{_js_escape(str(e))}, status:{_js_escape('error')}}})"
+                    if _tray_app_instance and _tray_app_instance.settings_window:
+                        _tray_app_instance.settings_window.evaluate_js(js_code)
+                    update_tray_icon(False, str(e))
             finally:
+                _auth_cancelled.clear()
                 _auth_lock.release()
         threading.Thread(target=_do_auth, daemon=True).start()
         return {'success': True, 'message': '认证已启动'}
@@ -1289,6 +1450,7 @@ class ApiBridge:
     def auto_save_form(self, form_data):
         cfg = load_config()
         old_auto_auth = cfg.get('auto_auth', False)
+        old_auto_restore = cfg.get('auto_restore', False)
         for key in ('wifi_name', 'username', 'password', 'auto_auth', 'auto_restore', 'warp_cli_path', 'silent_startup', 'portal_ip', 'portal_port'):
             if key in form_data:
                 cfg[key] = form_data[key]
@@ -1375,22 +1537,32 @@ class ApiBridge:
         logger.info("restore_network called")
         def _do_restore():
             if not _auth_lock.acquire(blocking=False):
-                logger.warning("restore_network: auth lock busy, another operation in progress")
-                js_code = f"onAuthProgress({{step:3, total:3, message:{_js_escape('操作正在进行中，请稍候')}, status:{_js_escape('error')}}})"
-                if _tray_app_instance and _tray_app_instance.settings_window:
-                    _tray_app_instance.settings_window.evaluate_js(js_code)
-                return
+                logger.warning("restore_network: auth lock busy, cancelling current operation...")
+                _auth_cancelled.set()
+                if not _interruptible_sleep(1):
+                    pass
+                if not _auth_lock.acquire(timeout=3):
+                    logger.error("restore_network: could not acquire lock after cancel")
+                    js_code = f"onAuthProgress({{step:3, total:3, message:{_js_escape('无法取消当前操作')}, status:{_js_escape('error')}}})"
+                    if _tray_app_instance and _tray_app_instance.settings_window:
+                        _tray_app_instance.settings_window.evaluate_js(js_code)
+                    return
             try:
                 success, msg = run_restore_task()
-                status = "success" if success else "error"
-                js_code = f"onAuthProgress({{step:3, total:3, message:{_js_escape(msg)}, status:{_js_escape(status)}, action:'restore'}})"
-                if _tray_app_instance and _tray_app_instance.settings_window:
-                    _tray_app_instance.settings_window.evaluate_js(js_code)
-                update_tray_icon_restore(success, msg)
+                if _auth_cancelled.is_set():
+                    logger.info("restore_network: operation was cancelled, skipping final notification")
+                else:
+                    status = "success" if success else "error"
+                    js_code = f"onAuthProgress({{step:3, total:3, message:{_js_escape(msg)}, status:{_js_escape(status)}, action:'restore'}})"
+                    if _tray_app_instance and _tray_app_instance.settings_window:
+                        _tray_app_instance.settings_window.evaluate_js(js_code)
+                    update_tray_icon_restore(success, msg)
             except Exception as e:
                 logger.error(f"restore_network thread error: {e}")
-                update_tray_icon_restore(False, str(e))
+                if not _auth_cancelled.is_set():
+                    update_tray_icon_restore(False, str(e))
             finally:
+                _auth_cancelled.clear()
                 _auth_lock.release()
         threading.Thread(target=_do_restore, daemon=True).start()
         return {'success': True, 'message': '恢复已启动'}

@@ -11366,3 +11366,181 @@ OSError: [WinError 50] 不支持该请求。
 2026-05-30 15:09:16 [DEBUG] [check_network_status:1307] check_network_status: WARP connected
 2026-05-30 15:09:18 [DEBUG] [check_network_status:1315] check_network_status: IPv4 check code=0, output='False\n', err=''
 2026-05-30 15:09:18 [DEBUG] [check_network_status:1318] check_network_status: IPv4 disabled on WLAN
+2026-05-30 15:14:35 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:14:35 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:14:35 [INFO] [main:1804] ==================================================
+2026-05-30 15:14:35 [INFO] [main:1805] WiFi Auto-Auth App Starting
+2026-05-30 15:14:35 [INFO] [main:1806] SCRIPT_DIR: D:\project_code\ipv6
+2026-05-30 15:14:35 [INFO] [main:1807] CONFIG_FILE: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:14:35 [INFO] [main:1808] LOG_FILE: D:\project_code\ipv6\tray_app.log
+2026-05-30 15:14:35 [INFO] [main:1809] Running as admin: 0
+2026-05-30 15:14:35 [INFO] [main:1810] sys.frozen: False
+2026-05-30 15:14:35 [INFO] [main:1811] ==================================================
+2026-05-30 15:14:35 [INFO] [main:1813] Not running as admin, elevating...
+2026-05-30 15:14:35 [INFO] [elevate_if_needed:1172] Not admin, elevating...
+2026-05-30 15:14:36 [DEBUG] [elevate_if_needed:1179] elevate_if_needed: ShellExecuteW returned 42
+2026-05-30 15:14:36 [INFO] [elevate_if_needed:1181] Elevated process started, exiting current instance
+2026-05-30 15:14:37 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:14:37 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:14:37 [INFO] [main:1804] ==================================================
+2026-05-30 15:14:37 [INFO] [main:1805] WiFi Auto-Auth App Starting
+2026-05-30 15:14:37 [INFO] [main:1806] SCRIPT_DIR: D:\project_code\ipv6
+2026-05-30 15:14:37 [INFO] [main:1807] CONFIG_FILE: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:14:37 [INFO] [main:1808] LOG_FILE: D:\project_code\ipv6\tray_app.log
+2026-05-30 15:14:37 [INFO] [main:1809] Running as admin: 1
+2026-05-30 15:14:37 [INFO] [main:1810] sys.frozen: False
+2026-05-30 15:14:37 [INFO] [main:1811] ==================================================
+2026-05-30 15:14:37 [INFO] [check_single_instance:76] Another instance already running, bringing window to front
+2026-05-30 15:14:40 [INFO] [on_exit:1519] on_exit: user clicked Exit
+2026-05-30 15:14:40 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:14:40 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:14:40 [INFO] [save_config_to_file:121] Saving config to: D:\project_code\ipv6\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:14:40 [INFO] [save_config_to_file:125] Config saved successfully
+2026-05-30 15:14:40 [INFO] [save_window_position:1666] Window position saved: (1120, 448)
+2026-05-30 15:14:40 [INFO] [cleanup_wifi_event:948] WiFi event handle released
+2026-05-30 15:14:40 [DEBUG] [on_closing:1754] TrayApp.run(): window closing event
+2026-05-30 15:14:40 [DEBUG] [on_closing:1756] TrayApp.run(): real exit, allowing close
+2026-05-30 15:14:40 [DEBUG] [on_exit:1534] on_exit: mutex released
+2026-05-30 15:14:40 [INFO] [on_exit:1535] on_exit: application exiting
+2026-05-30 15:14:42 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:14:42 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:14:42 [INFO] [main:1804] ==================================================
+2026-05-30 15:14:42 [INFO] [main:1805] WiFi Auto-Auth App Starting
+2026-05-30 15:14:42 [INFO] [main:1806] SCRIPT_DIR: D:\project_code\ipv6
+2026-05-30 15:14:42 [INFO] [main:1807] CONFIG_FILE: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:14:42 [INFO] [main:1808] LOG_FILE: D:\project_code\ipv6\tray_app.log
+2026-05-30 15:14:42 [INFO] [main:1809] Running as admin: 0
+2026-05-30 15:14:42 [INFO] [main:1810] sys.frozen: False
+2026-05-30 15:14:42 [INFO] [main:1811] ==================================================
+2026-05-30 15:14:42 [INFO] [main:1813] Not running as admin, elevating...
+2026-05-30 15:14:42 [INFO] [elevate_if_needed:1172] Not admin, elevating...
+2026-05-30 15:14:44 [DEBUG] [elevate_if_needed:1179] elevate_if_needed: ShellExecuteW returned 42
+2026-05-30 15:14:44 [INFO] [elevate_if_needed:1181] Elevated process started, exiting current instance
+2026-05-30 15:14:45 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:14:45 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:14:45 [INFO] [main:1804] ==================================================
+2026-05-30 15:14:45 [INFO] [main:1805] WiFi Auto-Auth App Starting
+2026-05-30 15:14:45 [INFO] [main:1806] SCRIPT_DIR: D:\project_code\ipv6
+2026-05-30 15:14:45 [INFO] [main:1807] CONFIG_FILE: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:14:45 [INFO] [main:1808] LOG_FILE: D:\project_code\ipv6\tray_app.log
+2026-05-30 15:14:45 [INFO] [main:1809] Running as admin: 1
+2026-05-30 15:14:45 [INFO] [main:1810] sys.frozen: False
+2026-05-30 15:14:45 [INFO] [main:1811] ==================================================
+2026-05-30 15:14:45 [DEBUG] [hide_console:1165] hide_console: console freed
+2026-05-30 15:14:45 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:14:45 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:14:45 [INFO] [run:1651] Tray started (admin: 1)
+2026-05-30 15:14:45 [DEBUG] [check_startup_status:1151] check_startup_status: enabled=True
+2026-05-30 15:14:45 [INFO] [start_wifi_event_monitor:859] WiFi event monitor thread launched
+2026-05-30 15:14:45 [INFO] [_create_event_with_acl:748] Named event created: Global\WiFiAutoAuth_WiFiEvent
+2026-05-30 15:14:45 [INFO] [wifi_event_monitor:781] WiFi event monitor thread started
+2026-05-30 15:14:45 [INFO] [register_wifi_event_task:1109] Old WiFi event task deleted (if existed)
+2026-05-30 15:14:45 [INFO] [register_wifi_event_task:1116] register_wifi_event_task: cmd=schtasks /Create /TN "WiFiAutoAuthEvent" /TR "C:\Users\wxy\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe D:\project_code\ipv6\tray_app.py --wifi-event" /SC ONEVENT /EC "Microsoft-Windows-WLAN-AutoConfig/Operational" /MO "*[System[Provider[@Name='Microsoft-Windows-WLAN-AutoConfig'] and EventID=8001]]" /RL HIGHEST /F
+2026-05-30 15:14:45 [INFO] [register_wifi_event_task:1120] WiFi event task registered
+2026-05-30 15:14:47 [INFO] [register_wifi_event_task:1131] WiFi event task power+timeout settings updated
+2026-05-30 15:14:47 [INFO] [run:1669] WiFi event task registered on startup
+2026-05-30 15:14:47 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:14:47 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:14:47 [DEBUG] [run:1685] run: html_file=D:\project_code\ipv6\settings.html
+2026-05-30 15:14:47 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:14:47 [DEBUG] [get_warp_cli:299] get_warp_cli: using custom path: C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe
+2026-05-30 15:14:47 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:14:47 [DEBUG] [run:1706] run: app_icon=D:\project_code\ipv6\app.ico
+2026-05-30 15:14:47 [INFO] [run:1724] Window created at (1120, 448)
+2026-05-30 15:14:47 [INFO] [check_startup_wifi_and_auth:880] WARP already connected on startup, skipping auto-auth
+2026-05-30 15:14:47 [DEBUG] [set_window_icon:1776] set_window_icon: icon set, hwnd=9638520, small=282006143, big=140315341
+2026-05-30 15:14:48 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:14:48 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:14:48 [INFO] [check_network_status:1275] check_network_status called
+2026-05-30 15:14:48 [DEBUG] [get_warp_cli:299] get_warp_cli: using custom path: C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe
+2026-05-30 15:14:48 [DEBUG] [check_network_status:1283] check_network_status: WARP connected
+2026-05-30 15:14:50 [DEBUG] [check_network_status:1291] check_network_status: IPv4 check code=0, output='False\n', err=''
+2026-05-30 15:14:50 [DEBUG] [check_network_status:1294] check_network_status: IPv4 disabled on WLAN
+2026-05-30 15:30:18 [INFO] [on_exit:1495] on_exit: user clicked Exit
+2026-05-30 15:30:18 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:30:18 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:30:18 [INFO] [save_config_to_file:121] Saving config to: D:\project_code\ipv6\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:30:18 [INFO] [save_config_to_file:125] Config saved successfully
+2026-05-30 15:30:18 [INFO] [save_window_position:1642] Window position saved: (1120, 448)
+2026-05-30 15:30:18 [INFO] [cleanup_wifi_event:924] WiFi event handle released
+2026-05-30 15:30:18 [DEBUG] [on_closing:1730] TrayApp.run(): window closing event
+2026-05-30 15:30:18 [DEBUG] [on_closing:1732] TrayApp.run(): real exit, allowing close
+2026-05-30 15:30:18 [DEBUG] [on_exit:1510] on_exit: mutex released
+2026-05-30 15:30:18 [INFO] [on_exit:1511] on_exit: application exiting
+2026-05-30 15:30:21 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:30:21 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:30:21 [INFO] [main:1805] ==================================================
+2026-05-30 15:30:21 [INFO] [main:1806] WiFi Auto-Auth App Starting
+2026-05-30 15:30:21 [INFO] [main:1807] SCRIPT_DIR: D:\project_code\ipv6
+2026-05-30 15:30:21 [INFO] [main:1808] CONFIG_FILE: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:30:21 [INFO] [main:1809] LOG_FILE: D:\project_code\ipv6\tray_app.log
+2026-05-30 15:30:21 [INFO] [main:1810] Running as admin: 0
+2026-05-30 15:30:21 [INFO] [main:1811] sys.frozen: False
+2026-05-30 15:30:21 [INFO] [main:1812] ==================================================
+2026-05-30 15:30:21 [INFO] [main:1814] Not running as admin, elevating...
+2026-05-30 15:30:21 [INFO] [elevate_if_needed:1164] Not admin, elevating...
+2026-05-30 15:30:21 [DEBUG] [elevate_if_needed:1176] elevate_if_needed: using pythonw.exe: C:\Users\wxy\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\pythonw.exe
+2026-05-30 15:30:23 [DEBUG] [elevate_if_needed:1182] elevate_if_needed: ShellExecuteW returned 42
+2026-05-30 15:30:23 [INFO] [elevate_if_needed:1184] Elevated process started, exiting current instance
+2026-05-30 15:30:23 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:30:23 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:30:23 [INFO] [main:1805] ==================================================
+2026-05-30 15:30:23 [INFO] [main:1806] WiFi Auto-Auth App Starting
+2026-05-30 15:30:23 [INFO] [main:1807] SCRIPT_DIR: D:\project_code\ipv6
+2026-05-30 15:30:23 [INFO] [main:1808] CONFIG_FILE: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:30:23 [INFO] [main:1809] LOG_FILE: D:\project_code\ipv6\tray_app.log
+2026-05-30 15:30:23 [INFO] [main:1810] Running as admin: 1
+2026-05-30 15:30:23 [INFO] [main:1811] sys.frozen: False
+2026-05-30 15:30:23 [INFO] [main:1812] ==================================================
+2026-05-30 15:30:23 [DEBUG] [hide_console:1157] hide_console: console freed
+2026-05-30 15:30:23 [INFO] [main:1821] Silent startup mode enabled
+2026-05-30 15:30:23 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:30:23 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:30:23 [INFO] [run:1654] Tray started (admin: 1)
+2026-05-30 15:30:23 [DEBUG] [run:1660] run: html_file=D:\project_code\ipv6\settings.html
+2026-05-30 15:30:23 [INFO] [run:1691] Window created at (1120, 448)
+2026-05-30 15:30:24 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:30:24 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:30:24 [DEBUG] [check_startup_status:1143] check_startup_status: enabled=True
+2026-05-30 15:30:24 [INFO] [start_wifi_event_monitor:859] WiFi event monitor thread launched
+2026-05-30 15:30:24 [INFO] [_create_event_with_acl:748] Named event created: Global\WiFiAutoAuth_WiFiEvent
+2026-05-30 15:30:24 [INFO] [wifi_event_monitor:781] WiFi event monitor thread started
+2026-05-30 15:30:24 [INFO] [register_wifi_event_task:1101] Old WiFi event task deleted (if existed)
+2026-05-30 15:30:24 [INFO] [register_wifi_event_task:1108] register_wifi_event_task: cmd=schtasks /Create /TN "WiFiAutoAuthEvent" /TR "C:\Users\wxy\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\pythonw.exe D:\project_code\ipv6\tray_app.py --wifi-event" /SC ONEVENT /EC "Microsoft-Windows-WLAN-AutoConfig/Operational" /MO "*[System[Provider[@Name='Microsoft-Windows-WLAN-AutoConfig'] and EventID=8001]]" /RL HIGHEST /F
+2026-05-30 15:30:24 [INFO] [register_wifi_event_task:1112] WiFi event task registered
+2026-05-30 15:30:24 [INFO] [hide_on_shown:1758] Silent mode: window hidden on startup
+2026-05-30 15:30:24 [DEBUG] [set_window_icon:1742] set_window_icon: icon set, hwnd=4196544, small=167580203, big=189795811
+2026-05-30 15:30:25 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:30:25 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:30:25 [INFO] [check_network_status:1278] check_network_status called
+2026-05-30 15:30:25 [DEBUG] [get_warp_cli:299] get_warp_cli: using custom path: C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe
+2026-05-30 15:30:26 [DEBUG] [check_network_status:1286] check_network_status: WARP connected
+2026-05-30 15:30:26 [INFO] [register_wifi_event_task:1123] WiFi event task power+timeout settings updated
+2026-05-30 15:30:26 [INFO] [delayed_init:1784] WiFi event task registered on startup
+2026-05-30 15:30:26 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:30:26 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:30:26 [DEBUG] [get_warp_cli:299] get_warp_cli: using custom path: C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe
+2026-05-30 15:30:27 [INFO] [check_startup_wifi_and_auth:872] WARP already connected on startup, skipping auto-auth
+2026-05-30 15:30:29 [DEBUG] [check_network_status:1294] check_network_status: IPv4 check code=0, output='False\n', err=''
+2026-05-30 15:30:29 [DEBUG] [check_network_status:1297] check_network_status: IPv4 disabled on WLAN
+2026-05-30 15:30:30 [DEBUG] [show_settings:1617] TrayApp.show_settings(tab='settings') called, window=<webview.window.Window object at 0x00000109C24DC890>
+2026-05-30 15:30:30 [DEBUG] [show_settings:1630] show_settings: failed to refresh status: 'TrayApp' object has no attribute 'check_network_status'
+2026-05-30 15:30:30 [DEBUG] [show_settings:1631] TrayApp.show_settings(): window shown and restored
+2026-05-30 15:30:52 [DEBUG] [on_closing:1697] TrayApp.run(): window closing event
+2026-05-30 15:30:52 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:30:52 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:30:52 [INFO] [save_config_to_file:121] Saving config to: D:\project_code\ipv6\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:30:52 [INFO] [save_config_to_file:125] Config saved successfully
+2026-05-30 15:30:52 [INFO] [save_window_position:1645] Window position saved: (892, 411)
+2026-05-30 15:30:52 [DEBUG] [on_closing:1703] TrayApp.run(): hiding to tray, cancelling close
+2026-05-30 15:30:54 [INFO] [on_exit:1498] on_exit: user clicked Exit
+2026-05-30 15:30:54 [INFO] [load_config:101] Loading config from: D:\project_code\ipv6\tray_config.json
+2026-05-30 15:30:54 [INFO] [load_config:113] Config loaded: wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:30:54 [INFO] [save_config_to_file:121] Saving config to: D:\project_code\ipv6\tray_config.json, wifi_name=CMCC_BJUT_SUSHE_H1010-5G, username=S202588273, auto_auth=True
+2026-05-30 15:30:54 [INFO] [save_config_to_file:125] Config saved successfully
+2026-05-30 15:30:54 [INFO] [save_window_position:1645] Window position saved: (892, 411)
+2026-05-30 15:30:54 [INFO] [cleanup_wifi_event:916] WiFi event handle released
+2026-05-30 15:30:54 [DEBUG] [on_closing:1697] TrayApp.run(): window closing event
+2026-05-30 15:30:54 [DEBUG] [on_closing:1699] TrayApp.run(): real exit, allowing close
+2026-05-30 15:30:55 [DEBUG] [on_exit:1513] on_exit: mutex released
+2026-05-30 15:30:55 [INFO] [on_exit:1514] on_exit: application exiting

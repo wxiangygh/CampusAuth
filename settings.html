@@ -18,6 +18,48 @@
             overflow: hidden;
         }
 
+        /* 加载遮罩 */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #FFFFFF;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.4s ease, visibility 0.4s ease;
+        }
+
+        .loading-overlay.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #F0F0F0;
+            border-top-color: #F68320;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        .loading-text {
+            font-size: 14px;
+            color: #999;
+            font-weight: 500;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
         .container {
             max-width: 400px;
             margin: 0 auto;
@@ -45,6 +87,15 @@
             cursor: pointer;
             position: relative;
             transition: color 0.2s;
+            outline: none;
+        }
+
+        .tab-btn:focus {
+            outline: none;
+        }
+
+        .tab-btn:focus-visible {
+            outline: none;
         }
 
         .tab-btn.active {
@@ -546,6 +597,12 @@
     </style>
 </head>
 <body>
+    <!-- 加载遮罩 -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">正在启动...</div>
+    </div>
+
     <div class="container">
         <div class="tab-bar">
             <button class="tab-btn active" onclick="switchTab('status')">连接</button>
@@ -680,12 +737,14 @@
 
         function switchToTab(name) {
             const tabs = document.querySelectorAll('.tab-btn');
+            const contents = document.querySelectorAll('.tab-content');
             const idx = name === 'settings' ? 1 : 0;
             tabs.forEach((b, i) => b.classList.toggle('active', i === idx));
-            document.querySelectorAll('.tab-content').forEach((c, i) => c.classList.toggle('active', i === idx));
+            contents.forEach((c, i) => c.classList.toggle('active', i === idx));
         }
 
         window.addEventListener('pywebviewready', async () => {
+            // 先快速加载配置（不阻塞UI）
             try {
                 const config = await window.pywebview.api.load_config();
                 document.getElementById('wifiName').value = config.wifi_name || '';
@@ -697,16 +756,22 @@
                 document.getElementById('silentStartup').checked = config.silent_startup || false;
                 console.log('Config loaded:', JSON.stringify(config));
             } catch (e) { console.error('Failed to load config:', e); }
-            try {
-                const status = await window.pywebview.api.check_network_status();
-                updateStatusFromCheck(status);
-                console.log('Network status:', JSON.stringify(status));
-            } catch (e) { console.error('Failed to check network status:', e); }
-            try {
-                const startup = await window.pywebview.api.get_startup_status();
-                document.getElementById('autoStartup').checked = startup.enabled || false;
-                console.log('Startup status:', JSON.stringify(startup));
-            } catch (e) { console.error('Failed to get startup status:', e); }
+
+            // 延迟执行网络状态检测，避免阻塞页面渲染
+            setTimeout(async () => {
+                try {
+                    const status = await window.pywebview.api.check_network_status();
+                    updateStatusFromCheck(status);
+                    console.log('Network status:', JSON.stringify(status));
+                } catch (e) { console.error('Failed to check network status:', e); }
+                try {
+                    const startup = await window.pywebview.api.get_startup_status();
+                    document.getElementById('autoStartup').checked = startup.enabled || false;
+                    console.log('Startup status:', JSON.stringify(startup));
+                } catch (e) { console.error('Failed to get startup status:', e); }
+                // 隐藏加载遮罩
+                document.getElementById('loadingOverlay').classList.add('hidden');
+            }, 100);
         });
 
         function updateStatusFromCheck(status) {

@@ -137,12 +137,12 @@ def is_admin():
 def run_command(cmd, shell=True, timeout=30):
     """
     执行命令并返回结果。
-    由于 Windows Store 版 Python 在管理员权限下使用 ShellExecuteW 提权后，
-    subprocess 的管道捕获会失败（[WinError 50]），因此使用临时文件来捕获输出。
-    使用 subprocess.Popen 避免 cmd.exe 窗口弹窗。
+    使用临时文件来捕获输出，避免 Windows Store 版 Python 在管理员权限下的 subprocess 管道问题。
+    使用 CREATE_NO_WINDOW + SW_HIDE 彻底避免命令行窗口弹窗。
     """
     import tempfile
-    
+    import uuid
+
     # 构建命令字符串
     if isinstance(cmd, list):
         cmd_parts = []
@@ -154,23 +154,21 @@ def run_command(cmd, shell=True, timeout=30):
         cmd_str = ' '.join(cmd_parts)
     else:
         cmd_str = cmd
-    
+
     # 创建临时文件（使用唯一标识符避免冲突）
-    import uuid
     unique_id = uuid.uuid4().hex
     tmp_out = os.path.join(tempfile.gettempdir(), f'cmd_out_{os.getpid()}_{unique_id}.txt')
     tmp_err = os.path.join(tempfile.gettempdir(), f'cmd_err_{os.getpid()}_{unique_id}.txt')
-    
+
     # 构建重定向命令
     redirect_cmd = f'{cmd_str} > "{tmp_out}" 2> "{tmp_err}"'
-    
+
     # 使用 subprocess.Popen 避免窗口弹窗
     si = subprocess.STARTUPINFO()
     si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     si.wShowWindow = subprocess.SW_HIDE
-    
+
     try:
-        # 先尝试 CREATE_NO_WINDOW（不弹窗）
         proc = subprocess.Popen(
             redirect_cmd,
             shell=True,
@@ -184,34 +182,10 @@ def run_command(cmd, shell=True, timeout=30):
         except subprocess.TimeoutExpired:
             proc.kill()
             exit_code = -1
-    except OSError as e:
-        if getattr(e, 'winerror', None) == 50:
-            # [WinError 50] 时回退到 CREATE_NEW_CONSOLE
-            logger.warning("run_command: [WinError 50] retrying with CREATE_NEW_CONSOLE")
-            try:
-                proc = subprocess.Popen(
-                    redirect_cmd,
-                    shell=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    startupinfo=si,
-                    creationflags=subprocess.CREATE_NEW_CONSOLE
-                )
-                try:
-                    exit_code = proc.wait(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    exit_code = -1
-            except Exception as e2:
-                logger.error(f"run_command Popen retry error: {e2}")
-                exit_code = -1
-        else:
-            logger.error(f"run_command Popen error: {e}")
-            exit_code = -1
     except Exception as e:
         logger.error(f"run_command Popen error: {e}")
         exit_code = -1
-    
+
     # 读取输出文件
     stdout = ''
     stderr = ''
@@ -222,7 +196,7 @@ def run_command(cmd, shell=True, timeout=30):
             os.remove(tmp_out)
     except Exception as e:
         logger.debug(f"run_command: failed to read stdout: {e}")
-    
+
     try:
         if os.path.exists(tmp_err):
             with open(tmp_err, 'r', encoding='utf-8', errors='ignore') as f:
@@ -230,34 +204,58 @@ def run_command(cmd, shell=True, timeout=30):
             os.remove(tmp_err)
     except Exception as e:
         logger.debug(f"run_command: failed to read stderr: {e}")
-    
+
     if exit_code == -1:
         stderr = "Command timed out" if not stderr else stderr
-    
+
     return exit_code, stdout, stderr
 
 def run_command_os_system(cmd_str):
-    """使用 os.system 执行命令，用于绕过 Windows Store Python 的 subprocess 问题"""
+    """使用 subprocess.Popen 执行命令，避免 os.system 的弹窗问题"""
     import tempfile
-    tmp_out = os.path.join(tempfile.gettempdir(), f'cmd_out_{os.getpid()}_{int(time.time()*1000)}.txt')
-    tmp_err = os.path.join(tempfile.gettempdir(), f'cmd_err_{os.getpid()}_{int(time.time()*1000)}.txt')
-    exit_code = os.system(f'{cmd_str} >"{tmp_out}" 2>"{tmp_err}"')
+    import uuid
+    unique_id = uuid.uuid4().hex
+    tmp_out = os.path.join(tempfile.gettempdir(), f'cmd_out_{os.getpid()}_{unique_id}.txt')
+    tmp_err = os.path.join(tempfile.gettempdir(), f'cmd_err_{os.getpid()}_{unique_id}.txt')
+
+    redirect_cmd = f'{cmd_str} >"{tmp_out}" 2>"{tmp_err}"'
+
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = subprocess.SW_HIDE
+
     try:
-        with open(tmp_out, 'r', encoding='utf-8', errors='ignore') as f:
-            stdout = f.read()
-    except:
-        stdout = ''
+        proc = subprocess.Popen(
+            redirect_cmd,
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            startupinfo=si,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        try:
+            exit_code = proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            exit_code = -1
+    except Exception as e:
+        logger.error(f"run_command_os_system Popen error: {e}")
+        exit_code = -1
+
+    stdout = ''
+    stderr = ''
     try:
-        with open(tmp_err, 'r', encoding='utf-8', errors='ignore') as f:
-            stderr = f.read()
-    except:
-        stderr = ''
-    try:
-        os.remove(tmp_out)
+        if os.path.exists(tmp_out):
+            with open(tmp_out, 'r', encoding='utf-8', errors='ignore') as f:
+                stdout = f.read()
+            os.remove(tmp_out)
     except:
         pass
     try:
-        os.remove(tmp_err)
+        if os.path.exists(tmp_err):
+            with open(tmp_err, 'r', encoding='utf-8', errors='ignore') as f:
+                stderr = f.read()
+            os.remove(tmp_err)
     except:
         pass
     return exit_code, stdout, stderr
@@ -671,9 +669,15 @@ def connect_warp():
                 time.sleep(3)
                 continue
         code, output, _ = run_command([warp_cli, 'status'], shell=False)
+        logger.debug(f"connect_warp: initial status: {output.strip()[:150]}")
         if code == 0 and ('Network: healthy' in output or 'Status update: Connected' in output):
             logger.info("WARP already connected")
             return True
+        # 如果状态是 "Manual Disconnection"，先执行一次 disconnect 重置状态
+        if 'Manual Disconnection' in output or 'Account is disconnected' in output:
+            logger.info("WARP in disconnected state, resetting...")
+            run_command([warp_cli, 'disconnect'], shell=False)
+            time.sleep(2)
         logger.info("WARP not connected, issuing connect command...")
         run_command([warp_cli, 'connect'], shell=False)
         logger.info("Waiting for WARP connection...")
@@ -891,16 +895,8 @@ def check_startup_wifi_and_auth():
     if not target_wifi:
         _update_tray_status()
         return
-    # 重试检测 WARP 状态，避免启动时 WARP 还在初始化
-    warp_connected = False
-    for i in range(6):  # 最多等待 30 秒
-        if is_warp_connected():
-            warp_connected = True
-            break
-        logger.debug(f"check_startup_wifi_and_auth: WARP not connected yet, retrying ({i+1}/6)...")
-        time.sleep(5)
-    
-    if warp_connected:
+    # 先快速检测一次WARP状态，避免阻塞启动
+    if is_warp_connected():
         logger.info("WARP already connected on startup, skipping auto-auth")
         update_tray_icon(True, 'WARP已连接')
         return
@@ -1184,7 +1180,14 @@ def remove_startup_task():
     return False
 
 def hide_console():
+    """隐藏控制台窗口，避免启动时闪现黑窗口"""
     try:
+        # 先尝试通过 ShowWindow 隐藏窗口（比 FreeConsole 更平滑）
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE = 0
+            logger.debug("hide_console: console window hidden via ShowWindow")
+        # 然后再释放控制台
         ctypes.windll.kernel32.FreeConsole()
         logger.debug("hide_console: console freed")
     except Exception as e:
@@ -1196,13 +1199,30 @@ def elevate_if_needed():
     logger.info("Not admin, elevating...")
     exe_path = sys.executable
     script = sys.argv[0]
+    # 构建参数：保留原有参数，不自动添加 --silent
+    # 只有原来就是静默模式时才传递 --silent
+    args = ' '.join(sys.argv[1:])
+    # 使用 pythonw.exe 替代 python.exe 以避免控制台窗口
+    if exe_path.lower().endswith('python.exe'):
+        pythonw = exe_path[:-10] + 'pythonw.exe'
+        if os.path.isfile(pythonw):
+            exe_path = pythonw
+            logger.debug(f"elevate_if_needed: using pythonw.exe: {exe_path}")
     try:
+        # nShowCmd=0 表示隐藏窗口（SW_HIDE）
         ret = ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", exe_path, script, None, 1
+            None, "runas", exe_path, f'"{script}" {args}', None, 0
         )
         logger.debug(f"elevate_if_needed: ShellExecuteW returned {ret}")
         if ret > 32:
             logger.info("Elevated process started, exiting current instance")
+            # 在退出前也隐藏当前窗口，避免闪现
+            try:
+                hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+                if hwnd:
+                    ctypes.windll.user32.ShowWindow(hwnd, 0)
+            except:
+                pass
             os._exit(0)
         else:
             logger.error(f"elevate_if_needed: ShellExecuteW failed with code {ret}")
@@ -1520,11 +1540,11 @@ def on_exit(icon, item):
     global _tray_app_instance
     if _tray_app_instance:
         _tray_app_instance._should_exit = True
-        if _tray_app_instance.settings_window:
-            _tray_app_instance.save_window_position()
     cleanup_wifi_event()
     icon.stop()
     if _tray_app_instance and _tray_app_instance.settings_window:
+        # 先保存位置，再销毁窗口
+        _tray_app_instance.save_window_position()
         _tray_app_instance.settings_window.destroy()
     global TRAY_MUTEX
     if TRAY_MUTEX:
@@ -1568,10 +1588,12 @@ class TrayApp:
         self.icon.title = '校园网助手'
         startup_enabled = CONFIG.get('auto_startup', False)
         menu_items = [
+            pystray.MenuItem('显示主窗口', lambda i, item: self.show_settings()),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem('手动认证', on_auth),
             pystray.MenuItem('恢复正常模式', on_restore),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem('打开设置', lambda i, item: self.show_settings('settings')),
+            pystray.MenuItem('打开设置', lambda i, item: self.show_settings()),
             pystray.Menu.SEPARATOR,
         ]
         if not is_admin():
@@ -1585,10 +1607,38 @@ class TrayApp:
         ])
         self.icon.menu = pystray.Menu(*menu_items)
         self.icon.on_activate = self._on_tray_activate
+        # Monkey-patch pystray 的消息处理器，让左键单击也触发 on_activate
+        self._patch_pystray_click()
 
     def _on_tray_activate(self, icon):
-        logger.info("Tray icon clicked, showing main window")
-        self.show_settings('status')
+        """处理托盘图标激活事件"""
+        logger.info("[tray_activate] Tray icon activated, calling show_settings()")
+        try:
+            self.show_settings()
+            logger.info("[tray_activate] show_settings completed")
+        except Exception as e:
+            logger.error(f"[tray_activate] ERROR: {e}\n{traceback.format_exc()}")
+
+    def _patch_pystray_click(self):
+        """修改 pystray 实例的 _message_handlers，让左键单击直接显示窗口而不是显示菜单"""
+        try:
+            from pystray._win32 import win32
+            WM_NOTIFY = win32.WM_NOTIFY
+            original_on_notify = self.icon._message_handlers[WM_NOTIFY]
+
+            app_ref = self
+
+            def patched_on_notify(wparam, lparam):
+                if lparam == win32.WM_LBUTTONUP:
+                    logger.info("[pystray_patch] Left click detected, showing window")
+                    app_ref.show_settings()
+                    return
+                original_on_notify(wparam, lparam)
+
+            self.icon._message_handlers[WM_NOTIFY] = patched_on_notify
+            logger.info("[pystray_patch] Successfully patched pystray _on_notify on instance")
+        except Exception as e:
+            logger.warning(f"[pystray_patch] Failed to patch pystray: {e}")
 
     def _toggle_startup(self, icon, item):
         enabled = check_startup_status()
@@ -1634,36 +1684,63 @@ class TrayApp:
         except Exception as e:
             logger.error(f"_refresh_tray_menu failed: {e}")
 
-    def show_settings(self, tab='status'):
-        logger.debug(f"TrayApp.show_settings(tab={tab!r}) called, window={self.settings_window}")
+    def show_settings(self, tab=None):
+        """显示应用窗口。tab参数保留但不再使用，窗口保持上次的状态。"""
+        logger.info(f"[show_settings] Called, window={self.settings_window}, icon={self.icon}")
         if self.settings_window:
             try:
+                # 使用 pywebview 的 show + restore
                 self.settings_window.show()
                 self.settings_window.restore()
-                if tab == 'settings':
-                    self.settings_window.evaluate_js("switchToTab('settings')")
-                # 刷新网络状态
-                try:
-                    status = self.check_network_status()
-                    js_code = f"updateStatusFromCheck({{status:{_js_escape(status['status'])}, message:{_js_escape(status['message'])}}}"
-                    self.settings_window.evaluate_js(js_code)
-                except Exception as e:
-                    logger.debug(f"show_settings: failed to refresh status: {e}")
-                logger.debug("TrayApp.show_settings(): window shown and restored")
+                logger.info("[show_settings] Window shown via pywebview")
+
+                # 使用 Win32 API 确保窗口可见并置顶
+                hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
+                if hwnd:
+                    logger.info(f"[show_settings] Found window hwnd={hwnd}")
+                    SW_RESTORE = 9
+                    HWND_TOPMOST = -1
+                    HWND_NOTOPMOST = -2
+                    SWP_NOMOVE = 0x0002
+                    SWP_NOSIZE = 0x0001
+                    SWP_SHOWWINDOW = 0x0040
+                    # 先设为 TOPMOST 再取消，确保窗口显示在最前方
+                    ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
+                    logger.info("[show_settings] Window brought to front via Win32 API")
+                else:
+                    logger.warning("[show_settings] Window not found via FindWindowW")
+                logger.info("[show_settings] Window shown successfully")
             except Exception as e:
-                logger.error(f"TrayApp.show_settings(): failed: {e}\n{traceback.format_exc()}")
+                logger.error(f"[show_settings] FAILED: {e}\n{traceback.format_exc()}")
+        else:
+            logger.error("[show_settings] settings_window is None, cannot show!")
 
     def save_window_position(self):
         try:
             if self.settings_window:
-                x = self.settings_window.x
-                y = self.settings_window.y
-                if x is not None and y is not None and x >= 0 and y >= 0:
+                # 使用 Win32 API 获取实际窗口位置（更可靠）
+                hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
+                if hwnd:
+                    rect = ctypes.wintypes.RECT()
+                    ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                    x, y = rect.left, rect.top
+                    logger.debug(f"save_window_position: Win32 API got ({x}, {y})")
+                else:
+                    x = self.settings_window.x
+                    y = self.settings_window.y
+                    logger.debug(f"save_window_position: pywebview got ({x}, {y})")
+                # 忽略 (0,0) 和负值（可能是隐藏后的位置）
+                if x is not None and y is not None and x > 0 and y > 0:
                     cfg = load_config()
                     cfg['window_x'] = x
                     cfg['window_y'] = y
                     save_config_to_file(cfg)
                     logger.info(f"Window position saved: ({x}, {y})")
+                else:
+                    logger.warning(f"Window position ({x}, {y}) ignored (too close to edge)")
         except Exception as e:
             logger.error(f"save_window_position exception: {e}")
 
@@ -1674,40 +1751,11 @@ class TrayApp:
         self.create_tray()
         logger.info(f"Tray started (admin: {is_admin()})")
 
-        if cfg.get('auto_startup'):
-            if is_admin():
-                if not check_startup_status():
-                    logger.info("auto_startup=True but task missing, re-registering")
-                    setup_startup_task()
-            else:
-                logger.info("auto_startup=True but not admin, cannot verify/register startup task")
-        else:
-            if check_startup_status():
-                logger.info("auto_startup=False but task exists, removing")
-                remove_startup_task()
-
-        if cfg.get('auto_auth') or cfg.get('auto_restore'):
-            start_wifi_event_monitor()
-            if is_admin():
-                if register_wifi_event_task():
-                    logger.info("WiFi event task registered on startup")
-                else:
-                    logger.warning("Failed to register WiFi event task on startup")
-            else:
-                logger.info("Not admin, skipping WiFi event task registration")
-            if cfg.get('auto_auth'):
-                threading.Thread(target=check_startup_wifi_and_auth, daemon=True).start()
-            else:
-                threading.Thread(target=_update_tray_status, daemon=True).start()
-        else:
-            threading.Thread(target=_update_tray_status, daemon=True).start()
-
         tray_thread = threading.Thread(target=self.icon.run, daemon=True)
         tray_thread.start()
 
         html_file = get_resource_path('settings.html')
         logger.debug(f"run: html_file={html_file}")
-        cfg = load_config()
         
         if cfg.get('window_x') is not None and cfg.get('window_y') is not None:
             import ctypes as _ct
@@ -1724,13 +1772,6 @@ class TrayApp:
             user32 = _ct.windll.user32
             wx = (user32.GetSystemMetrics(0) - TrayApp.WIN_W) // 2
             wy = (user32.GetSystemMetrics(1) - TrayApp.WIN_H) // 2
-
-        try:
-            app_icon = ensure_app_icon()
-            logger.debug(f"run: app_icon={app_icon}")
-        except Exception as e:
-            logger.error(f"run: ensure_app_icon failed: {e}")
-            app_icon = None
 
         try:
             self.settings_window = webview.create_window(
@@ -1751,13 +1792,18 @@ class TrayApp:
             return
         
         def on_closing():
-            logger.debug("TrayApp.run(): window closing event")
-            if self._should_exit:
-                logger.debug("TrayApp.run(): real exit, allowing close")
-                return None
+            logger.info("[on_closing] Window closing event triggered")
+            # 始终保存窗口位置（无论是退出还是隐藏到托盘）
             self.save_window_position()
-            threading.Timer(0.1, self.settings_window.hide).start()
-            logger.debug("TrayApp.run(): hiding to tray, cancelling close")
+            if self._should_exit:
+                logger.info("[on_closing] Real exit requested, allowing close")
+                return None
+            logger.info("[on_closing] Hiding window to tray (not closing)")
+            try:
+                self.settings_window.hide()
+                logger.info("[on_closing] Window hidden successfully")
+            except Exception as e:
+                logger.error(f"[on_closing] Hide failed: {e}")
             return False
         
         self.settings_window.events.closing += on_closing
@@ -1769,8 +1815,7 @@ class TrayApp:
                 ico_path = ensure_app_icon()
                 hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
                 if not hwnd:
-                    logger.debug("set_window_icon: FindWindowW returned None, retrying...")
-                    time.sleep(0.5)
+                    time.sleep(0.3)
                     hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
                 if hwnd and os.path.isfile(ico_path):
                     WM_SETICON = 0x0080
@@ -1817,6 +1862,53 @@ class TrayApp:
                 except Exception as e:
                     logger.error(f"Silent mode hide failed: {e}")
             threading.Thread(target=hide_on_shown, daemon=True).start()
+        else:
+            # 非静默启动，确保窗口显示
+            def ensure_visible():
+                try:
+                    time.sleep(0.5)
+                    if self.settings_window:
+                        self.settings_window.show()
+                        self.settings_window.restore()
+                        logger.info("Non-silent mode: window ensured visible")
+                except Exception as e:
+                    logger.error(f"Non-silent mode ensure visible failed: {e}")
+            threading.Thread(target=ensure_visible, daemon=True).start()
+
+        # 在 webview 启动后，后台执行耗时的初始化任务
+        def delayed_init():
+            time.sleep(0.5)
+            cfg = load_config()
+            
+            if cfg.get('auto_startup'):
+                if is_admin():
+                    if not check_startup_status():
+                        logger.info("auto_startup=True but task missing, re-registering")
+                        setup_startup_task()
+                else:
+                    logger.info("auto_startup=True but not admin, cannot verify/register startup task")
+            else:
+                if check_startup_status():
+                    logger.info("auto_startup=False but task exists, removing")
+                    remove_startup_task()
+
+            if cfg.get('auto_auth') or cfg.get('auto_restore'):
+                start_wifi_event_monitor()
+                if is_admin():
+                    if register_wifi_event_task():
+                        logger.info("WiFi event task registered on startup")
+                    else:
+                        logger.warning("Failed to register WiFi event task on startup")
+                else:
+                    logger.info("Not admin, skipping WiFi event task registration")
+                if cfg.get('auto_auth'):
+                    check_startup_wifi_and_auth()
+                else:
+                    _update_tray_status()
+            else:
+                _update_tray_status()
+        
+        threading.Thread(target=delayed_init, daemon=True).start()
 
         webview.start(debug=False)
         

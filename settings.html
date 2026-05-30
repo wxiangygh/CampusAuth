@@ -113,8 +113,13 @@
         }
 
         .orb.idle {
-            background: linear-gradient(135deg, #E8E8E8, #D0D0D0);
+            background: linear-gradient(135deg, #B4B4B4, #999999);
             box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+        }
+
+        .orb.normal {
+            background: linear-gradient(135deg, #34C759, #4CD964);
+            box-shadow: 0 8px 32px rgba(52,199,89,0.3);
         }
 
         .orb.running {
@@ -123,13 +128,45 @@
         }
 
         .orb.success {
-            background: linear-gradient(135deg, #34C759, #4CD964);
-            box-shadow: 0 8px 32px rgba(52,199,89,0.3);
+            background: linear-gradient(135deg, #F68320, #FF9F4A);
+            box-shadow: 0 8px 32px rgba(246,131,32,0.3);
         }
 
         .orb.error {
             background: linear-gradient(135deg, #FF3B30, #FF6B5E);
             box-shadow: 0 8px 32px rgba(255,59,48,0.3);
+        }
+
+        .orb-glow {
+            position: absolute;
+            top: -30px;
+            left: -30px;
+            width: 240px;
+            height: 240px;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        .orb-glow.active {
+            opacity: 1;
+        }
+
+        .orb-glow.green-glow {
+            background: radial-gradient(circle, rgba(52,199,89,0.25) 0%, rgba(52,199,89,0.08) 40%, transparent 70%);
+            animation: glowPulse 3s ease-in-out infinite;
+        }
+
+        .orb-glow.orange-glow {
+            background: radial-gradient(circle, rgba(246,131,32,0.25) 0%, rgba(246,131,32,0.08) 40%, transparent 70%);
+            animation: glowPulse 3s ease-in-out infinite;
+        }
+
+        @keyframes glowPulse {
+            0%, 100% { transform: scale(1); opacity: 0.6; }
+            50% { transform: scale(1.08); opacity: 1; }
         }
 
         .orb-icon {
@@ -519,6 +556,7 @@
             <div class="status-page">
                 <div class="orb-container">
                     <canvas class="orb-canvas" id="particleCanvas" width="240" height="240"></canvas>
+                    <div class="orb-glow" id="orbGlow"></div>
                     <div class="orb idle" id="statusOrb">
                         <span class="orb-icon" id="orbIcon"><svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l22 22"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></span>
                         <span class="orb-text" id="orbText">未连接</span>
@@ -587,6 +625,16 @@
                     <div class="form-group">
                         <div class="toggle-group">
                             <div class="toggle-label">
+                                <span>自动恢复</span>
+                                <span>切换WiFi后自动恢复网络</span>
+                            </div>
+                            <label class="toggle">
+                                <input type="checkbox" id="autoRestore">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="toggle-group">
+                            <div class="toggle-label">
                                 <span>静默启动</span>
                                 <span>开机自启时不显示主窗口，仅驻留托盘</span>
                             </div>
@@ -644,6 +692,7 @@
                 document.getElementById('username').value = config.username || '';
                 document.getElementById('password').value = config.password || '';
                 document.getElementById('autoAuth').checked = config.auto_auth || false;
+                document.getElementById('autoRestore').checked = config.auto_restore || false;
                 document.getElementById('warpCliPath').value = config.warp_cli_path || '';
                 document.getElementById('silentStartup').checked = config.silent_startup || false;
                 console.log('Config loaded:', JSON.stringify(config));
@@ -662,22 +711,38 @@
 
         function updateStatusFromCheck(status) {
             hideProgress();
+            const authBtn = document.getElementById('authBtn');
+            const restoreBtn = document.getElementById('restoreBtn');
             if (status.status === 'connected') {
-                setOrbState('success', 'check', '已连接');
-                document.getElementById('statusTitle').textContent = '已连接';
+                setOrbState('success', 'check', 'WARP已连接', 'orange');
+                document.getElementById('statusTitle').textContent = 'WARP已连接';
                 document.getElementById('statusSubtitle').textContent = status.message;
+                authBtn.disabled = true;
+                restoreBtn.disabled = false;
             } else if (status.status === 'partial') {
-                setOrbState('running', 'warn', '部分连接');
+                setOrbState('running', 'warn', '部分连接', 'orange');
                 document.getElementById('statusTitle').textContent = '部分连接';
                 document.getElementById('statusSubtitle').textContent = status.message;
+                authBtn.disabled = false;
+                restoreBtn.disabled = false;
             } else if (status.status === 'broken') {
-                setOrbState('error', 'cross', '异常');
+                setOrbState('error', 'cross', '异常', null);
                 document.getElementById('statusTitle').textContent = '网络异常';
                 document.getElementById('statusSubtitle').textContent = status.message;
+                authBtn.disabled = false;
+                restoreBtn.disabled = false;
+            } else if (status.status === 'normal') {
+                setOrbState('normal', 'check', '正常模式', 'green');
+                document.getElementById('statusTitle').textContent = '正常模式';
+                document.getElementById('statusSubtitle').textContent = status.message;
+                authBtn.disabled = false;
+                restoreBtn.disabled = true;
             } else {
-                setOrbState('idle', 'wifi', '未连接');
+                setOrbState('idle', 'wifi', '未连接', null);
                 document.getElementById('statusTitle').textContent = '校园网助手';
                 document.getElementById('statusSubtitle').textContent = '点击下方按钮开始认证';
+                authBtn.disabled = false;
+                restoreBtn.disabled = true;
             }
         }
 
@@ -688,6 +753,7 @@
                 username: document.getElementById('username').value.trim(),
                 password: document.getElementById('password').value,
                 auto_auth: document.getElementById('autoAuth').checked,
+                auto_restore: document.getElementById('autoRestore').checked,
                 warp_cli_path: document.getElementById('warpCliPath').value.trim(),
                 silent_startup: document.getElementById('silentStartup').checked
             };
@@ -705,6 +771,13 @@
         var _autoAuthEl = document.getElementById('autoAuth');
         if (_autoAuthEl) {
             _autoAuthEl.addEventListener('change', function() {
+                clearTimeout(_autoSaveTimer);
+                _doAutoSave();
+            });
+        }
+        var _autoRestoreEl = document.getElementById('autoRestore');
+        if (_autoRestoreEl) {
+            _autoRestoreEl.addEventListener('change', function() {
                 clearTimeout(_autoSaveTimer);
                 _doAutoSave();
             });
@@ -926,6 +999,7 @@
         const ctx = canvas.getContext('2d');
         let particles = [];
         let animRunning = false;
+        let particleColor = { r: 246, g: 131, b: 32 };
 
         class Particle {
             constructor() {
@@ -948,9 +1022,13 @@
                 const y = this.cy + Math.sin(this.angle) * this.radius;
                 ctx.beginPath();
                 ctx.arc(x, y, this.size, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(246, 131, 32, ${this.opacity})`;
+                ctx.fillStyle = `rgba(${particleColor.r}, ${particleColor.g}, ${particleColor.b}, ${this.opacity})`;
                 ctx.fill();
             }
+        }
+
+        function setParticleColor(r, g, b) {
+            particleColor = { r, g, b };
         }
 
         function initParticles() {
@@ -993,11 +1071,18 @@
             warn: '<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
         };
 
-        function setOrbState(state, svgKey, text) {
+        function setOrbState(state, svgKey, text, glowColor) {
             const orb = document.getElementById('statusOrb');
             orb.className = 'orb ' + state;
             document.getElementById('orbIcon').innerHTML = SVG_ICONS[svgKey] || SVG_ICONS.wifi;
             document.getElementById('orbText').textContent = text;
+            const glow = document.getElementById('orbGlow');
+            glow.className = 'orb-glow';
+            if (glowColor === 'green') {
+                glow.classList.add('active', 'green-glow');
+            } else if (glowColor === 'orange') {
+                glow.classList.add('active', 'orange-glow');
+            }
         }
 
         function showProgress(pct, statusClass) {
@@ -1014,41 +1099,59 @@
             document.getElementById('progressBarFill').className = 'progress-bar-fill';
         }
 
-        function finishAuth(success, message) {
+        function finishAuth(success, message, action) {
             _authRunning = false;
-            document.getElementById('authBtn').disabled = false;
-            document.getElementById('restoreBtn').disabled = false;
             stopParticleAnim();
             if (success) {
-                setOrbState('success', 'check', '已连接');
-                document.getElementById('statusTitle').textContent = '认证成功';
+                if (action === 'restore') {
+                    setOrbState('normal', 'check', '正常模式', 'green');
+                    document.getElementById('statusTitle').textContent = '恢复成功';
+                } else {
+                    setOrbState('success', 'check', 'WARP已连接', 'orange');
+                    document.getElementById('statusTitle').textContent = '认证成功';
+                }
                 document.getElementById('statusSubtitle').textContent = message;
                 showProgress(100, 'success');
+                document.getElementById('authBtn').disabled = false;
+                document.getElementById('restoreBtn').disabled = false;
                 setTimeout(() => {
                     window.pywebview.api.check_network_status().then(s => updateStatusFromCheck(s)).catch(() => {});
-                }, 3000);
+                }, 1500);
             } else {
-                setOrbState('error', 'cross', '失败');
-                document.getElementById('statusTitle').textContent = '认证失败';
+                setOrbState('error', 'cross', '失败', null);
+                if (action === 'restore') {
+                    document.getElementById('statusTitle').textContent = '恢复失败';
+                } else {
+                    document.getElementById('statusTitle').textContent = '认证失败';
+                }
                 document.getElementById('statusSubtitle').textContent = message;
                 showProgress(100, 'error');
+                document.getElementById('authBtn').disabled = false;
+                document.getElementById('restoreBtn').disabled = false;
             }
         }
 
         function onAuthProgress(data) {
-            const { step, total, message, status } = data;
+            const { step, total, message, status, action } = data;
 
             if (status === 'success') {
-                finishAuth(true, message);
+                finishAuth(true, message, action);
                 return;
             }
             if (status === 'error') {
-                finishAuth(false, message);
+                finishAuth(false, message, action);
                 return;
             }
 
-            setOrbState('running', 'loader', message.substring(0, 6));
-            document.getElementById('statusTitle').textContent = '认证中...';
+            if (action === 'restore') {
+                setOrbState('running', 'loader', message.substring(0, 6), 'green');
+                document.getElementById('statusTitle').textContent = '恢复中...';
+                setParticleColor(52, 199, 89);
+            } else {
+                setOrbState('running', 'loader', message.substring(0, 6), 'orange');
+                document.getElementById('statusTitle').textContent = '认证中...';
+                setParticleColor(246, 131, 32);
+            }
             document.getElementById('statusSubtitle').textContent = message;
             const pct = Math.round((step / total) * 100);
             showProgress(pct, '');
@@ -1061,10 +1164,11 @@
             document.getElementById('authBtn').disabled = true;
             document.getElementById('restoreBtn').disabled = true;
 
-            setOrbState('running', 'loader', '准备中');
+            setOrbState('running', 'loader', '准备中', 'orange');
             document.getElementById('statusTitle').textContent = '认证中...';
             document.getElementById('statusSubtitle').textContent = '正在准备...';
             showProgress(0, '');
+            setParticleColor(246, 131, 32);
             startParticleAnim();
 
             try {
@@ -1093,10 +1197,11 @@
             document.getElementById('authBtn').disabled = true;
             document.getElementById('restoreBtn').disabled = true;
 
-            setOrbState('running', 'loader', '恢复中');
+            setOrbState('running', 'loader', '恢复中', 'green');
             document.getElementById('statusTitle').textContent = '恢复网络...';
             document.getElementById('statusSubtitle').textContent = '正在恢复正常网络模式...';
             showProgress(0, '');
+            setParticleColor(52, 199, 89);
             startParticleAnim();
 
             try {

@@ -6,6 +6,7 @@ import ctypes.wintypes
 import threading
 import subprocess
 import logging
+from logging.handlers import RotatingFileHandler
 import time
 import functools
 import traceback
@@ -37,7 +38,7 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] [%(funcName)s:%(lineno)d] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[
-        logging.FileHandler(str(LOG_FILE), encoding='utf-8'),
+        RotatingFileHandler(str(LOG_FILE), maxBytes=2*1024*1024, backupCount=3, encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -88,6 +89,8 @@ def load_config():
         'password': '',
         'wifi_name': '',
         'auto_auth': False,
+        'auto_startup': False,
+        'auto_restore': False,
         'portal_ip': '10.21.221.98',
         'portal_port': '801',
         'warp_cli_path': '',
@@ -132,27 +135,132 @@ def is_admin():
         return False
 
 def run_command(cmd, shell=True, timeout=30):
+    """
+    执行命令并返回结果。
+    由于 Windows Store 版 Python 在管理员权限下使用 ShellExecuteW 提权后，
+    subprocess 的管道捕获会失败（[WinError 50]），因此使用临时文件来捕获输出。
+    使用 subprocess.Popen 避免 cmd.exe 窗口弹窗。
+    """
+    import tempfile
+    
+    # 构建命令字符串
+    if isinstance(cmd, list):
+        cmd_parts = []
+        for part in cmd:
+            if ' ' in part or '\t' in part:
+                cmd_parts.append(f'"{part}"')
+            else:
+                cmd_parts.append(part)
+        cmd_str = ' '.join(cmd_parts)
+    else:
+        cmd_str = cmd
+    
+    # 创建临时文件（使用唯一标识符避免冲突）
+    import uuid
+    unique_id = uuid.uuid4().hex
+    tmp_out = os.path.join(tempfile.gettempdir(), f'cmd_out_{os.getpid()}_{unique_id}.txt')
+    tmp_err = os.path.join(tempfile.gettempdir(), f'cmd_err_{os.getpid()}_{unique_id}.txt')
+    
+    # 构建重定向命令
+    redirect_cmd = f'{cmd_str} > "{tmp_out}" 2> "{tmp_err}"'
+    
+    # 使用 subprocess.Popen 避免窗口弹窗
     si = subprocess.STARTUPINFO()
     si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    si.wShowWindow = 0
-    creationflags = subprocess.CREATE_NO_WINDOW
+    si.wShowWindow = subprocess.SW_HIDE
+    
     try:
-        result = subprocess.run(
-            cmd,
-            shell=shell,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='ignore',
-            timeout=timeout,
+        # 先尝试 CREATE_NO_WINDOW（不弹窗）
+        proc = subprocess.Popen(
+            redirect_cmd,
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             startupinfo=si,
-            creationflags=creationflags
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
-        return result.returncode, result.stdout, result.stderr
-    except subprocess.TimeoutExpired:
-        return -1, "", "Command timed out"
+        try:
+            exit_code = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            exit_code = -1
+    except OSError as e:
+        if getattr(e, 'winerror', None) == 50:
+            # [WinError 50] 时回退到 CREATE_NEW_CONSOLE
+            logger.warning("run_command: [WinError 50] retrying with CREATE_NEW_CONSOLE")
+            try:
+                proc = subprocess.Popen(
+                    redirect_cmd,
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    startupinfo=si,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE
+                )
+                try:
+                    exit_code = proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    exit_code = -1
+            except Exception as e2:
+                logger.error(f"run_command Popen retry error: {e2}")
+                exit_code = -1
+        else:
+            logger.error(f"run_command Popen error: {e}")
+            exit_code = -1
     except Exception as e:
-        return -1, "", str(e)
+        logger.error(f"run_command Popen error: {e}")
+        exit_code = -1
+    
+    # 读取输出文件
+    stdout = ''
+    stderr = ''
+    try:
+        if os.path.exists(tmp_out):
+            with open(tmp_out, 'r', encoding='utf-8', errors='ignore') as f:
+                stdout = f.read()
+            os.remove(tmp_out)
+    except Exception as e:
+        logger.debug(f"run_command: failed to read stdout: {e}")
+    
+    try:
+        if os.path.exists(tmp_err):
+            with open(tmp_err, 'r', encoding='utf-8', errors='ignore') as f:
+                stderr = f.read()
+            os.remove(tmp_err)
+    except Exception as e:
+        logger.debug(f"run_command: failed to read stderr: {e}")
+    
+    if exit_code == -1:
+        stderr = "Command timed out" if not stderr else stderr
+    
+    return exit_code, stdout, stderr
+
+def run_command_os_system(cmd_str):
+    """使用 os.system 执行命令，用于绕过 Windows Store Python 的 subprocess 问题"""
+    import tempfile
+    tmp_out = os.path.join(tempfile.gettempdir(), f'cmd_out_{os.getpid()}_{int(time.time()*1000)}.txt')
+    tmp_err = os.path.join(tempfile.gettempdir(), f'cmd_err_{os.getpid()}_{int(time.time()*1000)}.txt')
+    exit_code = os.system(f'{cmd_str} >"{tmp_out}" 2>"{tmp_err}"')
+    try:
+        with open(tmp_out, 'r', encoding='utf-8', errors='ignore') as f:
+            stdout = f.read()
+    except:
+        stdout = ''
+    try:
+        with open(tmp_err, 'r', encoding='utf-8', errors='ignore') as f:
+            stderr = f.read()
+    except:
+        stderr = ''
+    try:
+        os.remove(tmp_out)
+    except:
+        pass
+    try:
+        os.remove(tmp_err)
+    except:
+        pass
+    return exit_code, stdout, stderr
 
 def run_elevated_powershell(ps_command, timeout=30):
     logger.info(f"run_elevated_powershell: cmd={ps_command[:120]!r}")
@@ -213,12 +321,12 @@ def get_warp_cli():
     if custom:
         if os.path.isfile(custom):
             logger.debug(f"get_warp_cli: using custom path: {custom}")
-            return f'"{custom}"'
+            return custom
         if os.path.isdir(custom):
             candidate = os.path.join(custom, 'warp-cli.exe')
             if os.path.isfile(candidate):
                 logger.debug(f"get_warp_cli: using custom dir: {custom}")
-                return f'"{candidate}"'
+                return candidate
         logger.warning(f"get_warp_cli: custom path not found: {custom}")
     code, _, _ = run_command('warp-cli --version')
     if code == 0:
@@ -231,21 +339,21 @@ def get_warp_cli():
     for p in default_paths:
         if os.path.isfile(p):
             logger.debug(f"get_warp_cli: found at {p}")
-            return f'"{p}"'
+            return p
     logger.warning("get_warp_cli: warp-cli not found")
     return None
 
-def create_icon(color='blue'):
+def create_icon(color='orange'):
     size = (64, 64)
     img = Image.new('RGBA', size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     colors = {
-        'blue': (246, 131, 32),
+        'gray': (180, 180, 180),
         'green': (52, 199, 89),
-        'red': (255, 59, 48),
-        'orange': (255, 152, 0)
+        'orange': (246, 131, 32),
+        'red': (255, 59, 48)
     }
-    c = colors.get(color, colors['blue'])
+    c = colors.get(color, colors['orange'])
     draw.ellipse([4, 4, 60, 60], fill=c)
     cx, cy = 32, 28
     arcs = [(22, 10, 16), (16, 6, 10), (10, 3, 5)]
@@ -258,7 +366,7 @@ def ensure_app_icon():
     icon_path = SCRIPT_DIR / 'app.ico'
     if not icon_path.exists():
         import io
-        img = create_icon('blue')
+        img = create_icon('orange')
         sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
         imgs = [img.resize(s, Image.LANCZOS) for s in sizes]
         png_bufs = []
@@ -343,11 +451,16 @@ def get_mac_address():
 def disconnect_warp():
     warp_cli = get_warp_cli()
     if warp_cli:
-        code, output, _ = run_command(warp_cli + ' status')
+        code, output, _ = run_command([warp_cli, 'status'], shell=False)
         if code == 0 and ('Status update: Connected' in output or 'Network: healthy' in output):
             logger.info("Disconnecting WARP...")
-            run_command(warp_cli + ' disconnect')
+            run_command([warp_cli, 'disconnect'], shell=False)
             time.sleep(2)
+        # 禁用 WARP 自动连接
+        logger.info("Disabling WARP auto-connect...")
+        run_command([warp_cli, 'set-mode', 'warp+doh'], shell=False)
+        run_command([warp_cli, 'disable-wifi'], shell=False)
+        run_command([warp_cli, 'disable-ethernet'], shell=False)
     logger.info("Terminating WARP processes...")
     run_command('taskkill /F /IM "Cloudflare WARP.exe" 2>nul')
     run_command('taskkill /F /IM "warp-svc.exe" 2>nul')
@@ -358,6 +471,9 @@ def disconnect_warp():
         logger.info("Stopping WARP service...")
         run_command('net stop "CloudflareWARP"')
         time.sleep(2)
+    # 禁用 WARP 服务自动启动
+    logger.info("Disabling WARP service auto-start...")
+    run_command('sc config "CloudflareWARP" start= disabled')
     logger.info("Waiting for WARP interface to disappear...")
     for i in range(10):
         code, output, _ = run_command('netsh interface ipv4 show interfaces')
@@ -421,6 +537,23 @@ def wait_for_network_ready(portal_ip, max_retries=5):
             logger.info(f"Network not ready ({i+1}/{max_retries}): {e}")
         time.sleep(2)
     logger.info("Network may not be fully connected, continuing...")
+    return False
+
+def _wait_for_ipv6_ready(max_retries=8):
+    logger.info("Waiting for IPv6 to be ready...")
+    for i in range(max_retries):
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+            sock.settimeout(3)
+            sock.connect(('2606:4700:103::1', 443))
+            sock.close()
+            logger.info(f"IPv6 ready ({i+1}/{max_retries})")
+            return True
+        except Exception as e:
+            logger.debug(f"IPv6 not ready ({i+1}/{max_retries}): {e}")
+        time.sleep(2)
+    logger.warning(f"IPv6 not ready after {max_retries} retries")
     return False
 
 def portal_login():
@@ -524,6 +657,8 @@ def connect_warp():
     if not warp_cli:
         logger.error("warp-cli not found")
         return False
+    # 确保 WARP 服务可以自动启动
+    run_command('sc config "CloudflareWARP" start= auto')
     for attempt in range(3):
         code, svc_output, _ = run_command('sc query "CloudflareWARP"')
         if 'RUNNING' not in svc_output:
@@ -535,16 +670,16 @@ def connect_warp():
                 logger.warning(f"WARP service failed to start, retrying...")
                 time.sleep(3)
                 continue
-        code, output, _ = run_command(warp_cli + ' status')
+        code, output, _ = run_command([warp_cli, 'status'], shell=False)
         if code == 0 and ('Network: healthy' in output or 'Status update: Connected' in output):
             logger.info("WARP already connected")
             return True
         logger.info("WARP not connected, issuing connect command...")
-        run_command(warp_cli + ' connect')
+        run_command([warp_cli, 'connect'], shell=False)
         logger.info("Waiting for WARP connection...")
         for i in range(20):
             time.sleep(3)
-            code, output, _ = run_command(warp_cli + ' status')
+            code, output, _ = run_command([warp_cli, 'status'], shell=False)
             if code == 0 and ('Network: healthy' in output or 'Status update: Connected' in output):
                 logger.info(f"WARP connected ({i+1} checks)")
                 return True
@@ -553,6 +688,47 @@ def connect_warp():
         logger.warning(f"WARP connection timeout (attempt {attempt+1})")
     logger.warning("WARP connection failed after 3 attempts")
     return False
+
+def is_warp_connected():
+    warp_cli = get_warp_cli()
+    if not warp_cli:
+        return False
+    code, output, _ = run_command([warp_cli, 'status'], shell=False, timeout=10)
+    if code == 0 and ('Network: healthy' in output or 'Status update: Connected' in output):
+        return True
+    try:
+        ps_cmd = 'Get-NetAdapter -Name *WARP* | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1 -ExpandProperty Name'
+        code2, output2, _ = run_command(['powershell', '-Command', ps_cmd], shell=False, timeout=5)
+        if code2 == 0 and output2.strip():
+            logger.info(f"is_warp_connected: warp-cli failed but WARP adapter '{output2.strip()}' is up")
+            return True
+    except Exception:
+        pass
+    return False
+
+def update_tray_icon(success, message=''):
+    try:
+        if _tray_app_instance and _tray_app_instance.icon:
+            if success:
+                _tray_app_instance.icon.icon = create_icon('orange')
+                _tray_app_instance.icon.title = message or 'WARP已连接'
+            else:
+                _tray_app_instance.icon.icon = create_icon('red')
+                _tray_app_instance.icon.title = message or '认证失败'
+    except Exception as e:
+        logger.error(f"update_tray_icon failed: {e}")
+
+def update_tray_icon_restore(success, message=''):
+    try:
+        if _tray_app_instance and _tray_app_instance.icon:
+            if success:
+                _tray_app_instance.icon.icon = create_icon('green')
+                _tray_app_instance.icon.title = message or '已恢复正常'
+            else:
+                _tray_app_instance.icon.icon = create_icon('red')
+                _tray_app_instance.icon.title = message or '恢复失败'
+    except Exception as e:
+        logger.error(f"update_tray_icon_restore failed: {e}")
 
 WIFI_EVENT_NAME = "Global\\WiFiAutoAuth_WiFiEvent"
 _auth_lock = threading.Lock()
@@ -633,30 +809,66 @@ def wifi_event_monitor():
             if result == 0:
                 logger.info("WiFi connection event signal received")
                 cfg = load_config()
-                if not cfg.get('auto_auth'):
-                    logger.info("Auto-auth disabled, skipping")
+                auto_auth = cfg.get('auto_auth', False)
+                auto_restore = cfg.get('auto_restore', False)
+                if not auto_auth and not auto_restore:
+                    logger.info("Both auto_auth and auto_restore disabled, skipping")
+                    _update_tray_status()
                     continue
                 target_wifi = cfg.get('wifi_name', '')
-                if not target_wifi:
-                    logger.info("No target WiFi configured, skipping")
-                    continue
                 time.sleep(3)
                 current_wifi = get_current_wifi_ssid()
                 logger.info(f"Current WiFi: {current_wifi!r}, Target WiFi: {target_wifi!r}")
-                if current_wifi == target_wifi:
+                if current_wifi == target_wifi and auto_auth:
+                    if not target_wifi:
+                        logger.info("No target WiFi configured, skipping")
+                        continue
+                    if is_warp_connected():
+                        # 检查 IPv4 是否已禁用
+                        interface_name = get_wifi_interface_name()
+                        if interface_name:
+                            ps_cmd = f'(Get-NetAdapterBinding -Name "{interface_name}" -ComponentID ms_tcpip).Enabled'
+                            code, output, _ = run_command(['powershell', '-Command', ps_cmd], shell=False)
+                            if 'False' in output:
+                                logger.info("WARP connected and IPv4 disabled, skipping auto-auth")
+                                update_tray_icon(True, 'WARP已连接')
+                                continue
+                            else:
+                                logger.info("WARP connected but IPv4 still enabled, will re-auth to fix")
+                        else:
+                            logger.info("WARP connected, skipping auto-auth (cannot check IPv4)")
+                            update_tray_icon(True, 'WARP已连接')
+                            continue
                     if _auth_lock.acquire(blocking=False):
                         try:
                             logger.info("Target WiFi matched, starting auto-auth")
                             success, msg = run_auth_task()
                             logger.info(f"Auto-auth result: {success}, {msg}")
+                            update_tray_icon(success, msg)
                         finally:
                             _auth_lock.release()
                     else:
                         logger.info("Auth already in progress, skipping")
+                elif current_wifi != target_wifi and auto_restore:
+                    logger.info(f"auto_restore: non-target WiFi detected, restoring normal mode")
+                    if _auth_lock.acquire(blocking=False):
+                        try:
+                            success, msg = run_restore_task()
+                            logger.info(f"auto_restore result: {success}, {msg}")
+                            if success:
+                                update_tray_icon_restore(True, msg)
+                            else:
+                                logger.warning(f"auto_restore failed: {msg}")
+                        finally:
+                            _auth_lock.release()
+                    else:
+                        logger.info("Auth lock busy, skipping auto_restore")
                 else:
-                    logger.info(f"Connected to '{current_wifi}', not target '{target_wifi}', skipping")
+                    _update_tray_status()
     except Exception as e:
         logger.error(f"wifi_event_monitor crashed: {e}\n{traceback.format_exc()}")
+        global _wifi_monitor_started
+        _wifi_monitor_started = False
 
 _wifi_monitor_started = False
 
@@ -673,17 +885,26 @@ def start_wifi_event_monitor():
 def check_startup_wifi_and_auth():
     cfg = load_config()
     if not cfg.get('auto_auth'):
+        _update_tray_status()
         return
     target_wifi = cfg.get('wifi_name', '')
     if not target_wifi:
+        _update_tray_status()
         return
-    time.sleep(5)
-    warp_cli = get_warp_cli()
-    if warp_cli:
-        code, output, _ = run_command(warp_cli + ' status')
-        if code == 0 and ('Network: healthy' in output or 'Status update: Connected' in output):
-            logger.info("WARP already connected on startup, skipping auto-auth")
-            return
+    # 重试检测 WARP 状态，避免启动时 WARP 还在初始化
+    warp_connected = False
+    for i in range(6):  # 最多等待 30 秒
+        if is_warp_connected():
+            warp_connected = True
+            break
+        logger.debug(f"check_startup_wifi_and_auth: WARP not connected yet, retrying ({i+1}/6)...")
+        time.sleep(5)
+    
+    if warp_connected:
+        logger.info("WARP already connected on startup, skipping auto-auth")
+        update_tray_icon(True, 'WARP已连接')
+        return
+    
     current_wifi = get_current_wifi_ssid()
     logger.info(f"Startup WiFi check: current={current_wifi!r}, target={target_wifi!r}")
     if current_wifi == target_wifi:
@@ -692,10 +913,31 @@ def check_startup_wifi_and_auth():
                 logger.info("Connected to target WiFi but WARP not connected, starting auto-auth")
                 success, msg = run_auth_task()
                 logger.info(f"Startup auto-auth result: {success}, {msg}")
+                update_tray_icon(success, msg)
             finally:
                 _auth_lock.release()
         else:
             logger.info("Auth already in progress on startup check")
+    else:
+        _update_tray_status()
+
+def _update_tray_status():
+    try:
+        if not _tray_app_instance or not _tray_app_instance.icon:
+            return
+        status = _tray_app_instance.api.check_network_status()
+        s = status.get('status', 'disconnected')
+        if s == 'connected' or s == 'partial':
+            _tray_app_instance.icon.icon = create_icon('orange')
+            _tray_app_instance.icon.title = status.get('message', 'WARP已连接')
+        elif s == 'normal':
+            _tray_app_instance.icon.icon = create_icon('green')
+            _tray_app_instance.icon.title = '正常模式'
+        else:
+            _tray_app_instance.icon.icon = create_icon('gray')
+            _tray_app_instance.icon.title = '未连接'
+    except Exception as e:
+        logger.error(f"_update_tray_status failed: {e}")
 
 def cleanup_wifi_event():
     global _wifi_event_handle
@@ -705,12 +947,12 @@ def cleanup_wifi_event():
         _wifi_event_handle = None
         logger.info("WiFi event handle released")
 
-def _push_auth_progress(step, total, message, status='running'):
+def _push_auth_progress(step, total, message, status='running', action='auth'):
     try:
         if _tray_app_instance and _tray_app_instance.settings_window:
-            js_code = f"onAuthProgress({{step:{step}, total:{total}, message:{_js_escape(message)}, status:{_js_escape(status)}}})"
+            js_code = f"onAuthProgress({{step:{step}, total:{total}, message:{_js_escape(message)}, status:{_js_escape(status)}, action:{_js_escape(action)}}})"
             _tray_app_instance.settings_window.evaluate_js(js_code)
-            logger.debug(f"push_auth_progress: step={step}/{total}, status={status}, msg={message}")
+            logger.debug(f"push_auth_progress: step={step}/{total}, status={status}, action={action}, msg={message}")
     except Exception as e:
         logger.error(f"push_auth_progress failed: {e}")
 
@@ -748,13 +990,29 @@ def run_auth_task():
         logger.error("Cannot get WiFi interface name")
         _push_auth_progress(0, 5, '无法获取WiFi接口名称', 'error')
         return False, "无法获取WiFi接口名称"
+    if is_warp_connected():
+        logger.info("WARP already connected, checking IPv4 status...")
+        ps_cmd = f'(Get-NetAdapterBinding -Name "{interface_name}" -ComponentID ms_tcpip).Enabled'
+        code, output, _ = run_command(['powershell', '-Command', ps_cmd], shell=False)
+        if 'False' in output:
+            logger.info("WARP connected and IPv4 disabled, no need to re-authenticate")
+            _push_auth_progress(5, 5, '已认证，WARP已连接', 'success')
+            return True, "已认证，WARP已连接"
+        logger.info("WARP connected but IPv4 still enabled, disabling IPv4...")
+        if disable_ipv4(interface_name):
+            _push_auth_progress(5, 5, '已认证，WARP已连接', 'success')
+            return True, "已认证，WARP已连接"
+        else:
+            _push_auth_progress(5, 5, 'WARP已连接，但IPv4禁用失败', 'error')
+            return False, "WARP已连接，但IPv4禁用失败"
     logger.info(f"WiFi interface: {interface_name}")
     _push_auth_progress(1, 5, '断开WARP...')
     logger.info("[1/5] Checking WARP...")
     disconnect_warp()
     _push_auth_progress(2, 5, '启用IPv4...')
     logger.info("[2/5] Checking IPv4 status...")
-    code, output, _ = run_command(f'powershell -Command "(Get-NetAdapterBinding -Name \\"{interface_name}\\" -ComponentID ms_tcpip).Enabled"')
+    ps_cmd = f'(Get-NetAdapterBinding -Name "{interface_name}" -ComponentID ms_tcpip).Enabled'
+    code, output, _ = run_command(['powershell', '-Command', ps_cmd], shell=False)
     if 'True' not in output:
         logger.info("IPv4 disabled, enabling...")
         if not enable_ipv4(interface_name):
@@ -774,12 +1032,19 @@ def run_auth_task():
             success, msg = portal_login()
         if not success:
             _push_auth_progress(3, 5, msg, 'error')
+            logger.warning("Portal auth failed, rolling back: reconnecting WARP")
+            disable_ipv4(interface_name)
+            connect_warp()
             return False, msg
     _push_auth_progress(4, 5, '禁用IPv4...')
     logger.info("[4/5] Disabling IPv4...")
     if not disable_ipv4(interface_name):
         _push_auth_progress(4, 5, '禁用IPv4失败', 'error')
         return False, "禁用IPv4失败"
+    _push_auth_progress(5, 5, '等待IPv6就绪...')
+    logger.info("[4.5/5] Waiting for IPv6 to be ready...")
+    if not _wait_for_ipv6_ready():
+        logger.warning("IPv6 may not be ready, but continuing with WARP connect...")
     _push_auth_progress(5, 5, '连接WARP...')
     logger.info("[5/5] Connecting WARP...")
     if not connect_warp():
@@ -795,38 +1060,51 @@ def run_restore_task():
     logger.info("=" * 60)
     logger.info("Restoring normal network mode")
     logger.info("=" * 60)
-    _push_auth_progress(1, 3, '断开WARP...')
+    _push_auth_progress(1, 3, '断开WARP...', action='restore')
     logger.info("[1/3] Disconnecting WARP...")
     disconnect_warp()
     interface_name = get_wifi_interface_name()
     if not interface_name:
         interface_name = "WLAN"
     logger.info(f"WiFi interface: {interface_name}")
-    _push_auth_progress(2, 3, '启用IPv4...')
+    _push_auth_progress(2, 3, '启用IPv4...', action='restore')
     logger.info("[2/3] Enabling IPv4...")
     if not enable_ipv4(interface_name):
-        return False, "启用IPv4失败"
-    _push_auth_progress(3, 3, '验证网络...')
+        logger.warning("enable_ipv4 failed, rolling back: reconnecting WARP")
+        connect_warp()
+        _push_auth_progress(3, 3, '启用IPv4失败，已恢复WARP', 'error', action='restore')
+        return False, "启用IPv4失败，已恢复WARP"
+    _push_auth_progress(3, 3, '验证网络...', action='restore')
     logger.info("[3/3] Verifying network...")
     time.sleep(3)
     code, output, _ = run_command(f'netsh interface ipv4 show config name="{interface_name}"')
-    has_ipv4 = any(ip in output for ip in ['192.168.', '10.', '172.'])
-    if has_ipv4:
-        logger.info("IPv4 enabled with valid IP")
+    has_ipv4 = any(ip in output for ip in ['192.168.', '10.'])
+    if not has_ipv4:
+        logger.warning("No valid IPv4 address found after enabling")
+        _push_auth_progress(3, 3, 'IPv4未获取到有效地址', 'error', action='restore')
+        return False, "IPv4未获取到有效地址"
+    try:
+        import urllib.request
+        req = urllib.request.Request('http://www.baidu.com', method='HEAD')
+        urllib.request.urlopen(req, timeout=5)
+        logger.info("Network connectivity verified")
+        _push_auth_progress(3, 3, '网络已恢复正常模式', 'success', action='restore')
         return True, "网络已恢复正常模式"
-    else:
-        return False, "IPv4可能未正确配置"
+    except Exception as e:
+        logger.warning(f"IPv4 has IP but no internet: {e}")
+        _push_auth_progress(3, 3, 'IPv4已启用，但可能需要Portal认证', 'success', action='restore')
+        return True, "IPv4已启用，但可能需要Portal认证"
 
 def _build_schtasks_tr(extra_args=''):
     if getattr(sys, 'frozen', False):
         exe_path = sys.executable
-        tr = f'"{exe_path}"'
+        tr = exe_path
         if extra_args:
             tr += f' {extra_args}'
     else:
         python_exe = sys.executable
         script = str(SCRIPT_DIR / 'tray_app.py')
-        tr = f'"{python_exe}" "{script}"'
+        tr = f'{python_exe} {script}'
         if extra_args:
             tr += f' {extra_args}'
     return tr
@@ -836,9 +1114,9 @@ def setup_startup_task():
         logger.info("Already running as admin, setting up startup task")
         args = '--silent' if CONFIG.get('silent_startup') else ''
         tr_value = _build_schtasks_tr(args)
-        cmd_list = ['schtasks', '/Create', '/TN', TASK_NAME_STARTUP, '/TR', tr_value, '/SC', 'ONLOGON', '/RL', 'HIGHEST', '/F']
-        logger.info(f"setup_startup_task: cmd={' '.join(cmd_list)}")
-        code, output, err = run_command(cmd_list, shell=False)
+        cmd_str = f'schtasks /Create /TN "{TASK_NAME_STARTUP}" /TR "{tr_value}" /SC ONLOGON /RL HIGHEST /F'
+        logger.info(f"setup_startup_task: cmd={cmd_str}")
+        code, output, err = run_command_os_system(cmd_str)
         if code == 0:
             logger.info("Startup task created successfully")
             return True
@@ -850,36 +1128,33 @@ def setup_startup_task():
 def register_wifi_event_task():
     if not CONFIG.get('wifi_name'):
         return False
+    try:
+        run_command_os_system('schtasks /Delete /TN WiFiAutoAuthEvent /F')
+        logger.info("Old WiFi event task deleted (if existed)")
+    except Exception:
+        pass
     tr_value = _build_schtasks_tr('--wifi-event')
     event_channel = 'Microsoft-Windows-WLAN-AutoConfig/Operational'
     event_filter = "*[System[Provider[@Name='Microsoft-Windows-WLAN-AutoConfig'] and EventID=8001]]"
-    cmd_list = [
-        'schtasks', '/Create',
-        '/TN', 'WiFiAutoAuthEvent',
-        '/TR', tr_value,
-        '/SC', 'ONEVENT',
-        '/EC', event_channel,
-        '/MO', event_filter,
-        '/RL', 'HIGHEST',
-        '/F'
-    ]
-    logger.info(f"register_wifi_event_task: cmd={' '.join(cmd_list)}")
+    cmd_str = f'schtasks /Create /TN "WiFiAutoAuthEvent" /TR "{tr_value}" /SC ONEVENT /EC "{event_channel}" /MO "{event_filter}" /RL HIGHEST /F'
+    logger.info(f"register_wifi_event_task: cmd={cmd_str}")
     try:
-        code, output, err = run_command(cmd_list, shell=False)
+        code, output, err = run_command_os_system(cmd_str)
         if code == 0:
             logger.info("WiFi event task registered")
             try:
-                run_command([
-                    'powershell', '-Command',
+                ps_cmd = (
                     '$t = Get-ScheduledTask -TaskName "WiFiAutoAuthEvent"; '
                     '$t.Settings.DisallowStartIfOnBatteries = $false; '
                     '$t.Settings.StopIfGoingOnBatteries = $false; '
                     '$t.Settings.AllowStartOnDemand = $true; '
+                    '$t.Settings.ExecutionTimeLimit = [TimeSpan]::Zero; '
                     'Set-ScheduledTask -InputObject $t'
-                ], shell=False)
-                logger.info("WiFi event task power settings updated")
+                )
+                run_command(['powershell', '-Command', ps_cmd], shell=False)
+                logger.info("WiFi event task power+timeout settings updated")
             except Exception as e2:
-                logger.warning(f"Failed to update power settings: {e2}")
+                logger.warning(f"Failed to update power/timeout settings: {e2}")
             return True
         else:
             logger.error(f"Failed to register WiFi event: code={code}, output={output}, err={err}")
@@ -889,19 +1164,19 @@ def register_wifi_event_task():
 
 def unregister_wifi_event_task():
     try:
-        run_command(['schtasks', '/Delete', '/TN', 'WiFiAutoAuthEvent', '/F'], shell=False)
+        run_command_os_system('schtasks /Delete /TN WiFiAutoAuthEvent /F')
         logger.info("WiFi event task unregistered")
     except:
         pass
 
 def check_startup_status():
-    code, output, _ = run_command(['schtasks', '/Query', '/TN', TASK_NAME_STARTUP], shell=False)
+    code, output, _ = run_command_os_system(f'schtasks /Query /TN "{TASK_NAME_STARTUP}"')
     enabled = code == 0
     logger.debug(f"check_startup_status: enabled={enabled}")
     return enabled
 
 def remove_startup_task():
-    code, output, _ = run_command(['schtasks', '/Delete', '/TN', TASK_NAME_STARTUP, '/F'], shell=False)
+    code, output, _ = run_command_os_system(f'schtasks /Delete /TN "{TASK_NAME_STARTUP}" /F')
     if code == 0:
         logger.info("Startup task removed")
         return True
@@ -943,23 +1218,26 @@ class ApiBridge:
 
     def save_config(self, config):
         global CONFIG
-        logger.info(f"save_config called: wifi_name={config.get('wifi_name')}, username={config.get('username')}, auto_auth={config.get('auto_auth')}")
+        logger.info(f"save_config called: wifi_name={config.get('wifi_name')}, username={config.get('username')}, auto_auth={config.get('auto_auth')}, auto_restore={config.get('auto_restore')}")
         cfg = load_config()
         old_auto_auth = cfg.get('auto_auth', False)
+        old_auto_restore = cfg.get('auto_restore', False)
         cfg.update(config)
         save_config_to_file(cfg)
         CONFIG = cfg
-        if cfg['auto_auth']:
-            if not cfg['wifi_name']:
+        need_monitor = cfg.get('auto_auth') or cfg.get('auto_restore')
+        old_need_monitor = old_auto_auth or old_auto_restore
+        if need_monitor:
+            if cfg.get('auto_auth') and not cfg.get('wifi_name'):
                 return {'success': False, 'message': '请先选择或输入WiFi名称'}
-            if not old_auto_auth:
+            if not old_need_monitor:
                 start_wifi_event_monitor()
             if register_wifi_event_task():
-                return {'success': True, 'message': '自动认证已启用'}
+                return {'success': True, 'message': '设置已保存'}
             else:
-                return {'success': False, 'message': '自动认证需要管理员权限才能启用'}
+                return {'success': False, 'message': '需要管理员权限才能启用WiFi事件监控'}
         else:
-            if old_auto_auth:
+            if old_need_monitor:
                 cleanup_wifi_event()
             unregister_wifi_event_task()
             return {'success': True, 'message': '设置已保存'}
@@ -977,11 +1255,13 @@ class ApiBridge:
                 js_code = f"onAuthProgress({{step:5, total:5, message:{_js_escape(msg)}, status:{_js_escape(status)}}})"
                 if _tray_app_instance and _tray_app_instance.settings_window:
                     _tray_app_instance.settings_window.evaluate_js(js_code)
+                update_tray_icon(success, msg)
             except Exception as e:
                 logger.error(f"test_auth thread error: {e}")
                 js_code = f"onAuthProgress({{step:5, total:5, message:{_js_escape(str(e))}, status:{_js_escape('error')}}})"
                 if _tray_app_instance and _tray_app_instance.settings_window:
                     _tray_app_instance.settings_window.evaluate_js(js_code)
+                update_tray_icon(False, str(e))
             finally:
                 _auth_lock.release()
         threading.Thread(target=_do_auth, daemon=True).start()
@@ -990,24 +1270,30 @@ class ApiBridge:
     def auto_save_form(self, form_data):
         cfg = load_config()
         old_auto_auth = cfg.get('auto_auth', False)
-        for key in ('wifi_name', 'username', 'password', 'auto_auth', 'warp_cli_path', 'silent_startup', 'portal_ip', 'portal_port'):
+        for key in ('wifi_name', 'username', 'password', 'auto_auth', 'auto_restore', 'warp_cli_path', 'silent_startup', 'portal_ip', 'portal_port'):
             if key in form_data:
                 cfg[key] = form_data[key]
         save_config_to_file(cfg)
         global CONFIG
         CONFIG = cfg
-        logger.info(f"Auto-saved: wifi={form_data.get('wifi_name')}, user={form_data.get('username')}, auto={form_data.get('auto_auth')}")
+        logger.info(f"Auto-saved: wifi={form_data.get('wifi_name')}, user={form_data.get('username')}, auto_auth={form_data.get('auto_auth')}, auto_restore={form_data.get('auto_restore')}")
         new_auto_auth = cfg.get('auto_auth', False)
-        if new_auto_auth and not old_auto_auth:
+        new_auto_restore = cfg.get('auto_restore', False)
+        need_monitor = new_auto_auth or new_auto_restore
+        if need_monitor and not old_auto_auth and not old_auto_restore:
             start_wifi_event_monitor()
             if register_wifi_event_task():
-                logger.info("Auto-auth enabled: WiFi event task registered")
+                logger.info("WiFi event monitor started (auto_auth or auto_restore enabled)")
             else:
-                logger.warning("Auto-auth enabled: failed to register WiFi event task")
-        elif not new_auto_auth and old_auto_auth:
+                logger.warning("Failed to register WiFi event task")
+        elif not need_monitor and (old_auto_auth or old_auto_restore):
             cleanup_wifi_event()
             unregister_wifi_event_task()
-            logger.info("Auto-auth disabled: WiFi event task unregistered")
+            logger.info("WiFi event monitor stopped (both auto_auth and auto_restore disabled)")
+        elif need_monitor and not _wifi_monitor_started:
+            start_wifi_event_monitor()
+            if register_wifi_event_task():
+                logger.info("WiFi event monitor restarted")
 
     def check_network_status(self):
         logger.info("check_network_status called")
@@ -1015,14 +1301,18 @@ class ApiBridge:
         ipv4_disabled = False
         warp_cli = get_warp_cli()
         if warp_cli:
-            code, output, _ = run_command(warp_cli + ' status')
+            code, output, _ = run_command([warp_cli, 'status'], shell=False, timeout=10)
             if code == 0 and ('Network: healthy' in output or 'Status update: Connected' in output):
                 warp_connected = True
                 logger.debug("check_network_status: WARP connected")
+            elif code != 0:
+                logger.warning(f"check_network_status: warp-cli status failed (code={code})")
         interface_name = get_wifi_interface_name()
         if not interface_name:
             interface_name = 'WLAN'
-        code, output, _ = run_command(f'powershell -Command "(Get-NetAdapterBinding -Name \\"{interface_name}\\" -ComponentID ms_tcpip).Enabled"')
+        ps_cmd = f'(Get-NetAdapterBinding -Name "{interface_name}" -ComponentID ms_tcpip).Enabled'
+        code, output, err = run_command(['powershell', '-Command', ps_cmd], shell=False)
+        logger.debug(f"check_network_status: IPv4 check code={code}, output={output!r}, err={err!r}")
         if 'False' in output:
             ipv4_disabled = True
             logger.debug(f"check_network_status: IPv4 disabled on {interface_name}")
@@ -1031,40 +1321,85 @@ class ApiBridge:
         elif warp_connected and not ipv4_disabled:
             return {'status': 'partial', 'message': 'WARP已连接，但IPv4未禁用'}
         elif not warp_connected and ipv4_disabled:
+            warp_adapter = self._check_warp_adapter()
+            if warp_adapter:
+                logger.info("check_network_status: WARP adapter exists but warp-cli status failed, treating as connected")
+                return {'status': 'connected', 'message': 'WARP已连接，IPv4已禁用'}
             return {'status': 'broken', 'message': 'IPv4已禁用但WARP未连接'}
         else:
-            return {'status': 'disconnected', 'message': '未连接'}
+            has_internet = self._check_internet()
+            if has_internet:
+                return {'status': 'normal', 'message': '正常模式'}
+            else:
+                return {'status': 'disconnected', 'message': '未连接'}
+
+    def _check_warp_adapter(self):
+        try:
+            ps_cmd = 'Get-NetAdapter -Name *WARP* | Where-Object { $_.Status -eq \"Up\" } | Select-Object -First 1 -ExpandProperty Name'
+            code, output, _ = run_command(['powershell', '-Command', ps_cmd], shell=False, timeout=5)
+            if code == 0 and output.strip():
+                logger.debug(f"_check_warp_adapter: found {output.strip()}")
+                return True
+        except Exception as e:
+            logger.debug(f"_check_warp_adapter failed: {e}")
+        return False
+
+    def _check_internet(self):
+        try:
+            import socket
+            socket.create_connection(('8.8.8.8', 53), timeout=3)
+            return True
+        except Exception:
+            return False
 
     def restore_network(self):
         logger.info("restore_network called")
         def _do_restore():
+            if not _auth_lock.acquire(blocking=False):
+                logger.warning("restore_network: auth lock busy, another operation in progress")
+                js_code = f"onAuthProgress({{step:3, total:3, message:{_js_escape('操作正在进行中，请稍候')}, status:{_js_escape('error')}}})"
+                if _tray_app_instance and _tray_app_instance.settings_window:
+                    _tray_app_instance.settings_window.evaluate_js(js_code)
+                return
             try:
                 success, msg = run_restore_task()
                 status = "success" if success else "error"
-                js_code = f"onAuthProgress({{step:3, total:3, message:{_js_escape(msg)}, status:{_js_escape(status)}}})"
+                js_code = f"onAuthProgress({{step:3, total:3, message:{_js_escape(msg)}, status:{_js_escape(status)}, action:'restore'}})"
                 if _tray_app_instance and _tray_app_instance.settings_window:
                     _tray_app_instance.settings_window.evaluate_js(js_code)
+                update_tray_icon_restore(success, msg)
             except Exception as e:
                 logger.error(f"restore_network thread error: {e}")
+                update_tray_icon_restore(False, str(e))
+            finally:
+                _auth_lock.release()
         threading.Thread(target=_do_restore, daemon=True).start()
         return {'success': True, 'message': '恢复已启动'}
 
     def get_startup_status(self):
-        enabled = check_startup_status()
+        enabled = CONFIG.get('auto_startup', False)
         return {'enabled': enabled}
 
     def set_startup(self, enabled):
         logger.info(f"set_startup called: enabled={enabled}")
+        global CONFIG
         if enabled:
             if not is_admin():
                 return {'success': False, 'message': '需要管理员权限'}
             if setup_startup_task():
+                CONFIG['auto_startup'] = True
+                save_config_to_file(CONFIG)
+                if _tray_app_instance:
+                    _tray_app_instance._refresh_tray_menu()
                 return {'success': True, 'message': '开机自启已开启'}
             return {'success': False, 'message': '设置失败'}
         else:
-            if remove_startup_task():
-                return {'success': True, 'message': '开机自启已关闭'}
-            return {'success': False, 'message': '取消失败'}
+            remove_startup_task()
+            CONFIG['auto_startup'] = False
+            save_config_to_file(CONFIG)
+            if _tray_app_instance:
+                _tray_app_instance._refresh_tray_menu()
+            return {'success': True, 'message': '开机自启已关闭'}
 
     def browse_folder(self, title='选择文件'):
         logger.info(f"browse_folder called: title={title}")
@@ -1130,12 +1465,14 @@ def on_auth(icon, item):
 def _run_auth(icon):
     if not _auth_lock.acquire(blocking=False):
         icon.notify('认证正在进行中，请稍候', '校园网助手')
+        icon.icon = create_icon('green')
+        icon.title = '校园网助手'
         return
     try:
         success, msg = run_auth_task()
         if success:
-            icon.icon = create_icon('green')
-            icon.title = '认证成功'
+            icon.icon = create_icon('orange')
+            icon.title = 'WARP已连接'
             icon.notify(msg, '校园网助手')
         else:
             icon.icon = create_icon('red')
@@ -1151,12 +1488,15 @@ def _run_auth(icon):
 
 def on_restore(icon, item):
     logger.info("User clicked: Restore Normal")
-    icon.icon = create_icon('orange')
+    icon.icon = create_icon('green')
     icon.title = '正在恢复...'
     icon.notify('正在恢复网络到正常模式...', '校园网助手')
     threading.Thread(target=_run_restore, args=(icon,), daemon=True).start()
 
 def _run_restore(icon):
+    if not _auth_lock.acquire(blocking=False):
+        icon.notify('操作正在进行中，请稍候', '校园网助手')
+        return
     try:
         success, msg = run_restore_task()
         if success:
@@ -1172,6 +1512,8 @@ def _run_restore(icon):
         icon.icon = create_icon('red')
         icon.title = '错误'
         icon.notify(f'错误: {e}', '校园网助手')
+    finally:
+        _auth_lock.release()
 
 def on_exit(icon, item):
     logger.info("on_exit: user clicked Exit")
@@ -1222,24 +1564,75 @@ class TrayApp:
 
     def create_tray(self):
         self.icon = pystray.Icon('wifi_auto_auth')
-        self.icon.icon = create_icon('blue')
-        self.icon.title = 'WiFi Auto-Auth'
+        self.icon.icon = create_icon('gray')
+        self.icon.title = '校园网助手'
+        startup_enabled = CONFIG.get('auto_startup', False)
         menu_items = [
             pystray.MenuItem('手动认证', on_auth),
             pystray.MenuItem('恢复正常模式', on_restore),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem('打开设置', lambda i, item: self.show_settings('settings'), default=True),
+            pystray.MenuItem('打开设置', lambda i, item: self.show_settings('settings')),
             pystray.Menu.SEPARATOR,
         ]
         if not is_admin():
             menu_items.append(pystray.MenuItem('以管理员身份运行', lambda i, item: elevate_if_needed()))
             menu_items.append(pystray.Menu.SEPARATOR)
+        startup_label = '取消开机自启' if startup_enabled else '设置开机自启'
         menu_items.extend([
-            pystray.MenuItem('设置开机自启', on_setup_admin),
+            pystray.MenuItem(startup_label, self._toggle_startup),
             pystray.MenuItem('查看日志', on_show_log),
             pystray.MenuItem('退出', on_exit),
         ])
         self.icon.menu = pystray.Menu(*menu_items)
+        self.icon.on_activate = self._on_tray_activate
+
+    def _on_tray_activate(self, icon):
+        logger.info("Tray icon clicked, showing main window")
+        self.show_settings('status')
+
+    def _toggle_startup(self, icon, item):
+        enabled = check_startup_status()
+        if enabled:
+            logger.info("User clicked: Cancel Startup")
+            if remove_startup_task():
+                icon.notify('开机自启已取消', '校园网助手')
+                self._refresh_tray_menu()
+            else:
+                icon.notify('取消开机自启失败', '校园网助手')
+        else:
+            logger.info("User clicked: Setup Startup")
+            if not is_admin():
+                icon.notify('请先以管理员身份运行', '校园网助手')
+                return
+            if setup_startup_task():
+                icon.notify('开机自启已设置', '校园网助手')
+                self._refresh_tray_menu()
+            else:
+                icon.notify('设置开机自启失败', '校园网助手')
+
+    def _refresh_tray_menu(self):
+        try:
+            startup_enabled = CONFIG.get('auto_startup', False)
+            startup_label = '取消开机自启' if startup_enabled else '设置开机自启'
+            menu_items = [
+                pystray.MenuItem('手动认证', on_auth),
+                pystray.MenuItem('恢复正常模式', on_restore),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem('打开设置', lambda i, item: self.show_settings('settings')),
+                pystray.Menu.SEPARATOR,
+            ]
+            if not is_admin():
+                menu_items.append(pystray.MenuItem('以管理员身份运行', lambda i, item: elevate_if_needed()))
+                menu_items.append(pystray.Menu.SEPARATOR)
+            menu_items.extend([
+                pystray.MenuItem(startup_label, self._toggle_startup),
+                pystray.MenuItem('查看日志', on_show_log),
+                pystray.MenuItem('退出', on_exit),
+            ])
+            self.icon.menu = pystray.Menu(*menu_items)
+            logger.debug(f"Tray menu refreshed, startup={'enabled' if startup_enabled else 'disabled'}")
+        except Exception as e:
+            logger.error(f"_refresh_tray_menu failed: {e}")
 
     def show_settings(self, tab='status'):
         logger.debug(f"TrayApp.show_settings(tab={tab!r}) called, window={self.settings_window}")
@@ -1249,6 +1642,13 @@ class TrayApp:
                 self.settings_window.restore()
                 if tab == 'settings':
                     self.settings_window.evaluate_js("switchToTab('settings')")
+                # 刷新网络状态
+                try:
+                    status = self.check_network_status()
+                    js_code = f"updateStatusFromCheck({{status:{_js_escape(status['status'])}, message:{_js_escape(status['message'])}}}"
+                    self.settings_window.evaluate_js(js_code)
+                except Exception as e:
+                    logger.debug(f"show_settings: failed to refresh status: {e}")
                 logger.debug("TrayApp.show_settings(): window shown and restored")
             except Exception as e:
                 logger.error(f"TrayApp.show_settings(): failed: {e}\n{traceback.format_exc()}")
@@ -1274,9 +1674,33 @@ class TrayApp:
         self.create_tray()
         logger.info(f"Tray started (admin: {is_admin()})")
 
-        if cfg.get('auto_auth'):
+        if cfg.get('auto_startup'):
+            if is_admin():
+                if not check_startup_status():
+                    logger.info("auto_startup=True but task missing, re-registering")
+                    setup_startup_task()
+            else:
+                logger.info("auto_startup=True but not admin, cannot verify/register startup task")
+        else:
+            if check_startup_status():
+                logger.info("auto_startup=False but task exists, removing")
+                remove_startup_task()
+
+        if cfg.get('auto_auth') or cfg.get('auto_restore'):
             start_wifi_event_monitor()
-            threading.Thread(target=check_startup_wifi_and_auth, daemon=True).start()
+            if is_admin():
+                if register_wifi_event_task():
+                    logger.info("WiFi event task registered on startup")
+                else:
+                    logger.warning("Failed to register WiFi event task on startup")
+            else:
+                logger.info("Not admin, skipping WiFi event task registration")
+            if cfg.get('auto_auth'):
+                threading.Thread(target=check_startup_wifi_and_auth, daemon=True).start()
+            else:
+                threading.Thread(target=_update_tray_status, daemon=True).start()
+        else:
+            threading.Thread(target=_update_tray_status, daemon=True).start()
 
         tray_thread = threading.Thread(target=self.icon.run, daemon=True)
         tray_thread.start()

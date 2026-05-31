@@ -3,35 +3,51 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>CampusAuth</title>
     <style>
+        :root {
+            --bg-primary: #0D0D0D;
+            --bg-secondary: #1A1A1A;
+            --bg-tertiary: #262626;
+            --accent: #F68320;
+            --accent-dim: rgba(246,131,32,0.15);
+            --text-primary: #FFFFFF;
+            --text-secondary: #A3A3A3;
+            --text-tertiary: #737373;
+            --border: rgba(255,255,255,0.08);
+            --success: #22C55E;
+            --error: #EF4444;
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
         }
 
         body {
-            background: #FAFAFA;
-            color: #1A1A1A;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             overflow: hidden;
+            width: 100vw;
+            height: 100vh;
         }
 
-        /* 加载遮罩 */
+        /* Loading Overlay */
         .loading-overlay {
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: #FFFFFF;
+            inset: 0;
+            background: var(--bg-primary);
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             z-index: 9999;
-            transition: opacity 0.4s ease, visibility 0.4s ease;
+            transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.4s;
         }
 
         .loading-overlay.hidden {
@@ -41,274 +57,385 @@
         }
 
         .loading-spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid #F0F0F0;
-            border-top-color: #F68320;
+            width: 32px;
+            height: 32px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
             margin-bottom: 16px;
         }
 
         .loading-text {
-            font-size: 14px;
-            color: #999;
+            font-size: 13px;
+            color: var(--text-tertiary);
             font-weight: 500;
+            letter-spacing: 0.3px;
         }
 
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
 
+        /* Container */
         .container {
-            max-width: 400px;
-            margin: 0 auto;
-            background: #FFFFFF;
-            min-height: 100vh;
+            width: 100%;
+            height: 100%;
             display: flex;
             flex-direction: column;
         }
 
+        /* Tab Bar */
         .tab-bar {
             display: flex;
-            border-bottom: 1px solid #F0F0F0;
-            background: #FFFFFF;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-primary);
+            padding: 0 20px;
         }
 
         .tab-btn {
-            flex: 1;
             padding: 14px 0;
+            margin-right: 24px;
             text-align: center;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
-            color: #999;
+            color: var(--text-tertiary);
             border: none;
             background: none;
             cursor: pointer;
             position: relative;
-            transition: color 0.2s;
+            transition: color 0.15s;
             outline: none;
+            letter-spacing: 0.3px;
         }
 
-        .tab-btn:focus {
-            outline: none;
-        }
-
-        .tab-btn:focus-visible {
-            outline: none;
+        .tab-btn:last-child {
+            margin-right: 0;
         }
 
         .tab-btn.active {
-            color: #F68320;
+            color: var(--text-primary);
         }
 
         .tab-btn.active::after {
             content: '';
             position: absolute;
-            bottom: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 32px;
-            height: 3px;
-            background: #F68320;
-            border-radius: 2px;
+            bottom: -1px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--accent);
+            border-radius: 1px;
         }
 
+        /* Tab Content */
         .tab-content {
             flex: 1;
             display: none;
             flex-direction: column;
+            overflow-y: auto;
         }
 
         .tab-content.active {
             display: flex;
         }
 
+        /* Status Page */
         .status-page {
             flex: 1;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            padding: 32px 24px;
+            justify-content: flex-start;
+            padding: 32px 24px 32px;
             position: relative;
         }
 
-        .orb-container {
+        /* Status Indicator - Hexagon Shape */
+        .status-indicator {
             position: relative;
-            width: 180px;
-            height: 180px;
-            margin-bottom: 28px;
+            width: 140px;
+            height: 160px;
+            margin-bottom: 22px;
         }
 
-        .orb-canvas {
+        .hexagon-svg {
             position: absolute;
-            top: -30px;
-            left: -30px;
-            width: 240px;
-            height: 240px;
-            pointer-events: none;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        .orb {
-            width: 180px;
-            height: 180px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-            position: relative;
-            z-index: 1;
-            transition: all 0.5s ease;
+        .hexagon-shape {
+            fill: var(--bg-tertiary);
+            stroke: var(--border);
+            stroke-width: 1;
+            transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        .orb.idle {
-            background: linear-gradient(135deg, #B4B4B4, #999999);
-            box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+        .status-indicator.idle .hexagon-shape {
+            fill: var(--bg-tertiary);
+            stroke: var(--border);
         }
 
-        .orb.normal {
-            background: linear-gradient(135deg, #34C759, #4CD964);
-            box-shadow: 0 8px 32px rgba(52,199,89,0.3);
+        .status-indicator.normal .hexagon-shape {
+            fill: rgba(34, 197, 94, 0.15);
+            stroke: rgba(34, 197, 94, 0.4);
+            filter: drop-shadow(0 0 20px rgba(34, 197, 94, 0.2));
         }
 
-        .orb.running {
-            background: linear-gradient(135deg, #F68320, #FF9F4A);
-            box-shadow: 0 8px 32px rgba(246,131,32,0.3);
+        .status-indicator.running .hexagon-shape {
+            fill: var(--accent-dim);
+            stroke: var(--accent);
+            filter: drop-shadow(0 0 30px rgba(246, 131, 32, 0.3));
+            animation: hexPulse 1.5s ease-in-out infinite;
         }
 
-        .orb.success {
-            background: linear-gradient(135deg, #F68320, #FF9F4A);
-            box-shadow: 0 8px 32px rgba(246,131,32,0.3);
+        .status-indicator.success .hexagon-shape {
+            fill: var(--accent-dim);
+            stroke: var(--accent);
+            filter: drop-shadow(0 0 30px rgba(246, 131, 32, 0.3));
         }
 
-        .orb.error {
-            background: linear-gradient(135deg, #FF3B30, #FF6B5E);
-            box-shadow: 0 8px 32px rgba(255,59,48,0.3);
+        .status-indicator.error .hexagon-shape {
+            fill: rgba(239, 68, 68, 0.15);
+            stroke: rgba(239, 68, 68, 0.5);
+            filter: drop-shadow(0 0 20px rgba(239, 68, 68, 0.2));
         }
 
-        .orb-glow {
+        @keyframes hexPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .hexagon-rotate {
             position: absolute;
-            top: -30px;
-            left: -30px;
-            width: 240px;
-            height: 240px;
-            border-radius: 50%;
-            pointer-events: none;
-            z-index: 0;
+            inset: -8px;
+            width: calc(100% + 16px);
+            height: calc(100% + 16px);
             opacity: 0;
             transition: opacity 0.5s ease;
         }
 
-        .orb-glow.active {
+        .status-indicator.running .hexagon-rotate,
+        .status-indicator.success .hexagon-rotate {
             opacity: 1;
         }
 
-        .orb-glow.green-glow {
-            background: radial-gradient(circle, rgba(52,199,89,0.25) 0%, rgba(52,199,89,0.08) 40%, transparent 70%);
-            animation: glowPulse 3s ease-in-out infinite;
+        .hexagon-rotate-line {
+            fill: none;
+            stroke: var(--accent);
+            stroke-width: 1;
+            stroke-dasharray: 8 4;
+            opacity: 0.4;
+            animation: hexRotate 8s linear infinite;
+            transform-origin: center;
         }
 
-        .orb-glow.orange-glow {
-            background: radial-gradient(circle, rgba(246,131,32,0.25) 0%, rgba(246,131,32,0.08) 40%, transparent 70%);
-            animation: glowPulse 3s ease-in-out infinite;
+        @keyframes hexRotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
         }
 
-        @keyframes glowPulse {
-            0%, 100% { transform: scale(1); opacity: 0.6; }
-            50% { transform: scale(1.08); opacity: 1; }
-        }
-
-        .orb-icon {
-            width: 40px;
-            height: 40px;
+        .status-icon {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 36px;
+            height: 36px;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-bottom: 4px;
+            z-index: 2;
         }
 
-        .orb-icon svg {
-            width: 36px;
-            height: 36px;
+        .status-icon svg {
+            width: 28px;
+            height: 28px;
+            stroke: var(--text-primary);
+            stroke-width: 1.5;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
         }
 
-        .orb-text {
-            font-size: 13px;
-            font-weight: 600;
-            color: rgba(255,255,255,0.9);
+        .status-indicator.running .status-icon svg {
+            animation: iconSpin 2s linear infinite;
+        }
+
+        @keyframes iconSpin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* Status Text */
+        .status-label {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
         }
 
         .status-title {
-            font-size: 18px;
+            font-size: 20px;
             font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.5px;
             margin-bottom: 6px;
+            text-align: center;
         }
 
         .status-subtitle {
             font-size: 13px;
-            color: #999;
-            margin-bottom: 16px;
+            color: var(--text-secondary);
             text-align: center;
+            margin-bottom: 24px;
             min-height: 20px;
+            font-weight: 400;
         }
 
-        .progress-bar-container {
-            width: 100%;
-            max-width: 280px;
-            height: 6px;
-            background: #F0F0F0;
-            border-radius: 3px;
-            overflow: hidden;
-            margin-bottom: 24px;
+        /* Progress Bar */
+        .progress-container {
+            width: 200px;
+            position: relative;
+            margin-bottom: 20px;
             display: none;
         }
 
-        .progress-bar-fill {
+        .progress-container.active {
+            display: block;
+        }
+
+        .progress-track {
+            width: 100%;
+            height: 3px;
+            background: var(--border);
+            border-radius: 2px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, #F68320, #FF9F4A);
-            border-radius: 3px;
-            transition: width 0.5s ease;
-            width: 0%;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
         }
 
-        .progress-bar-fill.success {
-            background: linear-gradient(90deg, #34C759, #4CD964);
+        .progress-fill::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 20px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3));
+            border-radius: 2px;
         }
 
-        .progress-bar-fill.error {
-            background: linear-gradient(90deg, #FF3B30, #FF6B5E);
+        .progress-fill.success { background: var(--accent); }
+        .progress-fill.error { background: var(--error); }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 6px;
         }
 
-        .progress-bar-fill.cancelled {
-            background: linear-gradient(90deg, #8E8E93, #AEAEB2);
+        .progress-text {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-primary);
+            font-variant-numeric: tabular-nums;
         }
 
+        .progress-label {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        /* Action Buttons */
         .status-actions {
             display: flex;
-            gap: 12px;
+            gap: 10px;
             width: 100%;
             max-width: 280px;
         }
 
-        .status-actions .btn {
+        .btn {
             flex: 1;
+            padding: 12px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+            outline: none;
+            letter-spacing: 0.2px;
         }
 
+        .btn:active {
+            transform: scale(0.97);
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: var(--text-primary);
+            border-color: var(--accent);
+        }
+
+        .btn-primary:hover {
+            background: #E8751A;
+            border-color: #E8751A;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-secondary);
+            border-color: var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--error);
+            border-color: rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-danger:hover {
+            background: rgba(239, 68, 68, 0.25);
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Settings Page */
         .settings-page {
             flex: 1;
             display: flex;
             flex-direction: column;
-        }
-
-        .form {
-            flex: 1;
-            padding: 12px 20px;
+            padding: 16px 20px;
+            overflow: hidden;
         }
 
         .form-group {
-            margin-bottom: 10px;
+            margin-bottom: 6px;
         }
 
         .form-group:last-child {
@@ -317,33 +444,35 @@
 
         label {
             display: block;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 600;
-            color: #333;
-            margin-bottom: 5px;
+            color: var(--text-tertiary);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         input[type="text"],
         input[type="password"] {
             width: 100%;
-            padding: 9px 12px;
-            border: 1px solid #E8E8E8;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
             border-radius: 6px;
             font-size: 13px;
-            background: #FAFAFA;
-            transition: all 0.2s;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            transition: all 0.15s;
             outline: none;
         }
 
         input[type="text"]:focus,
         input[type="password"]:focus {
-            border-color: #F68320;
-            background: #FFFFFF;
-            box-shadow: 0 0 0 3px rgba(246, 131, 32, 0.1);
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-dim);
         }
 
         input::placeholder {
-            color: #CCC;
+            color: var(--text-tertiary);
         }
 
         .input-row {
@@ -353,54 +482,65 @@
 
         .input-row input {
             flex: 1;
+            min-width: 0;
         }
 
         .btn-icon {
-            padding: 9px 12px;
-            background: #FFFFFF;
-            border: 1px solid #E8E8E8;
+            padding: 8px 14px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
             border-radius: 6px;
             cursor: pointer;
-            font-size: 13px;
-            transition: all 0.2s;
+            font-size: 12px;
+            color: var(--text-secondary);
+            transition: all 0.15s;
             white-space: nowrap;
+            font-weight: 500;
         }
 
         .btn-icon:hover {
-            background: #F5F5F5;
-            border-color: #DDD;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border-color: var(--text-tertiary);
         }
 
-        .toggle-group {
+        .toggle-card {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            min-height: 64px;
+        }
+
+        .toggle-card-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 10px 12px;
-            background: #FAFAFA;
-            border-radius: 6px;
+            gap: 8px;
         }
 
-        .toggle-label {
-            display: flex;
-            flex-direction: column;
-            gap: 1px;
-        }
-
-        .toggle-label span:first-child {
+        .toggle-card-title {
             font-size: 13px;
             font-weight: 600;
-            color: #1A1A1A;
+            color: var(--text-primary);
+            white-space: nowrap;
         }
 
-        .toggle-label span:last-child {
+        .toggle-card-tip {
             font-size: 11px;
-            color: #999;
+            color: var(--text-tertiary);
+            line-height: 1.3;
+            margin-top: 4px;
         }
 
         .toggle {
             position: relative;
-            width: 48px;
-            height: 26px;
+            width: 44px;
+            height: 24px;
+            flex-shrink: 0;
         }
 
         .toggle input {
@@ -412,36 +552,36 @@
         .toggle-slider {
             position: absolute;
             cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: #E8E8E8;
-            transition: 0.3s;
-            border-radius: 26px;
+            inset: 0;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            transition: 0.2s;
+            border-radius: 24px;
         }
 
         .toggle-slider:before {
             position: absolute;
             content: "";
-            height: 20px;
-            width: 20px;
-            left: 3px;
-            bottom: 3px;
-            background-color: white;
-            transition: 0.3s;
+            height: 18px;
+            width: 18px;
+            left: 2px;
+            bottom: 2px;
+            background-color: var(--text-secondary);
+            transition: 0.2s;
             border-radius: 50%;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         input:checked + .toggle-slider {
-            background-color: #F68320;
+            background-color: var(--accent);
+            border-color: var(--accent);
         }
 
         input:checked + .toggle-slider:before {
-            transform: translateX(22px);
+            transform: translateX(20px);
+            background-color: white;
         }
 
+        /* Dropdown */
         .dropdown {
             position: relative;
         }
@@ -452,10 +592,10 @@
             top: calc(100% + 4px);
             left: 0;
             right: 0;
-            background: #FFFFFF;
-            border: 1px solid #E8E8E8;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
             border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
             max-height: 160px;
             overflow-y: auto;
             z-index: 10;
@@ -466,89 +606,96 @@
         }
 
         .dropdown-item {
-            padding: 10px 16px;
+            padding: 10px 14px;
             cursor: pointer;
-            transition: background 0.15s;
-            font-size: 14px;
-            color: #333;
-        }
-
-        .dropdown-item:first-child {
-            border-radius: 8px 8px 0 0;
-        }
-
-        .dropdown-item:last-child {
-            border-radius: 0 0 8px 8px;
+            transition: background 0.1s;
+            font-size: 13px;
+            color: var(--text-secondary);
         }
 
         .dropdown-item:hover {
-            background: #F5F5F5;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
         }
 
         .dropdown-empty {
             padding: 16px;
             text-align: center;
-            color: #999;
-            font-size: 13px;
+            color: var(--text-tertiary);
+            font-size: 12px;
         }
 
-        .btn {
-            flex: 1;
-            padding: 14px 20px;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
+        /* Title Bar */
+        .title-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 36px;
+            padding: 0 12px;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border);
+            -webkit-app-region: drag;
+            user-select: none;
+        }
+
+        .title-bar-text {
+            font-size: 12px;
             font-weight: 600;
+            color: var(--text-secondary);
+            letter-spacing: 0.3px;
+        }
+
+        .title-bar-btns {
+            display: flex;
+            gap: 6px;
+            -webkit-app-region: no-drag;
+        }
+
+        .title-bar-btn {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: transparent;
+            border-radius: 4px;
             cursor: pointer;
-            transition: all 0.2s;
+            color: var(--text-tertiary);
+            transition: all 0.15s;
+            padding: 0;
         }
 
-        .btn-secondary {
-            background: #F5F5F5;
-            color: #333;
+        .title-bar-btn:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
         }
 
-        .btn-secondary:hover {
-            background: #EBEBEB;
+        .title-bar-btn.close:hover {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--error);
         }
 
-        .btn-danger {
-            background: #FF3B30;
-            color: white;
+        .title-bar-btn svg {
+            width: 14px;
+            height: 14px;
+            stroke: currentColor;
+            stroke-width: 2;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
         }
 
-        .btn-danger:hover {
-            background: #E0342B;
-        }
-
-        .btn-primary {
-            background: #F68320;
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: #E8751A;
-        }
-
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .hint {
-            font-size: 11px;
-            color: #999;
-            margin-top: 3px;
-        }
-
+        /* Alert */
         .alert {
             display: none;
             position: fixed;
             inset: 0;
-            background: rgba(0, 0, 0, 0.3);
+            background: rgba(0, 0, 0, 0.6);
             align-items: center;
             justify-content: center;
             z-index: 100;
+            backdrop-filter: blur(4px);
         }
 
         .alert.active {
@@ -556,29 +703,22 @@
         }
 
         .alert-card {
-            background: white;
+            background: var(--bg-secondary);
             padding: 24px;
             border-radius: 12px;
             max-width: 320px;
             width: calc(100% - 48px);
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            border: 1px solid var(--border);
         }
 
         .alert-title {
             display: flex;
             align-items: center;
-            gap: 8px;
-            font-size: 16px;
+            gap: 10px;
+            font-size: 15px;
             font-weight: 600;
             margin-bottom: 8px;
-        }
-
-        #alertIcon {
-            width: 22px;
-            height: 22px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            color: var(--text-primary);
         }
 
         #alertIcon svg {
@@ -587,56 +727,101 @@
         }
 
         .alert-message {
-            font-size: 14px;
-            color: #666;
-            margin-bottom: 16px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 20px;
+            line-height: 1.5;
         }
 
         .alert-btn {
             width: 100%;
-            padding: 12px;
+            padding: 10px;
             border: none;
-            border-radius: 8px;
-            font-size: 14px;
+            border-radius: 6px;
+            font-size: 13px;
             font-weight: 600;
             cursor: pointer;
-            background: #F68320;
+            background: var(--accent);
             color: white;
+            transition: background 0.15s;
         }
 
         .alert-btn:hover {
             background: #E8751A;
         }
+
+        /* Particle Canvas */
+        .particle-canvas {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 300px;
+            height: 300px;
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.6;
+        }
     </style>
 </head>
 <body>
-    <!-- 加载遮罩 -->
+    <!-- Title Bar -->
+    <div class="title-bar">
+        <div class="title-bar-text">CampusAuth</div>
+        <div class="title-bar-btns">
+            <button class="title-bar-btn" onclick="minimizeWindow()" title="最小化">
+                <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            <button class="title-bar-btn close" onclick="closeWindow()" title="关闭">
+                <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay">
         <div class="loading-spinner"></div>
         <div class="loading-text">正在启动...</div>
     </div>
 
     <div class="container">
+        <!-- Tab Bar -->
         <div class="tab-bar">
             <button class="tab-btn active" onclick="switchTab('status')">连接</button>
             <button class="tab-btn" onclick="switchTab('settings')">设置</button>
         </div>
 
+        <!-- Status Tab -->
         <div class="tab-content active" id="tab-status">
             <div class="status-page">
-                <div class="orb-container">
-                    <canvas class="orb-canvas" id="particleCanvas" width="240" height="240"></canvas>
-                    <div class="orb-glow" id="orbGlow"></div>
-                    <div class="orb idle" id="statusOrb">
-                        <span class="orb-icon" id="orbIcon"><svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l22 22"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></span>
-                        <span class="orb-text" id="orbText">未连接</span>
+                <canvas class="particle-canvas" id="particleCanvas" width="300" height="300"></canvas>
+
+                <div class="status-indicator idle" id="statusIndicator">
+                    <svg class="hexagon-svg" viewBox="0 0 140 140">
+                        <polygon class="hexagon-shape" points="70,5 125,35 125,105 70,135 15,105 15,35"/>
+                    </svg>
+                    <svg class="hexagon-rotate" viewBox="0 0 156 156">
+                        <polygon class="hexagon-rotate-line" points="78,5 141,39 141,117 78,151 15,117 15,39"/>
+                    </svg>
+                    <div class="status-icon" id="statusIcon">
+                        <svg viewBox="0 0 24 24"><path d="M1 1l22 22"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>
                     </div>
                 </div>
-                <div class="status-title" id="statusTitle">校园网助手</div>
+
+                <div class="status-label" id="statusLabel">STATUS</div>
+                <div class="status-title" id="statusTitle">一键认证</div>
                 <div class="status-subtitle" id="statusSubtitle">点击下方按钮开始认证</div>
-                <div class="progress-bar-container" id="progressBarContainer">
-                    <div class="progress-bar-fill" id="progressBarFill"></div>
+
+                <div class="progress-container" id="progressContainer">
+                    <div class="progress-track">
+                        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                    </div>
+                    <div class="progress-info">
+                        <div class="progress-label" id="progressLabelText">认证中</div>
+                        <div class="progress-text" id="progressText">0%</div>
+                    </div>
                 </div>
+
                 <div class="status-actions">
                     <button class="btn btn-primary" id="authBtn" onclick="startAuth()">开始认证</button>
                     <button class="btn btn-secondary" id="restoreBtn" onclick="startRestore()">恢复网络</button>
@@ -645,90 +830,97 @@
             </div>
         </div>
 
+        <!-- Settings Tab -->
         <div class="tab-content" id="tab-settings">
             <div class="settings-page">
-                <div class="form">
-                    <div class="form-group">
-                        <label>WiFi 网络</label>
-                        <div class="dropdown">
-                            <div class="input-row">
-                                <input type="text" id="wifiName" placeholder="选择或输入WiFi名称" />
-                                <button class="btn-icon" id="refreshBtn" onclick="refreshWifi()">扫描</button>
-                            </div>
-                            <div class="dropdown-list" id="wifiDropdown"></div>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>认证账号</label>
-                        <input type="text" id="username" placeholder="输入上网账号" />
-                    </div>
-                    <div class="form-group">
-                        <label>认证密码</label>
+                <div class="form-group">
+                    <label>WiFi 网络</label>
+                    <div class="dropdown">
                         <div class="input-row">
-                            <input type="password" id="password" placeholder="输入账号密码" />
-                            <button class="btn-icon" id="showPassBtn" onclick="togglePassword()">显示</button>
+                            <input type="text" id="wifiName" placeholder="选择或输入WiFi名称" />
+                            <button class="btn-icon" id="refreshBtn" onclick="refreshWifi()">扫描</button>
                         </div>
+                        <div class="dropdown-list" id="wifiDropdown"></div>
                     </div>
-                    <div class="form-group">
-                        <div style="display:flex;gap:8px;">
-                            <div class="toggle-group" style="flex:1;">
-                                <div class="toggle-label">
-                                    <span>自动认证</span>
-                                    <span>WiFi后自动认证</span>
-                                </div>
+                </div>
+
+                <div class="form-group">
+                    <label>认证账号</label>
+                    <input type="text" id="username" placeholder="输入上网账号" />
+                </div>
+
+                <div class="form-group">
+                    <label>认证密码</label>
+                    <div class="input-row">
+                        <input type="password" id="password" placeholder="输入账号密码" />
+                        <button class="btn-icon" id="showPassBtn" onclick="togglePassword()">显示</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <div style="display:flex;gap:8px;">
+                        <div class="toggle-card" style="flex:1;">
+                            <div class="toggle-card-header">
+                                <span class="toggle-card-title">自动认证</span>
                                 <label class="toggle">
                                     <input type="checkbox" id="autoAuth">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
-                            <div class="toggle-group" style="flex:1;">
-                                <div class="toggle-label">
-                                    <span>开机自启</span>
-                                    <span>登录后自动启动</span>
-                                </div>
+                            <div class="toggle-card-tip">WiFi后自动认证</div>
+                        </div>
+                        <div class="toggle-card" style="flex:1;">
+                            <div class="toggle-card-header">
+                                <span class="toggle-card-title">开机自启</span>
                                 <label class="toggle">
                                     <input type="checkbox" id="autoStartup">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
+                            <div class="toggle-card-tip">登录后自动启动</div>
                         </div>
                     </div>
-                    <div class="form-group">
-                        <div class="toggle-group">
-                            <div class="toggle-label">
-                                <span>自动恢复</span>
-                                <span>切换WiFi后自动恢复网络</span>
+                </div>
+
+                <div class="form-group">
+                    <div style="display:flex;gap:8px;">
+                        <div class="toggle-card" style="flex:1;">
+                            <div class="toggle-card-header">
+                                <span class="toggle-card-title">自动恢复</span>
+                                <label class="toggle">
+                                    <input type="checkbox" id="autoRestore">
+                                    <span class="toggle-slider"></span>
+                                </label>
                             </div>
-                            <label class="toggle">
-                                <input type="checkbox" id="autoRestore">
-                                <span class="toggle-slider"></span>
-                            </label>
+                            <div class="toggle-card-tip">切换WiFi后自动恢复网络</div>
                         </div>
-                        <div class="toggle-group">
-                            <div class="toggle-label">
-                                <span>静默启动</span>
-                                <span>开机自启时不显示主窗口，仅驻留托盘</span>
+                        <div class="toggle-card" style="flex:1;">
+                            <div class="toggle-card-header">
+                                <span class="toggle-card-title">静默启动</span>
+                                <label class="toggle">
+                                    <input type="checkbox" id="silentStartup">
+                                    <span class="toggle-slider"></span>
+                                </label>
                             </div>
-                            <label class="toggle">
-                                <input type="checkbox" id="silentStartup">
-                                <span class="toggle-slider"></span>
-                            </label>
+                            <div class="toggle-card-tip">开机自启时不显示主窗口</div>
                         </div>
                     </div>
-                    <div class="form-group">
-                        <label>WARP-CLI 路径</label>
-                        <div class="input-row">
-                            <input type="text" id="warpCliPath" placeholder="留空则自动检测" />
-                            <button class="btn-icon" id="browseWarpBtn" onclick="browseWarpPath()" title="选择文件">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                            </button>
-                        </div>
+                </div>
+
+                <div class="form-group">
+                    <label>WARP-CLI 路径</label>
+                    <div class="input-row">
+                        <input type="text" id="warpCliPath" placeholder="留空则自动检测" />
+                        <button class="btn-icon" id="browseWarpBtn" onclick="browseWarpPath()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        </button>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- Alert -->
     <div class="alert" id="alertOverlay">
         <div class="alert-card">
             <div class="alert-title" id="alertTitle">
@@ -741,6 +933,7 @@
     </div>
 
     <script>
+        // ===== Tab Switching =====
         function switchTab(name) {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -756,8 +949,8 @@
             contents.forEach((c, i) => c.classList.toggle('active', i === idx));
         }
 
+        // ===== Initialization =====
         window.addEventListener('pywebviewready', async () => {
-            // 先快速加载配置（不阻塞UI）
             try {
                 const config = await window.pywebview.api.load_config();
                 document.getElementById('wifiName').value = config.wifi_name || '';
@@ -767,64 +960,250 @@
                 document.getElementById('autoRestore').checked = config.auto_restore || false;
                 document.getElementById('warpCliPath').value = config.warp_cli_path || '';
                 document.getElementById('silentStartup').checked = config.silent_startup || false;
-                console.log('Config loaded:', JSON.stringify(config));
             } catch (e) { console.error('Failed to load config:', e); }
 
-            // 延迟执行网络状态检测，避免阻塞页面渲染
             setTimeout(async () => {
                 try {
                     const status = await window.pywebview.api.check_network_status();
                     updateStatusFromCheck(status);
-                    console.log('Network status:', JSON.stringify(status));
                 } catch (e) { console.error('Failed to check network status:', e); }
                 try {
                     const startup = await window.pywebview.api.get_startup_status();
                     document.getElementById('autoStartup').checked = startup.enabled || false;
-                    console.log('Startup status:', JSON.stringify(startup));
                 } catch (e) { console.error('Failed to get startup status:', e); }
-                // 隐藏加载遮罩
                 document.getElementById('loadingOverlay').classList.add('hidden');
             }, 100);
         });
 
+        // ===== Status Management =====
         function updateStatusFromCheck(status) {
             if (_authRunning) return;
             hideProgress();
             const authBtn = document.getElementById('authBtn');
             const restoreBtn = document.getElementById('restoreBtn');
+
             if (status.status === 'connected') {
-                setOrbState('success', 'check', 'WARP已连接', 'orange');
-                document.getElementById('statusTitle').textContent = 'WARP已连接';
-                document.getElementById('statusSubtitle').textContent = status.message;
+                setStatus('success', 'WARP已连接', status.message, 'check');
                 authBtn.disabled = true;
                 restoreBtn.disabled = false;
             } else if (status.status === 'partial') {
-                setOrbState('running', 'warn', '部分连接', 'orange');
-                document.getElementById('statusTitle').textContent = '部分连接';
-                document.getElementById('statusSubtitle').textContent = status.message;
+                setStatus('running', '部分连接', status.message, 'warn');
                 authBtn.disabled = false;
                 restoreBtn.disabled = false;
             } else if (status.status === 'broken') {
-                setOrbState('error', 'cross', '异常', null);
-                document.getElementById('statusTitle').textContent = '网络异常';
-                document.getElementById('statusSubtitle').textContent = status.message;
+                setStatus('error', '网络异常', status.message, 'cross');
                 authBtn.disabled = false;
                 restoreBtn.disabled = false;
             } else if (status.status === 'normal') {
-                setOrbState('normal', 'check', '正常模式', 'green');
-                document.getElementById('statusTitle').textContent = '正常模式';
-                document.getElementById('statusSubtitle').textContent = status.message;
+                setStatus('normal', '正常模式', status.message, 'check');
                 authBtn.disabled = false;
                 restoreBtn.disabled = true;
             } else {
-                setOrbState('idle', 'wifi', '未连接', null);
-                document.getElementById('statusTitle').textContent = '校园网助手';
-                document.getElementById('statusSubtitle').textContent = '点击下方按钮开始认证';
+                setStatus('idle', '校园网助手', '点击下方按钮开始认证', 'wifi');
                 authBtn.disabled = false;
                 restoreBtn.disabled = true;
             }
         }
 
+        const STATUS_ICONS = {
+            wifi: '<svg viewBox="0 0 24 24"><path d="M1 1l22 22"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>',
+            check: '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>',
+            cross: '<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+            loader: '<svg viewBox="0 0 24 24"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>',
+            warn: '<svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+        };
+
+        function setStatus(state, title, subtitle, iconKey) {
+            const indicator = document.getElementById('statusIndicator');
+            indicator.className = 'status-indicator ' + state;
+
+            const iconEl = document.getElementById('statusIcon');
+            iconEl.innerHTML = STATUS_ICONS[iconKey] || STATUS_ICONS.wifi;
+
+            document.getElementById('statusTitle').textContent = title;
+            document.getElementById('statusSubtitle').textContent = subtitle;
+        }
+
+        // ===== Progress Bar =====
+        function showProgress(pct, label) {
+            const container = document.getElementById('progressContainer');
+            const fill = document.getElementById('progressFill');
+            const text = document.getElementById('progressText');
+            const labelEl = document.getElementById('progressLabelText');
+
+            container.classList.add('active');
+            if (fill) fill.style.width = pct + '%';
+            if (text) text.textContent = Math.round(pct) + '%';
+            if (labelEl && label) labelEl.textContent = label;
+        }
+
+        function hideProgress() {
+            document.getElementById('progressContainer').classList.remove('active');
+            const fill = document.getElementById('progressFill');
+            if (fill) fill.style.width = '0%';
+        }
+
+        // ===== Auth Operations =====
+        let _authRunning = false;
+        let _currentAction = null;
+
+        function finishAuth(success, message, action) {
+            _authRunning = false;
+            _currentAction = null;
+            stopParticles();
+
+            document.getElementById('authBtn').textContent = '开始认证';
+            document.getElementById('authBtn').onclick = startAuth;
+            document.getElementById('authBtn').disabled = true;
+            document.getElementById('restoreBtn').textContent = '恢复网络';
+            document.getElementById('restoreBtn').onclick = startRestore;
+            document.getElementById('restoreBtn').disabled = true;
+            document.getElementById('cancelBtn').style.display = 'none';
+
+            const isCancelled = (message === '已取消');
+            if (success) {
+                if (action === 'restore') {
+                    setStatus('normal', '恢复成功', message, 'check');
+                } else {
+                    setStatus('success', '认证成功', message, 'check');
+                }
+                showProgress(100, '完成');
+            } else if (isCancelled) {
+                setStatus('idle', '已取消', '操作已取消', 'wifi');
+                showProgress(100, '已取消');
+            } else {
+                setStatus('error', action === 'restore' ? '恢复失败' : '认证失败', message, 'cross');
+                showProgress(100, '失败');
+            }
+
+            setTimeout(() => {
+                if (_authRunning) return;
+                window.pywebview.api.check_network_status().then(s => {
+                    if (!_authRunning) updateStatusFromCheck(s);
+                }).catch(() => {
+                    document.getElementById('authBtn').disabled = false;
+                    document.getElementById('restoreBtn').disabled = false;
+                });
+            }, 1500);
+        }
+
+        function onAuthProgress(data) {
+            const { step, total, message, status, action } = data;
+
+            if (status === 'success') { finishAuth(true, message, action); return; }
+            if (status === 'error') { finishAuth(false, message, action); return; }
+            if (status === 'cancelled') {
+                if (!_authRunning) return;
+                finishAuth(false, message || '已取消', action);
+                return;
+            }
+
+            const label = action === 'restore' ? '恢复中' : '认证中';
+            setStatus('running', label + '...', message, 'loader');
+            showProgress(Math.round((step / total) * 100), label);
+            startParticles();
+
+            // Auto-auth from backend: show cancel button
+            if (!_authRunning) {
+                _authRunning = true;
+                _currentAction = action || 'auth';
+                document.getElementById('authBtn').disabled = true;
+                document.getElementById('restoreBtn').disabled = true;
+                document.getElementById('cancelBtn').style.display = '';
+            }
+        }
+
+        async function startAuth() {
+            if (_authRunning) { await cancelOperation(); return; }
+            _authRunning = true;
+            _currentAction = 'auth';
+            document.getElementById('authBtn').disabled = true;
+            document.getElementById('restoreBtn').disabled = true;
+            document.getElementById('cancelBtn').style.display = '';
+
+            setStatus('running', '认证中...', '正在准备...', 'loader');
+            showProgress(0, '认证中');
+            startParticles();
+
+            try { await window.pywebview.api.test_auth(); }
+            catch (e) { finishAuth(false, e.message); }
+        }
+
+        async function startRestore() {
+            if (_authRunning) { await cancelOperation(); return; }
+            _authRunning = true;
+            _currentAction = 'restore';
+            document.getElementById('authBtn').disabled = true;
+            document.getElementById('restoreBtn').disabled = true;
+            document.getElementById('cancelBtn').style.display = '';
+
+            setStatus('running', '恢复中...', '正在恢复正常网络模式...', 'loader');
+            showProgress(0, '恢复中');
+            startParticles();
+
+            try { await window.pywebview.api.restore_network(); }
+            catch (e) { finishAuth(false, e.message); }
+        }
+
+        async function cancelOperation() {
+            try { await window.pywebview.api.cancel_operation(); }
+            catch (e) { console.error('cancel failed:', e); }
+            finishAuth(false, '已取消', _currentAction);
+        }
+
+        // ===== Particle Animation =====
+        const canvas = document.getElementById('particleCanvas');
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        let animRunning = false;
+
+        class Particle {
+            constructor() { this.reset(); }
+            reset() {
+                this.angle = Math.random() * Math.PI * 2;
+                this.radius = 60 + Math.random() * 50;
+                this.speed = 0.005 + Math.random() * 0.01;
+                this.size = 0.5 + Math.random() * 1.5;
+                this.opacity = 0.1 + Math.random() * 0.4;
+                this.cx = 150;
+                this.cy = 150;
+            }
+            update() { this.angle += this.speed; }
+            draw(ctx) {
+                const x = this.cx + Math.cos(this.angle) * this.radius;
+                const y = this.cy + Math.sin(this.angle) * this.radius;
+                ctx.beginPath();
+                ctx.arc(x, y, this.size, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(246, 131, 32, ${this.opacity})`;
+                ctx.fill();
+            }
+        }
+
+        function initParticles() {
+            particles = [];
+            for (let i = 0; i < 30; i++) particles.push(new Particle());
+        }
+
+        function animateParticles() {
+            if (!animRunning) return;
+            ctx.clearRect(0, 0, 300, 300);
+            particles.forEach(p => { p.update(); p.draw(ctx); });
+            requestAnimationFrame(animateParticles);
+        }
+
+        function startParticles() {
+            if (animRunning) return;
+            animRunning = true;
+            initParticles();
+            animateParticles();
+        }
+
+        function stopParticles() {
+            animRunning = false;
+            ctx.clearRect(0, 0, 300, 300);
+        }
+
+        // ===== Settings =====
         let _autoSaveTimer;
         function _doAutoSave() {
             var config = {
@@ -838,6 +1217,7 @@
             };
             window.pywebview.api.auto_save_form(config);
         }
+
         ['wifiName', 'username', 'password', 'warpCliPath'].forEach(function(id) {
             var el = document.getElementById(id);
             if (el) {
@@ -847,52 +1227,30 @@
                 });
             }
         });
-        var _autoAuthEl = document.getElementById('autoAuth');
-        if (_autoAuthEl) {
-            _autoAuthEl.addEventListener('change', function() {
-                clearTimeout(_autoSaveTimer);
-                _doAutoSave();
-            });
-        }
-        var _autoRestoreEl = document.getElementById('autoRestore');
-        if (_autoRestoreEl) {
-            _autoRestoreEl.addEventListener('change', function() {
-                clearTimeout(_autoSaveTimer);
-                _doAutoSave();
-            });
-        }
-        var _autoStartupEl = document.getElementById('autoStartup');
-        if (_autoStartupEl) {
-            _autoStartupEl.addEventListener('change', async function() {
-                const enabled = _autoStartupEl.checked;
-                try {
-                    const result = await window.pywebview.api.set_startup(enabled);
-                    if (!result.success) {
-                        _autoStartupEl.checked = !enabled;
-                        showAlert('提示', result.message, 'warning');
-                    }
-                } catch (e) {
-                    _autoStartupEl.checked = !enabled;
-                    showAlert('错误', '设置失败: ' + e.message, 'error');
-                }
-            });
-        }
-        var _silentStartupEl = document.getElementById('silentStartup');
-        if (_silentStartupEl) {
-            _silentStartupEl.addEventListener('change', async function() {
-                clearTimeout(_autoSaveTimer);
-                _doAutoSave();
-                try {
-                    await window.pywebview.api.refresh_startup_task();
-                } catch (e) {
-                    console.error('refresh_startup_task failed:', e);
-                }
-            });
-        }
-        window.addEventListener('beforeunload', function() {
-            _doAutoSave();
-        });
 
+        document.getElementById('autoAuth')?.addEventListener('change', () => { clearTimeout(_autoSaveTimer); _doAutoSave(); });
+        document.getElementById('autoRestore')?.addEventListener('change', () => { clearTimeout(_autoSaveTimer); _doAutoSave(); });
+        document.getElementById('autoStartup')?.addEventListener('change', async function() {
+            const enabled = this.checked;
+            try {
+                const result = await window.pywebview.api.set_startup(enabled);
+                if (!result.success) {
+                    this.checked = !enabled;
+                    showAlert('提示', result.message, 'warning');
+                }
+            } catch (e) {
+                this.checked = !enabled;
+                showAlert('错误', '设置失败: ' + e.message, 'error');
+            }
+        });
+        document.getElementById('silentStartup')?.addEventListener('change', async function() {
+            clearTimeout(_autoSaveTimer); _doAutoSave();
+            try { await window.pywebview.api.refresh_startup_task(); }
+            catch (e) { console.error('refresh_startup_task failed:', e); }
+        });
+        window.addEventListener('beforeunload', () => _doAutoSave());
+
+        // ===== WiFi Dropdown =====
         const wifiInput = document.getElementById('wifiName');
         const wifiDropdown = document.getElementById('wifiDropdown');
 
@@ -907,20 +1265,14 @@
             const items = wifiDropdown.querySelectorAll('.dropdown-item');
             let hasVisible = false;
             items.forEach(item => {
-                if (item.textContent.toLowerCase().includes(filter)) {
-                    item.style.display = '';
-                    hasVisible = true;
-                } else {
-                    item.style.display = 'none';
-                }
+                item.style.display = item.textContent.toLowerCase().includes(filter) ? '' : 'none';
+                if (item.style.display !== 'none') hasVisible = true;
             });
             wifiDropdown.classList.toggle('active', hasVisible);
         });
 
         document.addEventListener('click', (e) => {
-            if (!e.target.closest('.dropdown')) {
-                wifiDropdown.classList.remove('active');
-            }
+            if (!e.target.closest('.dropdown')) wifiDropdown.classList.remove('active');
         });
 
         let _knownNetworks = [];
@@ -932,11 +1284,11 @@
         function _addWifiItem(ssid) {
             if (_knownNetworks.includes(ssid)) return;
             _knownNetworks.push(ssid);
-            _removeWifiEmpty();
+            const empty = wifiDropdown.querySelector('.dropdown-empty');
+            if (empty) empty.remove();
             const div = document.createElement('div');
             div.className = 'dropdown-item';
             div.textContent = ssid;
-            div.dataset.ssid = ssid.toLowerCase();
             div.onclick = () => {
                 wifiInput.value = ssid;
                 wifiDropdown.classList.remove('active');
@@ -944,31 +1296,14 @@
                 _doAutoSave();
             };
             wifiDropdown.appendChild(div);
-            if (!wifiDropdown.classList.contains('active')) {
-                wifiDropdown.classList.add('active');
-            }
-        }
-        function _removeWifiEmpty() {
-            const empty = wifiDropdown.querySelector('.dropdown-empty');
-            if (empty) empty.remove();
-        }
-        function _showWifiEmpty(msg) {
-            _removeWifiEmpty();
-            const div = document.createElement('div');
-            div.className = 'dropdown-empty';
-            div.textContent = msg;
-            wifiDropdown.appendChild(div);
+            wifiDropdown.classList.add('active');
         }
 
         async function _pollWifi() {
             try {
                 const networks = await window.pywebview.api.poll_wifi();
-                if (networks.length > 0) {
-                    networks.forEach(ssid => _addWifiItem(ssid));
-                }
-            } catch (e) {
-                console.error('WiFi poll error:', e);
-            }
+                networks.forEach(ssid => _addWifiItem(ssid));
+            } catch (e) { console.error('WiFi poll error:', e); }
             _scanPollCount++;
             if (_scanPollCount < _scanMaxPolls) {
                 _scanPollTimer = setTimeout(_pollWifi, _scanInterval);
@@ -978,16 +1313,16 @@
                 btn.textContent = '扫描';
                 btn.style.opacity = '1';
                 if (_knownNetworks.length === 0) {
-                    _showWifiEmpty('未找到WiFi网络');
+                    const div = document.createElement('div');
+                    div.className = 'dropdown-empty';
+                    div.textContent = '未找到WiFi网络';
+                    wifiDropdown.appendChild(div);
                 }
             }
         }
 
         async function refreshWifi() {
-            if (_scanPollTimer) {
-                clearTimeout(_scanPollTimer);
-                _scanPollTimer = null;
-            }
+            if (_scanPollTimer) { clearTimeout(_scanPollTimer); _scanPollTimer = null; }
             const btn = document.getElementById('refreshBtn');
             btn.disabled = true;
             btn.textContent = '扫描中...';
@@ -999,13 +1334,14 @@
 
             try {
                 const firstBatch = await window.pywebview.api.scan_wifi();
-                if (firstBatch.length > 0) {
-                    firstBatch.forEach(ssid => _addWifiItem(ssid));
-                }
+                firstBatch.forEach(ssid => _addWifiItem(ssid));
                 _pollWifi();
             } catch (e) {
                 console.error('Failed to start wifi scan:', e);
-                _showWifiEmpty('扫描失败');
+                const div = document.createElement('div');
+                div.className = 'dropdown-empty';
+                div.textContent = '扫描失败';
+                wifiDropdown.appendChild(div);
                 btn.disabled = false;
                 btn.textContent = '扫描';
                 btn.style.opacity = '1';
@@ -1024,9 +1360,25 @@
             }
         }
 
+        async function browseWarpPath() {
+            try {
+                const path = await window.pywebview.api.browse_folder('选择 warp-cli.exe');
+                if (path) {
+                    document.getElementById('warpCliPath').value = path;
+                    clearTimeout(_autoSaveTimer);
+                    _doAutoSave();
+                }
+            } catch (e) { console.error('browseWarpPath failed:', e); }
+        }
+
+        // ===== Alert =====
         function showAlert(title, message, type) {
-            const icons = { success: SVG_ICONS.check, error: SVG_ICONS.cross, warning: SVG_ICONS.warn };
-            document.getElementById('alertIcon').innerHTML = icons[type] || SVG_ICONS.check;
+            const icons = {
+                success: '<svg viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+                error: '<svg viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+                warning: '<svg viewBox="0 0 24 24" fill="none" stroke="#F68320" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+            };
+            document.getElementById('alertIcon').innerHTML = icons[type] || icons.success;
             document.getElementById('alertTitleText').textContent = title;
             document.getElementById('alertMessage').textContent = message;
             document.getElementById('alertOverlay').classList.add('active');
@@ -1036,298 +1388,21 @@
             document.getElementById('alertOverlay').classList.remove('active');
         }
 
-        async function saveSettings() {
-            const config = {
-                wifi_name: document.getElementById('wifiName').value.trim(),
-                username: document.getElementById('username').value.trim(),
-                password: document.getElementById('password').value,
-                auto_auth: document.getElementById('autoAuth').checked
-            };
+        // ===== Window Controls =====
+        function minimizeWindow() {
             try {
-                const result = await window.pywebview.api.save_config(config);
-                if (result.success) {
-                    showAlert('成功', result.message, 'success');
-                } else {
-                    showAlert('提示', result.message, 'warning');
-                }
+                window.pywebview.api.minimize_window();
             } catch (e) {
-                showAlert('错误', '保存失败: ' + e.message, 'error');
+                console.error('minimizeWindow failed:', e);
             }
         }
 
-        async function testAuth() {
-            const config = {
-                wifi_name: document.getElementById('wifiName').value.trim(),
-                username: document.getElementById('username').value.trim(),
-                password: document.getElementById('password').value,
-                auto_auth: document.getElementById('autoAuth').checked
-            };
-            if (!config.username || !config.password || !config.wifi_name) {
-                showAlert('提示', '请先完整填写配置信息', 'warning');
-                return;
-            }
-            await window.pywebview.api.save_config(config);
-            switchTab('status');
-            document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', i===0));
-            document.querySelectorAll('.tab-content').forEach((c,i) => c.classList.toggle('active', i===0));
-            startAuth();
-        }
-
-        /* ===== Particle Animation ===== */
-        const canvas = document.getElementById('particleCanvas');
-        const ctx = canvas.getContext('2d');
-        let particles = [];
-        let animRunning = false;
-        let particleColor = { r: 246, g: 131, b: 32 };
-
-        class Particle {
-            constructor() {
-                this.reset();
-            }
-            reset() {
-                this.angle = Math.random() * Math.PI * 2;
-                this.radius = 78 + Math.random() * 30;
-                this.speed = 0.008 + Math.random() * 0.012;
-                this.size = 1.5 + Math.random() * 2.5;
-                this.opacity = 0.3 + Math.random() * 0.7;
-                this.cx = 120;
-                this.cy = 120;
-            }
-            update() {
-                this.angle += this.speed;
-            }
-            draw(ctx) {
-                const x = this.cx + Math.cos(this.angle) * this.radius;
-                const y = this.cy + Math.sin(this.angle) * this.radius;
-                ctx.beginPath();
-                ctx.arc(x, y, this.size, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(${particleColor.r}, ${particleColor.g}, ${particleColor.b}, ${this.opacity})`;
-                ctx.fill();
-            }
-        }
-
-        function setParticleColor(r, g, b) {
-            particleColor = { r, g, b };
-        }
-
-        function initParticles() {
-            particles = [];
-            for (let i = 0; i < 24; i++) {
-                particles.push(new Particle());
-            }
-        }
-
-        function animateParticles() {
-            if (!animRunning) return;
-            ctx.clearRect(0, 0, 240, 240);
-            particles.forEach(p => {
-                p.update();
-                p.draw(ctx);
-            });
-            requestAnimationFrame(animateParticles);
-        }
-
-        function startParticleAnim() {
-            if (animRunning) return;
-            animRunning = true;
-            initParticles();
-            animateParticles();
-        }
-
-        function stopParticleAnim() {
-            animRunning = false;
-            ctx.clearRect(0, 0, 240, 240);
-        }
-
-        /* ===== Auth Progress ===== */
-        let _authRunning = false;
-        let _currentAction = null;
-
-        const SVG_ICONS = {
-            wifi: '<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l22 22"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>',
-            check: '<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
-            cross: '<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
-            loader: '<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>',
-            warn: '<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
-        };
-
-        function setOrbState(state, svgKey, text, glowColor) {
-            const orb = document.getElementById('statusOrb');
-            orb.className = 'orb ' + state;
-            document.getElementById('orbIcon').innerHTML = SVG_ICONS[svgKey] || SVG_ICONS.wifi;
-            document.getElementById('orbText').textContent = text;
-            const glow = document.getElementById('orbGlow');
-            glow.className = 'orb-glow';
-            if (glowColor === 'green') {
-                glow.classList.add('active', 'green-glow');
-            } else if (glowColor === 'orange') {
-                glow.classList.add('active', 'orange-glow');
-            }
-        }
-
-        function showProgress(pct, statusClass) {
-            const container = document.getElementById('progressBarContainer');
-            const fill = document.getElementById('progressBarFill');
-            container.style.display = 'block';
-            fill.style.width = pct + '%';
-            fill.className = 'progress-bar-fill' + (statusClass ? ' ' + statusClass : '');
-        }
-
-        function hideProgress() {
-            document.getElementById('progressBarContainer').style.display = 'none';
-            document.getElementById('progressBarFill').style.width = '0%';
-            document.getElementById('progressBarFill').className = 'progress-bar-fill';
-        }
-
-        function finishAuth(success, message, action) {
-            _authRunning = false;
-            _currentAction = null;
-            stopParticleAnim();
-            document.getElementById('authBtn').textContent = '开始认证';
-            document.getElementById('authBtn').onclick = startAuth;
-            document.getElementById('authBtn').disabled = false;
-            document.getElementById('restoreBtn').textContent = '恢复网络';
-            document.getElementById('restoreBtn').onclick = startRestore;
-            document.getElementById('restoreBtn').disabled = false;
-            document.getElementById('cancelBtn').style.display = 'none';
-
-            var isCancelled = (message === '已取消');
-            if (success) {
-                if (action === 'restore') {
-                    setOrbState('normal', 'check', '正常模式', 'green');
-                    document.getElementById('statusTitle').textContent = '恢复成功';
-                } else {
-                    setOrbState('success', 'check', 'WARP已连接', 'orange');
-                    document.getElementById('statusTitle').textContent = '认证成功';
-                }
-                document.getElementById('statusSubtitle').textContent = message;
-                showProgress(100, 'success');
-                setTimeout(() => {
-                    if (_authRunning) return;
-                    window.pywebview.api.check_network_status().then(s => {
-                        if (_authRunning) return;
-                        updateStatusFromCheck(s);
-                    }).catch(() => {});
-                }, 1500);
-            } else if (isCancelled) {
-                setOrbState('idle', 'wifi-off', '已取消', null);
-                document.getElementById('statusTitle').textContent = '已取消';
-                document.getElementById('statusSubtitle').textContent = '操作已取消';
-                showProgress(100, 'cancelled');
-            } else {
-                setOrbState('error', 'cross', '失败', null);
-                if (action === 'restore') {
-                    document.getElementById('statusTitle').textContent = '恢复失败';
-                } else {
-                    document.getElementById('statusTitle').textContent = '认证失败';
-                }
-                document.getElementById('statusSubtitle').textContent = message;
-                showProgress(100, 'error');
-            }
-        }
-
-        function onAuthProgress(data) {
-            const { step, total, message, status, action } = data;
-
-            if (status === 'success') {
-                finishAuth(true, message, action);
-                return;
-            }
-            if (status === 'error') {
-                finishAuth(false, message, action);
-                return;
-            }
-            if (status === 'cancelled') {
-                if (!_authRunning) return;
-                finishAuth(false, message || '已取消', action);
-                return;
-            }
-
-            if (action === 'restore') {
-                setOrbState('running', 'loader', message.substring(0, 6), 'green');
-                document.getElementById('statusTitle').textContent = '恢复中...';
-                setParticleColor(52, 199, 89);
-            } else {
-                setOrbState('running', 'loader', message.substring(0, 6), 'orange');
-                document.getElementById('statusTitle').textContent = '认证中...';
-                setParticleColor(246, 131, 32);
-            }
-            document.getElementById('statusSubtitle').textContent = message;
-            const pct = Math.round((step / total) * 100);
-            showProgress(pct, '');
-            startParticleAnim();
-        }
-
-        async function startAuth() {
-            if (_authRunning) {
-                await cancelOperation();
-                return;
-            }
-            _authRunning = true;
-            _currentAction = 'auth';
-            document.getElementById('authBtn').disabled = true;
-            document.getElementById('restoreBtn').disabled = true;
-            document.getElementById('cancelBtn').style.display = '';
-
-            setOrbState('running', 'loader', '准备中', 'orange');
-            document.getElementById('statusTitle').textContent = '认证中...';
-            document.getElementById('statusSubtitle').textContent = '正在准备...';
-            showProgress(0, '');
-            setParticleColor(246, 131, 32);
-            startParticleAnim();
-
+        function closeWindow() {
             try {
-                await window.pywebview.api.test_auth();
+                window.pywebview.api.close_window();
             } catch (e) {
-                finishAuth(false, e.message);
+                console.error('closeWindow failed:', e);
             }
-        }
-
-        async function browseWarpPath() {
-            try {
-                const path = await window.pywebview.api.browse_folder('选择 warp-cli.exe');
-                if (path) {
-                    document.getElementById('warpCliPath').value = path;
-                    clearTimeout(_autoSaveTimer);
-                    _doAutoSave();
-                }
-            } catch (e) {
-                console.error('browseWarpPath failed:', e);
-            }
-        }
-
-        async function startRestore() {
-            if (_authRunning) {
-                await cancelOperation();
-                return;
-            }
-            _authRunning = true;
-            _currentAction = 'restore';
-            document.getElementById('authBtn').disabled = true;
-            document.getElementById('restoreBtn').disabled = true;
-            document.getElementById('cancelBtn').style.display = '';
-
-            setOrbState('running', 'loader', '恢复中', 'green');
-            document.getElementById('statusTitle').textContent = '恢复网络...';
-            document.getElementById('statusSubtitle').textContent = '正在恢复正常网络模式...';
-            showProgress(0, '');
-            setParticleColor(52, 199, 89);
-            startParticleAnim();
-
-            try {
-                await window.pywebview.api.restore_network();
-            } catch (e) {
-                finishAuth(false, e.message);
-            }
-        }
-
-        async function cancelOperation() {
-            try {
-                await window.pywebview.api.cancel_operation();
-            } catch (e) {
-                console.error('cancel failed:', e);
-            }
-            finishAuth(false, '已取消', _currentAction);
         }
     </script>
 </body>

@@ -1435,6 +1435,22 @@ class ApiBridge:
     def load_config(self):
         return load_config()
 
+    def minimize_window(self):
+        try:
+            if _tray_app_instance and _tray_app_instance.settings_window:
+                _tray_app_instance.settings_window.minimize()
+                logger.info("Window minimized via title bar button")
+        except Exception as e:
+            logger.error(f"minimize_window failed: {e}")
+
+    def close_window(self):
+        try:
+            if _tray_app_instance and _tray_app_instance.settings_window:
+                _tray_app_instance.settings_window.hide()
+                logger.info("Window hidden via title bar button")
+        except Exception as e:
+            logger.error(f"close_window failed: {e}")
+
     def scan_wifi(self):
         return scan_wifi_networks()
 
@@ -2003,19 +2019,21 @@ class TrayApp:
             wy = (user32.GetSystemMetrics(1) - TrayApp.WIN_H) // 2
 
         try:
+            html_url = f'file:///{html_file.replace(chr(92), "/")}'
             self.settings_window = webview.create_window(
                 'CampusAuth',
-                url=f'file:///{html_file.replace(chr(92), "/")}',
+                url=html_url,
                 js_api=self.api,
                 width=TrayApp.WIN_W,
                 height=TrayApp.WIN_H,
                 x=wx,
                 y=wy,
                 resizable=False,
-                background_color='#FFFFFF',
-                easy_drag=True
+                background_color='#0D0D0D',
+                easy_drag=True,
+                frameless=True
             )
-            logger.info(f"Window created at ({wx}, {wy})")
+            logger.info(f"Window created at ({wx}, {wy}), url={html_url}")
         except Exception as e:
             logger.error(f"run: create_window failed: {e}\n{traceback.format_exc()}")
             return

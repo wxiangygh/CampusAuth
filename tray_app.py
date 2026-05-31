@@ -591,18 +591,24 @@ def wait_for_network_ready(portal_ip, portal_port='801', max_retries=5):
 
 def _wait_for_ipv6_ready(max_retries=8):
     logger.info("Waiting for IPv6 to be ready...")
+    ipv6_test_targets = [
+        ('2606:4700:d0::a29f:c001', 443),
+        ('2606:4700:4700::1111', 443),
+        ('2606:4700:103::1', 443),
+    ]
     for i in range(max_retries):
         if _check_cancel(): return False
-        try:
-            import socket
-            sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-            sock.settimeout(3)
-            sock.connect(('2606:4700:103::1', 443))
-            sock.close()
-            logger.info(f"IPv6 ready ({i+1}/{max_retries})")
-            return True
-        except Exception as e:
-            logger.debug(f"IPv6 not ready ({i+1}/{max_retries}): {e}")
+        for addr, port in ipv6_test_targets:
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                sock.settimeout(3)
+                sock.connect((addr, port))
+                sock.close()
+                logger.info(f"IPv6 ready via {addr} ({i+1}/{max_retries})")
+                return True
+            except Exception as e:
+                logger.debug(f"IPv6 not ready via {addr} ({i+1}/{max_retries}): {e}")
         if not _interruptible_sleep(2): return False
     logger.warning(f"IPv6 not ready after {max_retries} retries")
     return False
@@ -840,6 +846,9 @@ def _connect_warp_inner(warp_cli):
                 logger.info(f"WARP fell back to disconnected state ({i+1}/10), breaking inner loop")
                 break
             if 'Unable' in output:
+                if 'No Network' in output:
+                    logger.info(f"WARP reports No Network ({i+1}/10), waiting for IPv6...")
+                    continue
                 logger.info(f"WARP unable to connect ({i+1}/10), breaking inner loop")
                 break
             if i % 3 == 2:
@@ -1241,17 +1250,24 @@ def run_auth_task():
             connect_warp()
             return False, msg
     if _check_cancel(): return False, "已取消"
-    _push_auth_progress(4, 5, '禁用IPv4...')
-    logger.info("[4/5] Disabling IPv4...")
+    _push_auth_progress(4, 5, '设置IPv6 DNS...')
+    logger.info("[4/5] Setting IPv6 DNS before disabling IPv4...")
+    run_command(f'netsh interface ipv6 set dnsservers "{interface_name}" static 2606:4700:4700::1111 primary')
+    run_command(f'netsh interface ipv6 add dnsservers "{interface_name}" 2606:4700:4700::1001 index=2')
+    logger.info("IPv6 DNS set to Cloudflare (2606:4700:4700::1111, 2606:4700:4700::1001)")
+    if _check_cancel(): return False, "已取消"
+    _push_auth_progress(5, 5, '禁用IPv4并连接WARP...')
+    logger.info("[5/5] Disabling IPv4 and connecting WARP...")
     if not disable_ipv4(interface_name):
-        _push_auth_progress(4, 5, '禁用IPv4失败', 'error')
+        _push_auth_progress(5, 5, '禁用IPv4失败', 'error')
         return False, "禁用IPv4失败"
     if _check_cancel(): return False, "已取消"
-    _push_auth_progress(5, 5, '连接WARP...')
-    logger.info("[5/5] Connecting WARP...")
     if warp_service_was_running:
         logger.info("Re-enabling WARP virtual adapter...")
         run_command('netsh interface set interface "CloudflareWARP" enable')
+    if not _wait_for_ipv6_ready(max_retries=5):
+        _push_auth_progress(5, 5, 'IPv6网络不可用', 'error')
+        return False, "IPv6网络不可用，无法连接WARP"
     run_command('sc config "CloudflareWARP" start= auto')
     code, svc_output, _ = run_command('sc query "CloudflareWARP"')
     if 'RUNNING' not in svc_output:
@@ -1291,6 +1307,7 @@ def run_restore_task():
 
     def _enable_ipv4_thread():
         ipv4_result[0] = enable_ipv4(interface_name)
+        run_command(f'netsh interface ipv6 set dnsservers "{interface_name}" dhcp')
 
     t_warp = threading.Thread(target=_disconnect_warp_thread, daemon=True)
     t_ipv4 = threading.Thread(target=_enable_ipv4_thread, daemon=True)
@@ -1818,10 +1835,11 @@ def on_exit(icon, item):
     global _tray_app_instance
     if _tray_app_instance:
         _tray_app_instance._should_exit = True
+        if not _tray_app_instance._webview_started:
+            _tray_app_instance._webview_start_event.set()
     cleanup_wifi_event()
     icon.stop()
     if _tray_app_instance and _tray_app_instance.settings_window:
-        # 先保存位置，再销毁窗口
         _tray_app_instance.save_window_position()
         _tray_app_instance.settings_window.destroy()
     global TRAY_MUTEX
@@ -1859,6 +1877,9 @@ class TrayApp:
         self.settings_window = None
         self._should_exit = False
         self._silent = silent
+        self._webview_started = False
+        self._webview_start_event = threading.Event()
+        self._init_done = False
 
     def create_tray(self):
         self.icon = pystray.Icon('wifi_auto_auth')
@@ -1964,15 +1985,17 @@ class TrayApp:
 
     def show_settings(self, tab=None):
         """显示应用窗口。tab参数保留但不再使用，窗口保持上次的状态。"""
-        logger.info(f"[show_settings] Called, window={self.settings_window}, icon={self.icon}")
+        logger.info(f"[show_settings] Called, webview_started={self._webview_started}, window={self.settings_window}")
+        if not self._webview_started:
+            logger.info("[show_settings] WebView2 not started yet, triggering lazy init...")
+            self._webview_start_event.set()
+            return
         if self.settings_window:
             try:
-                # 使用 pywebview 的 show + restore
                 self.settings_window.show()
                 self.settings_window.restore()
                 logger.info("[show_settings] Window shown via pywebview")
 
-                # 使用 Win32 API 确保窗口可见并置顶
                 hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
                 if hwnd:
                     logger.info(f"[show_settings] Found window hwnd={hwnd}")
@@ -1982,7 +2005,6 @@ class TrayApp:
                     SWP_NOMOVE = 0x0002
                     SWP_NOSIZE = 0x0001
                     SWP_SHOWWINDOW = 0x0040
-                    # 先设为 TOPMOST 再取消，确保窗口显示在最前方
                     ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
                     ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
                     ctypes.windll.user32.SetForegroundWindow(hwnd)
@@ -2032,6 +2054,47 @@ class TrayApp:
         tray_thread = threading.Thread(target=self.icon.run, daemon=True)
         tray_thread.start()
 
+        def delayed_init():
+            cfg = load_config()
+            
+            if cfg.get('auto_startup'):
+                if is_admin():
+                    if not check_startup_status():
+                        logger.info("auto_startup=True but task missing, re-registering")
+                        setup_startup_task()
+                else:
+                    logger.info("auto_startup=True but not admin, cannot verify/register startup task")
+            else:
+                if check_startup_status():
+                    logger.info("auto_startup=False but task exists, removing")
+                    remove_startup_task()
+
+            if cfg.get('auto_auth') or cfg.get('auto_restore'):
+                start_wifi_event_monitor()
+                if is_admin():
+                    if register_wifi_event_task():
+                        logger.info("WiFi event task registered on startup")
+                    else:
+                        logger.warning("Failed to register WiFi event task on startup")
+                else:
+                    logger.info("Not admin, skipping WiFi event task registration")
+                if cfg.get('auto_auth'):
+                    check_startup_wifi_and_auth()
+                else:
+                    _update_tray_status()
+            else:
+                _update_tray_status()
+            self._init_done = True
+
+        if self._silent:
+            logger.info("Silent mode: starting delayed_init first, WebView2 will load on demand")
+            init_thread = threading.Thread(target=delayed_init, daemon=True)
+            init_thread.start()
+
+            self._webview_start_event.wait()
+
+            logger.info("Silent mode: WebView2 init triggered, starting now...")
+
         html_file = get_resource_path('settings.html')
         logger.debug(f"run: html_file={html_file}")
         
@@ -2064,7 +2127,8 @@ class TrayApp:
                 resizable=False,
                 background_color='#0D0D0D',
                 easy_drag=True,
-                frameless=True
+                frameless=True,
+                hidden=self._silent
             )
             logger.info(f"Window created at ({wx}, {wy}), url={html_url}")
         except Exception as e:
@@ -2073,7 +2137,6 @@ class TrayApp:
         
         def on_closing():
             logger.info("[on_closing] Window closing event triggered")
-            # 始终保存窗口位置（无论是退出还是隐藏到托盘）
             self.save_window_position()
             if self._should_exit:
                 logger.info("[on_closing] Real exit requested, allowing close")
@@ -2132,18 +2195,7 @@ class TrayApp:
 
         self.settings_window.events.shown += set_window_icon
 
-        if self._silent:
-            def hide_on_shown():
-                try:
-                    time.sleep(0.3)
-                    if self.settings_window:
-                        self.settings_window.hide()
-                        logger.info("Silent mode: window hidden on startup")
-                except Exception as e:
-                    logger.error(f"Silent mode hide failed: {e}")
-            threading.Thread(target=hide_on_shown, daemon=True).start()
-        else:
-            # 非静默启动，确保窗口显示
+        if not self._silent:
             def ensure_visible():
                 try:
                     time.sleep(0.5)
@@ -2155,41 +2207,9 @@ class TrayApp:
                     logger.error(f"Non-silent mode ensure visible failed: {e}")
             threading.Thread(target=ensure_visible, daemon=True).start()
 
-        # 在 webview 启动后，后台执行耗时的初始化任务
-        def delayed_init():
-            time.sleep(0.5)
-            cfg = load_config()
-            
-            if cfg.get('auto_startup'):
-                if is_admin():
-                    if not check_startup_status():
-                        logger.info("auto_startup=True but task missing, re-registering")
-                        setup_startup_task()
-                else:
-                    logger.info("auto_startup=True but not admin, cannot verify/register startup task")
-            else:
-                if check_startup_status():
-                    logger.info("auto_startup=False but task exists, removing")
-                    remove_startup_task()
+            threading.Thread(target=delayed_init, daemon=True).start()
 
-            if cfg.get('auto_auth') or cfg.get('auto_restore'):
-                start_wifi_event_monitor()
-                if is_admin():
-                    if register_wifi_event_task():
-                        logger.info("WiFi event task registered on startup")
-                    else:
-                        logger.warning("Failed to register WiFi event task on startup")
-                else:
-                    logger.info("Not admin, skipping WiFi event task registration")
-                if cfg.get('auto_auth'):
-                    check_startup_wifi_and_auth()
-                else:
-                    _update_tray_status()
-            else:
-                _update_tray_status()
-        
-        threading.Thread(target=delayed_init, daemon=True).start()
-
+        self._webview_started = True
         webview.start(debug=False)
         
         if self.icon:

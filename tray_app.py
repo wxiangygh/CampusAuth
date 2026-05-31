@@ -721,6 +721,26 @@ def portal_logout():
 
 _conf_json_backup = None
 
+def _set_warp_masque_mode(warp_cli, enable):
+    if not warp_cli:
+        logger.warning("warp-cli not found, cannot set MASQUE mode")
+        return False
+    try:
+        if enable:
+            logger.info("Setting WARP tunnel protocol to MASQUE with h3-with-h2-fallback...")
+            run_command([warp_cli, 'tunnel', 'protocol', 'set', 'MASQUE'], shell=False)
+            run_command([warp_cli, 'tunnel', 'masque-options', 'set', 'h3-with-h2-fallback'], shell=False)
+            logger.info("MASQUE h3-with-h2-fallback mode set (QUIC/UDP:443 with TCP/443 fallback)")
+        else:
+            logger.info("Resetting WARP tunnel protocol to default...")
+            run_command([warp_cli, 'tunnel', 'protocol', 'reset'], shell=False)
+            run_command([warp_cli, 'tunnel', 'masque-options', 'reset'], shell=False)
+            logger.info("WARP tunnel protocol reset to default")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to set MASQUE mode: {e}")
+        return False
+
 def _set_warp_endpoint_ipv6(enable):
     global _conf_json_backup
     conf_path = os.path.join(os.environ.get('ProgramData', r'C:\ProgramData'),
@@ -757,13 +777,19 @@ def _set_warp_endpoint_ipv6(enable):
         logger.error(f"Failed to update WARP conf.json: {e}")
         return False
 
-def connect_warp():
+def connect_warp(force_restart=False):
     logger.info("Connecting to WARP...")
     warp_cli = get_warp_cli()
     if not warp_cli:
         logger.error("warp-cli not found")
         return False
     run_command('sc config "CloudflareWARP" start= auto')
+    if force_restart:
+        logger.info("Force restarting WARP service to apply config changes...")
+        run_command('net stop "CloudflareWARP"')
+        time.sleep(2)
+        run_command('net start "CloudflareWARP"')
+        time.sleep(3)
     return _connect_warp_inner(warp_cli)
 
 def _connect_warp_inner(warp_cli):
@@ -1226,12 +1252,19 @@ def run_auth_task():
     if warp_service_was_running:
         logger.info("Re-enabling WARP virtual adapter...")
         run_command('netsh interface set interface "CloudflareWARP" enable')
-    _set_warp_endpoint_ipv6(True)
+    run_command('sc config "CloudflareWARP" start= auto')
+    code, svc_output, _ = run_command('sc query "CloudflareWARP"')
+    if 'RUNNING' not in svc_output:
+        logger.info("Starting WARP service for MASQUE config...")
+        run_command('net start "CloudflareWARP"')
+        time.sleep(3)
+    warp_cli = get_warp_cli()
+    _set_warp_masque_mode(warp_cli, True)
     if not connect_warp():
-        _set_warp_endpoint_ipv6(False)
+        _set_warp_masque_mode(warp_cli, False)
         _push_auth_progress(5, 5, 'WARP连接超时，请手动检查', 'error')
         return False, "WARP连接超时，请手动检查"
-    _set_warp_endpoint_ipv6(False)
+    _set_warp_masque_mode(warp_cli, False)
     logger.info("=" * 60)
     logger.info("Authentication completed successfully")
     logger.info("=" * 60)

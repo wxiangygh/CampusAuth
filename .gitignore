@@ -15,10 +15,8 @@ warp_exclusion_config.json
 p.txt
 test_register_result.txt
 
-# 旧版/未使用脚本
+# 旧版脚本
 auto_wifi_login.py
-warp_exclusion.py
-warp_exclusion.html
 
 # 辅助脚本（非核心）
 build.bat

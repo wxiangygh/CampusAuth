@@ -16,6 +16,7 @@ from ctypes import wintypes
 import pystray
 from PIL import Image, ImageDraw
 import webview
+from warp_exclusion import get_exclusion_manager, DnsMonitor
 
 def get_resource_path(relative_path):
     """获取资源文件路径（支持开发环境和PyInstaller打包）"""
@@ -1764,6 +1765,139 @@ class ApiBridge:
             return {'success': False, 'message': '需要管理员权限'}
         return {'success': True, 'message': '无需更新'}
 
+    # ------------------------------------------------------------------
+    # WARP 排除管理 API（供 warp_exclusion.html 前端调用）
+    # ------------------------------------------------------------------
+    def _get_mgr(self):
+        """获取 ExclusionManager 单例"""
+        return get_exclusion_manager()
+
+    def get_exclusion_config(self):
+        return self._get_mgr().get_config()
+
+    def add_domain(self, domain, route='ipv6'):
+        ok, msg, info = self._get_mgr().add_domain(domain, route=route)
+        return {'success': ok, 'message': msg, 'info': info}
+
+    def remove_domain(self, domain):
+        ok, msg = self._get_mgr().remove_domain(domain)
+        return {'success': ok, 'message': msg}
+
+    def toggle_domain(self, domain, enabled):
+        ok, msg = self._get_mgr().toggle_domain(domain, enabled)
+        return {'success': ok, 'message': msg}
+
+    def set_domain_route(self, domain, route):
+        ok, msg = self._get_mgr().set_domain_route(domain, route)
+        return {'success': ok, 'message': msg}
+
+    def add_ip_range(self, cidr, route='ipv4'):
+        ok, msg, info = self._get_mgr().add_ip_range(cidr, route=route)
+        return {'success': ok, 'message': msg, 'info': info}
+
+    def remove_ip_range(self, cidr):
+        ok, msg = self._get_mgr().remove_ip_range(cidr)
+        return {'success': ok, 'message': msg}
+
+    def toggle_ip_range(self, cidr, enabled):
+        ok, msg = self._get_mgr().toggle_ip_range(cidr, enabled)
+        return {'success': ok, 'message': msg}
+
+    def set_ip_range_route(self, cidr, route):
+        ok, msg = self._get_mgr().set_ip_range_route(cidr, route)
+        return {'success': ok, 'message': msg}
+
+    def start_learning(self):
+        ok, msg = self._get_mgr().dns_monitor.start_learning()
+        return {'success': ok, 'message': msg}
+
+    def stop_learning(self):
+        ok, msg = self._get_mgr().dns_monitor.stop_learning()
+        return {'success': ok, 'message': msg}
+
+    def get_learned_domains(self):
+        return self._get_mgr().dns_monitor.get_learned_domains()
+
+    def apply_to_warp(self, domain=None):
+        ok, msg, details = self._get_mgr().apply_to_warp(domain)
+        return {'success': ok, 'message': msg, 'details': details}
+
+    def sync_from_warp(self):
+        ok, msg, details = self._get_mgr().sync_from_warp()
+        return {'success': ok, 'message': msg, 'details': details}
+
+    def get_warp_ranges(self):
+        return self._get_mgr().get_warp_ranges()
+
+    def get_cli_ip_ranges(self):
+        """获取 CLI 添加的 IP 规则，区分使用中和残留"""
+        from warp_exclusion import warp_list_ip_ranges, load_exclusion_config, _resolve_ipv6_prefixes
+        cli_ranges, _ = warp_list_ip_ranges()
+        cfg = load_exclusion_config()
+        # 收集域名规则自动生成的 IPv6 CIDR
+        active_ipv6 = set()
+        for entry in cfg.get('domains', []):
+            if entry.get('enabled', True) and entry.get('route', 'ipv6') == 'ipv6':
+                prefixes = _resolve_ipv6_prefixes(entry['domain'])
+                active_ipv6.update(prefixes)
+        # 收集 IP 范围管理中启用的 CIDR
+        active_ip_ranges = set()
+        for entry in cfg.get('ip_ranges', []):
+            if entry.get('enabled', True):
+                active_ip_ranges.add(entry['cidr'])
+        # 分类：使用中 vs 残留
+        active = [r for r in cli_ranges if r in active_ipv6 or r in active_ip_ranges]
+        legacy = [r for r in cli_ranges if r not in active_ipv6 and r not in active_ip_ranges]
+        return {'active_ipv6': sorted(active), 'legacy': sorted(legacy)}
+
+    def cleanup_legacy_config(self):
+        from warp_exclusion import warp_cleanup_cli_ip_ranges
+        ok, msg, details = warp_cleanup_cli_ip_ranges()
+        return {'success': ok, 'message': msg, 'details': details}
+
+    def add_dns_fallback(self, domain):
+        ok, msg, info = self._get_mgr().add_dns_fallback(domain)
+        return {'success': ok, 'message': msg, 'info': info}
+
+    def remove_dns_fallback(self, domain):
+        ok, msg = self._get_mgr().remove_dns_fallback(domain)
+        return {'success': ok, 'message': msg}
+
+    def toggle_dns_fallback(self, domain, enabled):
+        ok, msg = self._get_mgr().toggle_dns_fallback(domain, enabled)
+        return {'success': ok, 'message': msg}
+
+    def apply_dns_fallback_to_warp(self):
+        ok, msg, details = self._get_mgr().apply_dns_fallback_to_warp()
+        return {'success': ok, 'message': msg, 'details': details}
+
+    def get_dns_fallback_list(self):
+        return self._get_mgr().get_dns_fallback_list()
+
+    def is_ipv4_enabled(self):
+        return self._get_mgr().is_ipv4_enabled()
+
+    def set_ipv4_enabled(self, enabled):
+        ok, msg = self._get_mgr().set_ipv4_enabled(enabled)
+        return {'success': ok, 'message': msg}
+
+    def get_auto_enable_ipv4(self):
+        cfg = self._get_mgr().get_config()
+        return cfg.get('auto_enable_ipv4', True)
+
+    def set_auto_enable_ipv4(self, enabled):
+        from warp_exclusion import load_exclusion_config, save_exclusion_config
+        cfg = load_exclusion_config()
+        cfg['auto_enable_ipv4'] = enabled
+        save_exclusion_config(cfg)
+        return {'success': True, 'message': '已更新'}
+
+    def close_exclusion_window(self):
+        """关闭 WARP 排除管理窗口"""
+        if _tray_app_instance and _tray_app_instance._exclusion_window:
+            _tray_app_instance._exclusion_window.hide()
+            _tray_app_instance._exclusion_window = None
+
 icon_instance = None
 _tray_app_instance = None
 
@@ -1875,6 +2009,7 @@ class TrayApp:
         self.icon = None
         self.api = ApiBridge()
         self.settings_window = None
+        self._exclusion_window = None
         self._should_exit = False
         self._silent = silent
         self._webview_started = False
@@ -1892,6 +2027,7 @@ class TrayApp:
             pystray.MenuItem('手动认证', on_auth),
             pystray.MenuItem('恢复正常模式', on_restore),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem('WARP排除管理', lambda i, item: self.show_exclusion()),
             pystray.MenuItem('打开设置', lambda i, item: self.show_settings()),
             pystray.Menu.SEPARATOR,
         ]
@@ -1967,6 +2103,7 @@ class TrayApp:
                 pystray.MenuItem('手动认证', on_auth),
                 pystray.MenuItem('恢复正常模式', on_restore),
                 pystray.Menu.SEPARATOR,
+                pystray.MenuItem('WARP排除管理', lambda i, item: self.show_exclusion()),
                 pystray.MenuItem('打开设置', lambda i, item: self.show_settings('settings')),
                 pystray.Menu.SEPARATOR,
             ]
@@ -1982,6 +2119,59 @@ class TrayApp:
             logger.debug(f"Tray menu refreshed, startup={'enabled' if startup_enabled else 'disabled'}")
         except Exception as e:
             logger.error(f"_refresh_tray_menu failed: {e}")
+
+    def show_exclusion(self):
+        """显示 WARP 排除管理窗口"""
+        logger.info("[show_exclusion] Called")
+        if self._exclusion_window:
+            try:
+                self._exclusion_window.show()
+                self._exclusion_window.restore()
+                hwnd = ctypes.windll.user32.FindWindowW(None, 'WARP排除管理')
+                if hwnd:
+                    SW_RESTORE = 9
+                    HWND_TOPMOST = -1
+                    HWND_NOTOPMOST = -2
+                    SWP_NOMOVE = 0x0002
+                    SWP_NOSIZE = 0x0001
+                    SWP_SHOWWINDOW = 0x0040
+                    ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
+                logger.info("[show_exclusion] Existing window shown")
+                return
+            except Exception as e:
+                logger.error(f"[show_exclusion] Show existing window failed: {e}")
+                self._exclusion_window = None
+
+        # 创建新的排除管理窗口
+        html_file = get_resource_path('warp_exclusion.html')
+        html_url = f'file:///{html_file.replace(chr(92), "/")}'
+        try:
+            user32 = ctypes.windll.user32
+            screen_w = user32.GetSystemMetrics(0)
+            screen_h = user32.GetSystemMetrics(1)
+            ex_w, ex_h = 520, 700
+            ex_x = (screen_w - ex_w) // 2
+            ex_y = (screen_h - ex_h) // 2
+
+            self._exclusion_window = webview.create_window(
+                'WARP排除管理',
+                url=html_url,
+                js_api=self.api,
+                width=ex_w,
+                height=ex_h,
+                x=ex_x,
+                y=ex_y,
+                resizable=True,
+                background_color='#0D0D0D',
+                easy_drag=True,
+                frameless=True,
+            )
+            logger.info(f"[show_exclusion] Window created, url={html_url}")
+        except Exception as e:
+            logger.error(f"[show_exclusion] create_window failed: {e}\n{traceback.format_exc()}")
 
     def show_settings(self, tab=None):
         """显示应用窗口。tab参数保留但不再使用，窗口保持上次的状态。"""

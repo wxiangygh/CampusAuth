@@ -15,6 +15,39 @@ warp_exclusion_config.json
 p.txt
 test_register_result.txt
 
+# 旧版/未使用脚本
+auto_wifi_login.py
+warp_exclusion.py
+warp_exclusion.html
+
+# 辅助脚本（非核心）
+build.bat
+cleanup.bat
+run.bat
+run.sh
+start_tray.bat
+remove_tasks.bat
+restore_normal.bat
+test_hook.bat
+test_netsh.bat
+
+# 测试文件
+test_register.py
+test_warp_check.py
+test.ico
+
+# 模板/文档
+config.py.example
+build.md
+修复WiFi连接触发Bug.md
+
+# 备份文件
+CampusAuth_backup.exe
+CampusAuth_backup1.exe
+CampusAuth_new.spec
+register_test_hook.ps1
+query
+
 # 旧 spec 文件
 WiFiAutoAuth.spec
 校园网助手.spec

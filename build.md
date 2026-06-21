@@ -1,1 +1,0 @@
-pyinstaller -w -F --name CampusAuth tray_app.py --add-data "settings.html;." --add-data "app.ico;."

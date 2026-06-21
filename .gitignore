@@ -1,0 +1,30 @@
+# 构建产物
+build/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+
+# 敏感信息（含账号密码）
+config.py
+tray_config.json
+warp_exclusion_config.json
+
+# 临时文件
+*.log
+p.txt
+test_register_result.txt
+
+# 旧 spec 文件
+WiFiAutoAuth.spec
+校园网助手.spec
+
+# IDE
+.trae/
+.vscode/
+.idea/
+
+# 系统文件
+Thumbs.db
+Desktop.ini
+.DS_Store

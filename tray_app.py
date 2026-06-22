@@ -17,6 +17,7 @@ import pystray
 from PIL import Image, ImageDraw
 import webview
 from warp_exclusion import get_exclusion_manager, DnsMonitor
+from traffic_monitor import get_traffic_status
 
 def get_resource_path(relative_path):
     """获取资源文件路径（支持开发环境和PyInstaller打包）"""
@@ -1898,6 +1899,19 @@ class ApiBridge:
             _tray_app_instance._exclusion_window.hide()
             _tray_app_instance._exclusion_window = None
 
+    # ------------------------------------------------------------------
+    # 流量监控 API（供 traffic_monitor.html 前端调用）
+    # ------------------------------------------------------------------
+    def get_traffic_status(self):
+        """获取当前网络流量走向统计和连接详情"""
+        return get_traffic_status()
+
+    def close_traffic_window(self):
+        """关闭流量监控窗口"""
+        if _tray_app_instance and _tray_app_instance._traffic_window:
+            _tray_app_instance._traffic_window.hide()
+            _tray_app_instance._traffic_window = None
+
 icon_instance = None
 _tray_app_instance = None
 
@@ -2010,6 +2024,7 @@ class TrayApp:
         self.api = ApiBridge()
         self.settings_window = None
         self._exclusion_window = None
+        self._traffic_window = None
         self._should_exit = False
         self._silent = silent
         self._webview_started = False
@@ -2028,6 +2043,7 @@ class TrayApp:
             pystray.MenuItem('恢复正常模式', on_restore),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('WARP排除管理', lambda i, item: self.show_exclusion()),
+            pystray.MenuItem('流量监控', lambda i, item: self.show_traffic_monitor()),
             pystray.MenuItem('打开设置', lambda i, item: self.show_settings()),
             pystray.Menu.SEPARATOR,
         ]
@@ -2104,6 +2120,7 @@ class TrayApp:
                 pystray.MenuItem('恢复正常模式', on_restore),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem('WARP排除管理', lambda i, item: self.show_exclusion()),
+                pystray.MenuItem('流量监控', lambda i, item: self.show_traffic_monitor()),
                 pystray.MenuItem('打开设置', lambda i, item: self.show_settings('settings')),
                 pystray.Menu.SEPARATOR,
             ]
@@ -2172,6 +2189,58 @@ class TrayApp:
             logger.info(f"[show_exclusion] Window created, url={html_url}")
         except Exception as e:
             logger.error(f"[show_exclusion] create_window failed: {e}\n{traceback.format_exc()}")
+
+    def show_traffic_monitor(self):
+        """显示流量监控窗口"""
+        logger.info("[show_traffic_monitor] Called")
+        if self._traffic_window:
+            try:
+                self._traffic_window.show()
+                self._traffic_window.restore()
+                hwnd = ctypes.windll.user32.FindWindowW(None, '流量监控')
+                if hwnd:
+                    SW_RESTORE = 9
+                    HWND_TOPMOST = -1
+                    HWND_NOTOPMOST = -2
+                    SWP_NOMOVE = 0x0002
+                    SWP_NOSIZE = 0x0001
+                    SWP_SHOWWINDOW = 0x0040
+                    ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
+                logger.info("[show_traffic_monitor] Existing window shown")
+                return
+            except Exception as e:
+                logger.error(f"[show_traffic_monitor] Show existing window failed: {e}")
+                self._traffic_window = None
+
+        html_file = get_resource_path('traffic_monitor.html')
+        html_url = f'file:///{html_file.replace(chr(92), "/")}'
+        try:
+            user32 = ctypes.windll.user32
+            screen_w = user32.GetSystemMetrics(0)
+            screen_h = user32.GetSystemMetrics(1)
+            mon_w, mon_h = 560, 680
+            mon_x = (screen_w - mon_w) // 2
+            mon_y = (screen_h - mon_h) // 2
+
+            self._traffic_window = webview.create_window(
+                '流量监控',
+                url=html_url,
+                js_api=self.api,
+                width=mon_w,
+                height=mon_h,
+                x=mon_x,
+                y=mon_y,
+                resizable=True,
+                background_color='#0D0D0D',
+                easy_drag=True,
+                frameless=True,
+            )
+            logger.info(f"[show_traffic_monitor] Window created, url={html_url}")
+        except Exception as e:
+            logger.error(f"[show_traffic_monitor] create_window failed: {e}\n{traceback.format_exc()}")
 
     def show_settings(self, tab=None):
         """显示应用窗口。tab参数保留但不再使用，窗口保持上次的状态。"""

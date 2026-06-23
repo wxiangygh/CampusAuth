@@ -708,6 +708,40 @@ def warp_remove_ip_range(cidr):
     return False, f'删除失败: {msg}'
 
 
+def warp_add_ip(ip):
+    """添加单个 IP 排除规则：warp-cli tunnel ip add <ip>
+    用于无域名的连接，直接排除 IP 不走 WARP。
+    """
+    warp_cli = get_warp_cli_path()
+    if not warp_cli:
+        return False, 'warp-cli 未找到'
+    code, output, err = _run_command([warp_cli, 'tunnel', 'ip', 'add', ip], shell=False)
+    if code == 0:
+        logger.info(f'WARP add ip {ip}: success')
+        return True, '添加成功'
+    msg = (output + err).strip()[:200]
+    if 'already' in msg.lower() or '已存在' in msg:
+        return True, '已存在'
+    logger.warning(f'WARP add ip {ip}: failed, {msg}')
+    return False, f'添加失败: {msg}'
+
+
+def warp_remove_ip(ip):
+    """移除单个 IP 排除规则：warp-cli tunnel ip remove <ip>"""
+    warp_cli = get_warp_cli_path()
+    if not warp_cli:
+        return False, 'warp-cli 未找到'
+    code, output, err = _run_command([warp_cli, 'tunnel', 'ip', 'remove', ip], shell=False)
+    if code == 0:
+        logger.info(f'WARP remove ip {ip}: success')
+        return True, '移除成功'
+    msg = (output + err).strip()[:200]
+    if 'not found' in msg.lower() or 'Not found' in msg:
+        return True, '不存在'
+    logger.warning(f'WARP remove ip {ip}: failed, {msg}')
+    return False, f'移除失败: {msg}'
+
+
 def warp_cleanup_cli_ip_ranges():
     """
     清理通过CLI添加的IP排除规则中属于"旧版残留"的部分。

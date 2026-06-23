@@ -411,6 +411,18 @@
 
         window.addEventListener('pywebviewready', init);
         setTimeout(() => { if (window.pywebview && window.pywebview.api && !_initStarted) init(); }, 1000);
+
+        // 窗口隐藏时停止轮询以节省资源，显示时恢复
+        let _wasAutoBeforeHide = false;
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                _wasAutoBeforeHide = !!autoRefreshTimer;
+                stopAutoRefresh();
+            } else {
+                if (_wasAutoBeforeHide) startAutoRefresh();
+                refresh();
+            }
+        });
     </script>
 
     <style>

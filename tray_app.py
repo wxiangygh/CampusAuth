@@ -1813,6 +1813,47 @@ class ApiBridge:
         ok, msg, details = self._get_mgr().check_ipv6_support()
         return {'success': ok, 'message': msg, 'details': details}
 
+    def set_connections_route(self, connections, route):
+        """批量设置连接的路由类型。
+        connections: [{hostname, remote_ip}, ...]
+        route: 'ipv4' | 'ipv6' | 'warp'（warp=不直连，走WARP）
+        有域名的用域名排除，无域名的用 IP 排除。
+        """
+        from warp_exclusion import warp_add_ip, warp_remove_ip
+        mgr = self._get_mgr()
+        results = []
+        for conn in connections:
+            hostname = (conn.get('hostname') or '').strip()
+            remote_ip = (conn.get('remote_ip') or '').strip()
+            if not hostname and not remote_ip:
+                results.append({'hostname': hostname, 'remote_ip': remote_ip,
+                                'success': False, 'message': '无域名和IP'})
+                continue
+            try:
+                if route == 'warp':
+                    # 不直连：移除排除规则，让流量走 WARP
+                    if hostname:
+                        ok, msg = mgr.remove_domain(hostname)
+                    else:
+                        ok, msg = warp_remove_ip(remote_ip)
+                else:
+                    # 直连：添加排除规则
+                    if hostname:
+                        ok, msg, _ = mgr.add_domain(hostname, route=route)
+                    else:
+                        ok, msg = warp_add_ip(remote_ip)
+            except Exception as e:
+                ok, msg = False, str(e)
+            results.append({'hostname': hostname, 'remote_ip': remote_ip,
+                            'success': ok, 'message': msg})
+        success_count = sum(1 for r in results if r['success'])
+        total = len(results)
+        return {
+            'success': success_count == total,
+            'message': f'成功 {success_count}/{total}',
+            'results': results,
+        }
+
     def start_learning(self):
         ok, msg = self._get_mgr().dns_monitor.start_learning()
         return {'success': ok, 'message': msg}
@@ -2216,7 +2257,7 @@ class TrayApp:
                 y=ex_y,
                 resizable=True,
                 background_color='#0D0D0D',
-                easy_drag=True,
+                easy_drag=False,
                 frameless=True,
             )
             logger.info(f"[show_exclusion] Window created, url={html_url}")
@@ -2254,7 +2295,7 @@ class TrayApp:
             user32 = ctypes.windll.user32
             screen_w = user32.GetSystemMetrics(0)
             screen_h = user32.GetSystemMetrics(1)
-            mon_w, mon_h = 560, 680
+            mon_w, mon_h = 640, 760
             mon_x = (screen_w - mon_w) // 2
             mon_y = (screen_h - mon_h) // 2
 
@@ -2268,7 +2309,7 @@ class TrayApp:
                 y=mon_y,
                 resizable=True,
                 background_color='#0D0D0D',
-                easy_drag=True,
+                easy_drag=False,
                 frameless=True,
             )
             logger.info(f"[show_traffic_monitor] Window created, url={html_url}")
@@ -2306,7 +2347,7 @@ class TrayApp:
             user32 = ctypes.windll.user32
             screen_w = user32.GetSystemMetrics(0)
             screen_h = user32.GetSystemMetrics(1)
-            flow_w, flow_h = 720, 640
+            flow_w, flow_h = 960, 820
             flow_x = (screen_w - flow_w) // 2
             flow_y = (screen_h - flow_h) // 2
 
@@ -2320,7 +2361,7 @@ class TrayApp:
                 y=flow_y,
                 resizable=True,
                 background_color='#0D0D0D',
-                easy_drag=True,
+                easy_drag=False,
                 frameless=True,
             )
             logger.info(f"[show_flow_monitor] Window created, url={html_url}")

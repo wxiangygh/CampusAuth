@@ -162,42 +162,258 @@ class DnsMonitor:
 #           强制浏览器走 IPv6 校园网直连。
 # IPv4 路由：走校园网 IPv4 直连。
 
+def _make_dns_resolver():
+    """创建 DNS 解析器，使用国内公共 DNS 绕过 WARP DNS 劫持。
+    WARP 会接管系统 DNS，导致 socket.getaddrinfo 无法获取真实 AAAA 记录。
+    使用 dnspython 直接查询 114.114.114.114 / 223.5.5.5，获取真实记录。
+    返回 (resolver, dns_module) 或 (None, None)
+    """
+    try:
+        import dns.resolver
+        resolver = dns.resolver.Resolver()
+        # 使用国内公共 DNS，避免 WARP DNS 劫持
+        resolver.nameservers = ['114.114.114.114', '223.5.5.5']
+        resolver.timeout = 3
+        resolver.lifetime = 5
+        return resolver, dns
+    except ImportError:
+        logger.warning('dnspython not available, DNS resolution may be inaccurate')
+        return None, None
+
+
 def _resolve_ipv6_prefixes(domain):
     """解析域名的 AAAA 记录，提取 /32 或 /48 前缀（用于 IPv6 CIDR 排除）。
-    返回 CIDR 列表，如 ['2605:340::/32', '2001:ee0:2800::/40']
+    使用 dnspython 直接查询国内 DNS，绕过 WARP DNS 劫持。
+    返回 CIDR 列表，如 ['240e:97d::/32', '240e:97d:10::/48']
     """
     prefixes = set()
+    resolver, dns_mod = _make_dns_resolver()
+    if resolver is None:
+        # 回退到 socket.getaddrinfo（可能不准确）
+        try:
+            results = socket.getaddrinfo(domain, None, socket.AF_INET6)
+            for result in results:
+                ip = result[4][0]
+                parts = ip.split(':')
+                if len(parts) >= 4:
+                    prefixes.add(':'.join(parts[:2]) + '::/32')
+                    prefixes.add(':'.join(parts[:3]) + '::/48')
+        except Exception as e:
+            logger.debug(f'No AAAA records for {domain} (socket fallback): {e}')
+        return list(prefixes)
+
+    # 使用 dnspython 查询 AAAA 记录
     try:
-        results = socket.getaddrinfo(domain, None, socket.AF_INET6)
-        for result in results:
-            # result[4] 是 (ip, port, flow, scopeid)
-            ip = result[4][0]
-            # 提取前缀：取前 4 组（/64）或前 3 组（/48）或前 2 组（/32）
+        answers = resolver.resolve(domain, 'AAAA')
+        for rdata in answers:
+            ip = str(rdata)
             parts = ip.split(':')
-            # 去掉 :: 展开后的部分，取前 4 组作为 /64 前缀
-            # 但为了覆盖更多地址，使用 /32（前 2 组）或 /48（前 3 组）
             if len(parts) >= 4:
-                # 判断是否为常见 CDN 前缀长度
-                # 2605:340:xxxx:: → /32
-                # 2001:ee0:280x:: → /40 (取前3组+第4组前1位)
-                prefix_32 = ':'.join(parts[:2]) + '::/32'
-                prefix_48 = ':'.join(parts[:3]) + '::/48'
-                prefixes.add(prefix_32)
-                prefixes.add(prefix_48)
+                # 提取 /32 和 /48 前缀，覆盖同网段的 CDN IP 轮换
+                prefixes.add(':'.join(parts[:2]) + '::/32')
+                prefixes.add(':'.join(parts[:3]) + '::/48')
+        logger.debug(f'AAAA records for {domain} (dnspython): {[str(r) for r in answers]}')
+    except dns_mod.resolver.NoAnswer:
+        logger.debug(f'No AAAA records for {domain}: server returned no answer')
+    except dns_mod.resolver.NXDOMAIN:
+        logger.debug(f'No AAAA records for {domain}: domain does not exist')
     except Exception as e:
-        logger.debug(f'No AAAA records for {domain}: {e}')
+        logger.debug(f'No AAAA records for {domain}: {type(e).__name__}: {e}')
     return list(prefixes)
 
 
 def _resolve_ipv4_addresses(domain):
-    """解析域名的 A 记录，返回 IPv4 地址列表。"""
+    """解析域名的 A 记录，返回 IPv4 地址列表。
+    使用 dnspython 直接查询国内 DNS，绕过 WARP DNS 劫持。
+    """
     addrs = set()
+    resolver, dns_mod = _make_dns_resolver()
+    if resolver is None:
+        # 回退到 socket.getaddrinfo
+        try:
+            results = socket.getaddrinfo(domain, None, socket.AF_INET)
+            for result in results:
+                addrs.add(result[4][0])
+        except Exception as e:
+            logger.debug(f'No A records for {domain} (socket fallback): {e}')
+        return list(addrs)
+
+    # 使用 dnspython 查询 A 记录
     try:
-        results = socket.getaddrinfo(domain, None, socket.AF_INET)
-        for result in results:
-            addrs.add(result[4][0])
+        answers = resolver.resolve(domain, 'A')
+        for rdata in answers:
+            addrs.add(str(rdata))
+        logger.debug(f'A records for {domain} (dnspython): {list(addrs)}')
+    except dns_mod.resolver.NoAnswer:
+        logger.debug(f'No A records for {domain}: server returned no answer')
+    except dns_mod.resolver.NXDOMAIN:
+        logger.debug(f'No A records for {domain}: domain does not exist')
     except Exception as e:
-        logger.debug(f'No A records for {domain}: {e}')
+        logger.debug(f'No A records for {domain}: {type(e).__name__}: {e}')
+    return list(addrs)
+
+
+# Hosts 文件管理：强制域名解析到 IPv6 地址
+# 原因：WARP DNS fallback 不可靠，Chrome 用系统 DNS (127.0.2.2) 解析时拿不到 AAAA 记录
+# 通过 hosts 文件可以直接指定 IPv6 地址，绕过 WARP DNS
+HOSTS_FILE = r'C:\Windows\System32\drivers\etc\hosts'
+HOSTS_MARKER_BEGIN = '# BEGIN CampusAuth IPv6 route'
+HOSTS_MARKER_END = '# END CampusAuth IPv6 route'
+
+
+def _add_ipv6_hosts_entry(domain, ipv6_addr):
+    """添加 hosts 条目，强制域名解析到 IPv6 地址。
+    需要管理员权限。返回 (success, message)
+    """
+    if not ipv6_addr:
+        return False, '无 IPv6 地址'
+
+    # 读取当前 hosts 文件
+    try:
+        with open(HOSTS_FILE, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+    except Exception as e:
+        logger.error(f'Failed to read hosts file: {e}')
+        return False, f'读取 hosts 失败: {e}'
+
+    # 检查是否已有该域名的条目（在标记区域内）
+    entry_line = f'{ipv6_addr} {domain}'
+    if entry_line in content:
+        logger.info(f'Hosts entry already exists: {entry_line}')
+        return True, 'hosts 条目已存在'
+
+    # 在标记区域内添加条目
+    if HOSTS_MARKER_BEGIN in content:
+        # 在标记区域末尾添加
+        new_content = content.replace(
+            HOSTS_MARKER_END,
+            f'{entry_line}\n{HOSTS_MARKER_END}'
+        )
+    else:
+        # 创建新的标记区域
+        new_content = content.rstrip('\n') + '\n\n' + HOSTS_MARKER_BEGIN + '\n' + entry_line + '\n' + HOSTS_MARKER_END + '\n'
+
+    # 写入临时文件，然后提权复制
+    import tempfile
+    import os
+    tmp_file = os.path.join(tempfile.gettempdir(), f'hosts_{os.getpid()}_{int(time.time())}.txt')
+    try:
+        with open(tmp_file, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+    except Exception as e:
+        logger.error(f'Failed to write temp hosts file: {e}')
+        return False, f'写入临时文件失败: {e}'
+
+    # 提权复制到 hosts 文件
+    code, output, err = _run_elevated_copy(tmp_file, HOSTS_FILE)
+    try:
+        os.remove(tmp_file)
+    except:
+        pass
+
+    if code == 0:
+        logger.info(f'Hosts entry added: {entry_line}')
+        # 清空 DNS 缓存，让新条目立即生效
+        _run_command(['powershell', '-Command', 'Clear-DnsClientCache'], shell=False, timeout=5)
+        return True, 'hosts 条目已添加'
+    else:
+        logger.error(f'Failed to copy hosts file: {err or output}')
+        return False, f'复制 hosts 失败（需要管理员权限）: {err or output}'
+
+
+def _remove_ipv6_hosts_entry(domain):
+    """移除 hosts 文件中指定域名的 IPv6 条目。
+    需要管理员权限。返回 (success, message)
+    """
+    try:
+        with open(HOSTS_FILE, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+    except Exception as e:
+        logger.error(f'Failed to read hosts file: {e}')
+        return False, f'读取 hosts 失败: {e}'
+
+    # 查找并移除该域名的条目
+    lines = content.split('\n')
+    new_lines = []
+    removed = False
+    for line in lines:
+        # 匹配 "IPv6地址 域名" 格式（忽略注释和空行）
+        stripped = line.strip()
+        if stripped and not stripped.startswith('#'):
+            parts = stripped.split()
+            if len(parts) >= 2 and parts[1] == domain:
+                removed = True
+                continue  # 跳过这一行
+        new_lines.append(line)
+
+    if not removed:
+        logger.info(f'No hosts entry found for {domain}')
+        return True, 'hosts 中无该域名条目'
+
+    new_content = '\n'.join(new_lines)
+
+    # 写入临时文件，然后提权复制
+    import tempfile
+    import os
+    tmp_file = os.path.join(tempfile.gettempdir(), f'hosts_{os.getpid()}_{int(time.time())}.txt')
+    try:
+        with open(tmp_file, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+    except Exception as e:
+        return False, f'写入临时文件失败: {e}'
+
+    code, output, err = _run_elevated_copy(tmp_file, HOSTS_FILE)
+    try:
+        os.remove(tmp_file)
+    except:
+        pass
+
+    if code == 0:
+        logger.info(f'Hosts entry removed for {domain}')
+        _run_command(['powershell', '-Command', 'Clear-DnsClientCache'], shell=False, timeout=5)
+        return True, 'hosts 条目已移除'
+    else:
+        return False, f'复制 hosts 失败: {err or output}'
+
+
+def _run_elevated_copy(src, dst):
+    """提权复制文件。返回 (exit_code, stdout, stderr)"""
+    # 使用 PowerShell Start-Process 提权
+    ps_cmd = f'Copy-Item -Path "{src}" -Destination "{dst}" -Force'
+    code, output, err = _run_command(
+        ['powershell', '-Command',
+         f'Start-Process powershell -Verb RunAs -Wait -ArgumentList \'-Command\', \'{ps_cmd}\''],
+        shell=False, timeout=30
+    )
+    return code, output, err
+
+
+def _resolve_ipv6_addresses(domain):
+    """解析域名的 AAAA 记录，返回 IPv6 地址列表（完整地址，非前缀）。
+    使用 dnspython 直接查询国内 DNS，绕过 WARP DNS 劫持。
+    """
+    addrs = set()
+    resolver, dns_mod = _make_dns_resolver()
+    if resolver is None:
+        try:
+            results = socket.getaddrinfo(domain, None, socket.AF_INET6)
+            for result in results:
+                addrs.add(result[4][0])
+        except Exception as e:
+            logger.debug(f'No AAAA records for {domain} (socket fallback): {e}')
+        return list(addrs)
+
+    try:
+        answers = resolver.resolve(domain, 'AAAA')
+        for rdata in answers:
+            addrs.add(str(rdata))
+        logger.debug(f'AAAA addresses for {domain} (dnspython): {list(addrs)}')
+    except dns_mod.resolver.NoAnswer:
+        logger.debug(f'No AAAA records for {domain}: server returned no answer')
+    except dns_mod.resolver.NXDOMAIN:
+        logger.debug(f'No AAAA records for {domain}: domain does not exist')
+    except Exception as e:
+        logger.debug(f'No AAAA records for {domain}: {type(e).__name__}: {e}')
     return list(addrs)
 
 
@@ -321,6 +537,22 @@ def warp_add_host(host, route='ipv6'):
 
     if route == 'ipv6':
         # IPv6 路由额外操作：
+        # 先检查域名是否有 IPv6 (AAAA) 记录，没有则无法走 IPv6 直连
+        ipv6_prefixes = _resolve_ipv6_prefixes(host)
+        ipv6_addrs = _resolve_ipv6_addresses(host)
+        ipv4_addrs = _resolve_ipv4_addresses(host)
+
+        if not ipv6_prefixes:
+            # 域名没有 IPv6 地址，无法走 IPv6 直连
+            # 原因：WARP 排除的流量会绕过 Windows 防火墙，防火墙阻止 IPv4 无效
+            # 所以只能降级为 IPv4 路由（走校园网 IPv4 直连）
+            logger.warning(f'{host} has no AAAA records, cannot use IPv6 route, falling back to IPv4')
+            # 仍然添加 DNS fallback（可能有助于未来获得 IPv6）
+            code, output, err = _run_command([warp_cli, 'dns', 'fallback', 'add', host], shell=False)
+            if code == 0:
+                logger.info(f'WARP add dns fallback {host} (no AAAA, fallback added): success')
+            return True, f'域名 {host} 无 IPv6 地址，已自动改为 IPv4 直连模式（WARP 排除+IPv4 直连）', []
+
         # 1. DNS fallback：让 DNS 走校园网本地解析（获取校园 IPv6 地址）
         code, output, err = _run_command([warp_cli, 'dns', 'fallback', 'add', host], shell=False)
         if code == 0:
@@ -329,19 +561,30 @@ def warp_add_host(host, route='ipv6'):
             logger.debug(f'WARP add dns fallback {host}: {(output+err).strip()[:100]}')
 
         # 2. IPv6 CIDR 排除：让 IPv6 流量走校园网直连
-        ipv6_prefixes = _resolve_ipv6_prefixes(host)
-        if ipv6_prefixes:
-            for cidr in ipv6_prefixes:
-                c, o, e = _run_command([warp_cli, 'tunnel', 'ip', 'add-range', cidr], shell=False)
-                if c == 0:
-                    logger.info(f'WARP auto-exclude IPv6 CIDR {cidr} for {host}: success')
-                else:
-                    logger.debug(f'WARP auto-exclude IPv6 CIDR {cidr} for {host}: skipped ({(o+e).strip()[:100]})')
-        else:
-            logger.warning(f'No AAAA records for {host}, IPv6 route may not work')
+        for cidr in ipv6_prefixes:
+            c, o, e = _run_command([warp_cli, 'tunnel', 'ip', 'add-range', cidr], shell=False)
+            if c == 0:
+                logger.info(f'WARP auto-exclude IPv6 CIDR {cidr} for {host}: success')
+            else:
+                logger.debug(f'WARP auto-exclude IPv6 CIDR {cidr} for {host}: skipped ({(o+e).strip()[:100]})')
 
-        # 3. 防火墙阻止 IPv4（所有协议），强制浏览器走 IPv6
-        ipv4_addrs = _resolve_ipv4_addresses(host)
+        # 3. 添加 hosts 条目，强制域名解析到 IPv6 地址
+        # 这是关键步骤！WARP DNS fallback 不可靠，Chrome 用系统 DNS (127.0.2.2) 解析时拿不到 AAAA 记录
+        # 通过 hosts 文件可以直接指定 IPv6 地址，绕过 WARP DNS
+        if ipv6_addrs:
+            # 只用第一个 IPv6 地址（避免 hosts 文件过长）
+            ipv6_addr = ipv6_addrs[0]
+            ok, hosts_msg = _add_ipv6_hosts_entry(host, ipv6_addr)
+            if ok:
+                logger.info(f'Hosts entry added for {host}: {ipv6_addr}')
+            else:
+                logger.warning(f'Failed to add hosts entry for {host}: {hosts_msg}')
+        else:
+            logger.warning(f'No IPv6 addresses for {host}, cannot add hosts entry')
+
+        # 4. 防火墙阻止 IPv4（所有协议），强制浏览器走 IPv6
+        # 注意：WARP 排除的流量可能绕过 Windows 防火墙，此规则不一定生效
+        # 但仍尝试添加，对非 WARP 排除的 IPv4 流量有效
         if ipv4_addrs:
             ok, blocked = _add_ipv4_firewall_block(host, ipv4_addrs)
             if ok:
@@ -393,7 +636,14 @@ def warp_remove_host(host, route='ipv6'):
             else:
                 logger.debug(f'WARP auto-remove IPv6 CIDR {cidr} for {host}: skipped')
 
-        # 3. 移除 IPv4 防火墙阻止规则
+        # 3. 移除 hosts 条目
+        ok, hosts_msg = _remove_ipv6_hosts_entry(host)
+        if ok:
+            logger.info(f'Hosts entry removed for {host}')
+        else:
+            logger.debug(f'Failed to remove hosts entry for {host}: {hosts_msg}')
+
+        # 4. 移除 IPv4 防火墙阻止规则
         _remove_ipv4_firewall_block(host)
 
     return True, '删除成功'
@@ -757,18 +1007,23 @@ class ExclusionManager:
             ok, msg, blocked_ipv4 = warp_add_host(domain, route=route)
             if not ok:
                 return False, msg, None
+            # 如果域名无 IPv6 地址，warp_add_host 会自动降级为 IPv4 路由
+            # 此时 msg 包含"已自动改为 IPv4 直连模式"，需要同步配置中的 route
+            actual_route = route
+            if route == 'ipv6' and '无 IPv6 地址' in msg:
+                actual_route = 'ipv4'
             entry = {
                 'domain': domain,
                 'enabled': True,
-                'route': route,
+                'route': actual_route,
                 'added_at': time.strftime('%Y-%m-%d %H:%M:%S'),
             }
             if blocked_ipv4:
                 entry['blocked_ipv4'] = blocked_ipv4
             cfg['domains'].append(entry)
             self._save_config(cfg)
-            logger.info(f'Added domain {domain} (route={route})')
-            return True, f'域名 {domain} 已添加（走{route.upper()}校园网）', entry
+            logger.info(f'Added domain {domain} (route={actual_route})')
+            return True, msg, entry
 
     def remove_domain(self, domain):
         """从排除列表移除域名，并从WARP删除规则"""
@@ -845,6 +1100,47 @@ class ExclusionManager:
     def set_domain_mode(self, domain, mode):
         """兼容旧API：域名排除方案无需模式选择，直接返回成功"""
         return True, '域名排除方案无需选择模式', None
+
+    def check_ipv6_support(self):
+        """检测所有 route='ipv6' 的域名是否真的支持 IPv6 (AAAA 记录)。
+        对于不支持 IPv6 的域名，自动降级为 IPv4 路由，并清理无效的防火墙规则。
+        返回 (success, message, details)
+        """
+        with self._lock:
+            cfg = load_exclusion_config()
+            details = []
+            fixed_count = 0
+            for entry in cfg.get('domains', []):
+                if entry.get('route', 'ipv6') != 'ipv6':
+                    continue
+                if not entry.get('enabled', True):
+                    continue
+                domain = entry['domain']
+                # 检测是否有 IPv6 地址
+                ipv6_prefixes = _resolve_ipv6_prefixes(domain)
+                if ipv6_prefixes:
+                    details.append({'domain': domain, 'has_ipv6': True, 'action': 'kept'})
+                    continue
+                # 无 IPv6 地址，降级为 IPv4
+                old_route = entry.get('route', 'ipv6')
+                entry['route'] = 'ipv4'
+                # 清理无效的 IPv6 CIDR 排除规则（如果有）
+                # 清理无效的 IPv4 防火墙阻止规则
+                _remove_ipv4_firewall_block(domain)
+                fixed_count += 1
+                details.append({
+                    'domain': domain,
+                    'has_ipv6': False,
+                    'action': 'downgraded',
+                    'message': '无 IPv6 地址，已降级为 IPv4 直连'
+                })
+                logger.info(f'Domain {domain} downgraded: ipv6 -> ipv4 (no AAAA records)')
+            if fixed_count > 0:
+                self._save_config(cfg)
+                msg = f'检测完成: {fixed_count} 个域名无 IPv6 支持，已降级为 IPv4 直连'
+            else:
+                msg = '检测完成: 所有 IPv6 路由域名均支持 IPv6'
+            return True, msg, details
 
     # ------------------------------------------------------------------
     # IP 范围排除管理（warp-cli tunnel ip add-range/remove-range）

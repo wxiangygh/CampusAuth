@@ -1808,6 +1808,11 @@ class ApiBridge:
         ok, msg = self._get_mgr().set_ip_range_route(cidr, route)
         return {'success': ok, 'message': msg}
 
+    def check_ipv6_support(self):
+        """检测所有 IPv6 路由域名是否真的支持 IPv6，不支持则降级为 IPv4"""
+        ok, msg, details = self._get_mgr().check_ipv6_support()
+        return {'success': ok, 'message': msg, 'details': details}
+
     def start_learning(self):
         ok, msg = self._get_mgr().dns_monitor.start_learning()
         return {'success': ok, 'message': msg}
@@ -1904,13 +1909,28 @@ class ApiBridge:
     # ------------------------------------------------------------------
     def get_traffic_status(self):
         """获取当前网络流量走向统计和连接详情"""
-        return get_traffic_status()
+        import time as _time
+        _t0 = _time.time()
+        try:
+            result = get_traffic_status()
+            _elapsed = _time.time() - _t0
+            logger.info(f"[get_traffic_status] OK, elapsed={_elapsed:.2f}s, total={result.get('total', 0)}")
+            return result
+        except Exception as e:
+            logger.error(f"[get_traffic_status] FAILED: {e}\n{traceback.format_exc()}")
+            raise
 
     def close_traffic_window(self):
         """关闭流量监控窗口"""
         if _tray_app_instance and _tray_app_instance._traffic_window:
             _tray_app_instance._traffic_window.hide()
             _tray_app_instance._traffic_window = None
+
+    def close_flow_window(self):
+        """关闭流量可视化窗口"""
+        if _tray_app_instance and _tray_app_instance._flow_window:
+            _tray_app_instance._flow_window.hide()
+            _tray_app_instance._flow_window = None
 
 icon_instance = None
 _tray_app_instance = None
@@ -1985,11 +2005,19 @@ def on_exit(icon, item):
         _tray_app_instance._should_exit = True
         if not _tray_app_instance._webview_started:
             _tray_app_instance._webview_start_event.set()
+        # 销毁所有 webview 窗口，让 webview.start() 退出
+        for win_attr in ('settings_window', '_exclusion_window', '_traffic_window', '_flow_window'):
+            win = getattr(_tray_app_instance, win_attr, None)
+            if win:
+                try:
+                    win.destroy()
+                except Exception as e:
+                    logger.debug(f"on_exit: destroy {win_attr} failed: {e}")
+                setattr(_tray_app_instance, win_attr, None)
     cleanup_wifi_event()
     icon.stop()
     if _tray_app_instance and _tray_app_instance.settings_window:
         _tray_app_instance.save_window_position()
-        _tray_app_instance.settings_window.destroy()
     global TRAY_MUTEX
     if TRAY_MUTEX:
         kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -1997,6 +2025,8 @@ def on_exit(icon, item):
         TRAY_MUTEX = None
         logger.debug("on_exit: mutex released")
     logger.info("on_exit: application exiting")
+    # 强制退出，防止残留线程阻止进程退出
+    os._exit(0)
 
 def on_show_log(icon, item):
     logger.info("User clicked: Show Log")
@@ -2025,6 +2055,7 @@ class TrayApp:
         self.settings_window = None
         self._exclusion_window = None
         self._traffic_window = None
+        self._flow_window = None
         self._should_exit = False
         self._silent = silent
         self._webview_started = False
@@ -2044,6 +2075,7 @@ class TrayApp:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('WARP排除管理', lambda i, item: self.show_exclusion()),
             pystray.MenuItem('流量监控', lambda i, item: self.show_traffic_monitor()),
+            pystray.MenuItem('流量可视化', lambda i, item: self.show_flow_monitor()),
             pystray.MenuItem('打开设置', lambda i, item: self.show_settings()),
             pystray.Menu.SEPARATOR,
         ]
@@ -2121,6 +2153,7 @@ class TrayApp:
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem('WARP排除管理', lambda i, item: self.show_exclusion()),
                 pystray.MenuItem('流量监控', lambda i, item: self.show_traffic_monitor()),
+                pystray.MenuItem('流量可视化', lambda i, item: self.show_flow_monitor()),
                 pystray.MenuItem('打开设置', lambda i, item: self.show_settings('settings')),
                 pystray.Menu.SEPARATOR,
             ]
@@ -2241,6 +2274,58 @@ class TrayApp:
             logger.info(f"[show_traffic_monitor] Window created, url={html_url}")
         except Exception as e:
             logger.error(f"[show_traffic_monitor] create_window failed: {e}\n{traceback.format_exc()}")
+
+    def show_flow_monitor(self):
+        """显示流量可视化窗口（数据流动画）"""
+        logger.info("[show_flow_monitor] Called")
+        if self._flow_window:
+            try:
+                self._flow_window.show()
+                self._flow_window.restore()
+                hwnd = ctypes.windll.user32.FindWindowW(None, '流量可视化')
+                if hwnd:
+                    SW_RESTORE = 9
+                    HWND_TOPMOST = -1
+                    HWND_NOTOPMOST = -2
+                    SWP_NOMOVE = 0x0002
+                    SWP_NOSIZE = 0x0001
+                    SWP_SHOWWINDOW = 0x0040
+                    ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
+                logger.info("[show_flow_monitor] Existing window shown")
+                return
+            except Exception as e:
+                logger.error(f"[show_flow_monitor] Show existing window failed: {e}")
+                self._flow_window = None
+
+        html_file = get_resource_path('traffic_flow.html')
+        html_url = f'file:///{html_file.replace(chr(92), "/")}'
+        try:
+            user32 = ctypes.windll.user32
+            screen_w = user32.GetSystemMetrics(0)
+            screen_h = user32.GetSystemMetrics(1)
+            flow_w, flow_h = 720, 640
+            flow_x = (screen_w - flow_w) // 2
+            flow_y = (screen_h - flow_h) // 2
+
+            self._flow_window = webview.create_window(
+                '流量可视化',
+                url=html_url,
+                js_api=self.api,
+                width=flow_w,
+                height=flow_h,
+                x=flow_x,
+                y=flow_y,
+                resizable=True,
+                background_color='#0D0D0D',
+                easy_drag=True,
+                frameless=True,
+            )
+            logger.info(f"[show_flow_monitor] Window created, url={html_url}")
+        except Exception as e:
+            logger.error(f"[show_flow_monitor] create_window failed: {e}\n{traceback.format_exc()}")
 
     def show_settings(self, tab=None):
         """显示应用窗口。tab参数保留但不再使用，窗口保持上次的状态。"""

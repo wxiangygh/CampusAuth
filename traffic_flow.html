@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>流量可视化</title>
+    <style>
+        :root {
+            --bg-primary: #0D0D0D;
+            --bg-secondary: #1A1A1A;
+            --bg-tertiary: #262626;
+            --accent: #F68320;
+            --text-primary: #FFFFFF;
+            --text-secondary: #A3A3A3;
+            --text-tertiary: #737373;
+            --border: rgba(255,255,255,0.08);
+            /* 6 种分类颜色 */
+            --c-ipv4: #3b82f6;
+            --c-ipv6: #22C55E;
+            --c-ipv4-warp: #F59E0B;
+            --c-ipv4-warp-ipv6: #EAB308;
+            --c-ipv6-warp: #EF4444;
+            --c-ipv6-warp-ipv4: #A855F7;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow: hidden;
+            width: 100vw; height: 100vh;
+            user-select: none;
+        }
+        .container { width: 100%; height: 100%; display: flex; flex-direction: column; }
+
+        /* 标题栏 */
+        .title-bar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 16px; background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            -webkit-app-region: drag;
+        }
+        .title-bar-text { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+        .title-bar-info { font-size: 10px; color: var(--text-tertiary); margin-left: 8px; }
+        .title-bar-btns { display: flex; gap: 6px; -webkit-app-region: no-drag; }
+        .title-bar-btn {
+            width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+            border: none; background: transparent; border-radius: 4px; cursor: pointer;
+            color: var(--text-tertiary); transition: all 0.15s; padding: 0;
+        }
+        .title-bar-btn:hover { background: var(--bg-tertiary); color: var(--text-secondary); }
+        .title-bar-btn.close:hover { background: rgba(239,68,68,0.2); color: var(--c-ipv6-warp); }
+        .title-bar-btn svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
+        /* Canvas 区域 */
+        .canvas-wrap { flex: 1; position: relative; overflow: hidden; }
+        #flowCanvas { display: block; width: 100%; height: 100%; }
+
+        /* 顶部统计条 */
+        .top-stats {
+            position: absolute; top: 10px; left: 10px; right: 10px;
+            display: flex; gap: 6px; justify-content: center; flex-wrap: wrap;
+            pointer-events: none;
+        }
+        .stat-pill {
+            display: flex; align-items: center; gap: 5px;
+            padding: 4px 10px; border-radius: 16px;
+            background: rgba(26,26,26,0.85); backdrop-filter: blur(8px);
+            border: 1px solid var(--border); font-size: 11px;
+        }
+        .stat-dot { width: 7px; height: 7px; border-radius: 50%; }
+        .stat-num { font-weight: 700; font-size: 13px; }
+        .stat-label { color: var(--text-tertiary); font-size: 9px; }
+
+        /* 底部连接列表 */
+        .bottom-panel {
+            height: 170px; background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+            display: flex; flex-direction: column;
+        }
+        .panel-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 6px 12px; border-bottom: 1px solid var(--border);
+        }
+        .panel-title { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+        .panel-controls { display: flex; align-items: center; gap: 8px; }
+        .search-box {
+            width: 130px; padding: 3px 8px; font-size: 11px;
+            background: var(--bg-tertiary); border: 1px solid var(--border);
+            border-radius: 4px; color: var(--text-primary); outline: none;
+        }
+        .search-box:focus { border-color: var(--accent); }
+        .search-box::placeholder { color: var(--text-tertiary); }
+        .auto-toggle { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-tertiary); }
+        .toggle-switch { position: relative; width: 28px; height: 16px; cursor: pointer; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; inset: 0; background: var(--bg-tertiary); border-radius: 8px; transition: 0.2s; }
+        .toggle-slider::before {
+            content: ''; position: absolute; width: 12px; height: 12px;
+            left: 2px; top: 2px; background: var(--text-tertiary);
+            border-radius: 50%; transition: 0.2s;
+        }
+        .toggle-switch input:checked + .toggle-slider { background: var(--accent); }
+        .toggle-switch input:checked + .toggle-slider::before { transform: translateX(12px); background: #000; }
+
+        .conn-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+        .conn-row {
+            display: flex; align-items: center; gap: 8px;
+            padding: 3px 8px; border-radius: 4px; font-size: 11px;
+            transition: background 0.1s;
+        }
+        .conn-row:hover { background: var(--bg-tertiary); }
+        .conn-proc { min-width: 70px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+        .conn-host { flex: 1; overflow: hidden; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+        .conn-hostname { font-size: 11px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .conn-ip { color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'Consolas','Monaco',monospace; font-size: 9px; }
+        .conn-badge { font-size: 9px; padding: 1px 6px; border-radius: 3px; font-weight: 600; white-space: nowrap; }
+
+        .empty-hint { text-align: center; color: var(--text-tertiary); font-size: 11px; padding: 20px; }
+
+        /* Toast：默认用 opacity+visibility 彻底隐藏，避免空 toast 残留显示 */
+        .toast {
+            position: fixed; bottom: 190px; left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            opacity: 0; visibility: hidden;
+            background: var(--bg-tertiary); color: var(--text-primary);
+            padding: 8px 16px; border-radius: 8px; font-size: 12px;
+            border: 1px solid var(--border);
+            transition: transform 0.3s, opacity 0.3s, visibility 0.3s; z-index: 1000;
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; visibility: visible; }
+
+        /* 滚动条 */
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+
+        /* badge 颜色 */
+        .badge-ipv4 { background: rgba(59,130,246,0.15); color: var(--c-ipv4); }
+        .badge-ipv6 { background: rgba(34,197,94,0.15); color: var(--c-ipv6); }
+        .badge-ipv4-warp { background: rgba(245,158,11,0.15); color: var(--c-ipv4-warp); }
+        .badge-ipv4-warp-ipv6 { background: rgba(234,179,8,0.15); color: var(--c-ipv4-warp-ipv6); }
+        .badge-ipv6-warp { background: rgba(239,68,68,0.15); color: var(--c-ipv6-warp); }
+        .badge-ipv6-warp-ipv4 { background: rgba(168,85,247,0.15); color: var(--c-ipv6-warp-ipv4); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 标题栏 -->
+        <div class="title-bar pywebview-drag-region">
+            <div>
+                <span class="title-bar-text">网络流量可视化</span>
+                <span class="title-bar-info" id="warpInfo"></span>
+            </div>
+            <div class="title-bar-btns">
+                <button class="title-bar-btn close" onclick="closeWindow()" title="关闭">
+                    <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Canvas 可视化区 -->
+        <div class="canvas-wrap">
+            <canvas id="flowCanvas"></canvas>
+            <!-- 顶部统计 -->
+            <div class="top-stats" id="topStats"></div>
+        </div>
+
+        <!-- 底部连接列表 -->
+        <div class="bottom-panel">
+            <div class="panel-header">
+                <span class="panel-title">活动连接</span>
+                <div class="panel-controls">
+                    <input type="text" class="search-box" id="searchInput" placeholder="搜索域名/IP/进程..." oninput="renderConnList()">
+                    <label class="auto-toggle">
+                        <span class="toggle-switch">
+                            <input type="checkbox" id="autoToggle" checked onchange="toggleAuto()">
+                            <span class="toggle-slider"></span>
+                        </span>
+                        自动刷新
+                    </label>
+                </div>
+            </div>
+            <div class="conn-list" id="connList">
+                <div class="empty-hint">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let api = null;
+        let lastData = null;
+        let autoTimer = null;
+        let canvas, ctx;
+        let particles = [];
+        let animFrame = null;
+        let _initStarted = false;
+        // 6 种分类的统计和配置
+        let stats = { ipv4: 0, ipv6: 0, ipv4_warp: 0, ipv4_warp_ipv6: 0, ipv6_warp: 0, ipv6_warp_ipv4: 0 };
+        let warpUnderlay = 'ipv4';
+
+        // 6 种分类配置（颜色、标签）
+        // 标签格式：WARP[v4]→v4 表示 WARP 底层为 IPv4，内部传输 IPv4
+        const ROUTE_CONFIG = {
+            'ipv4':            { color: '#3b82f6', label: 'IPv4 直连',   badge: 'badge-ipv4',            isWarp: false },
+            'ipv6':            { color: '#22C55E', label: 'IPv6 直连',   badge: 'badge-ipv6',            isWarp: false },
+            'ipv4_warp':       { color: '#F59E0B', label: 'WARP[v4]→v4', badge: 'badge-ipv4-warp',       isWarp: true },
+            'ipv4_warp_ipv6':  { color: '#EAB308', label: 'WARP[v4]→v6', badge: 'badge-ipv4-warp-ipv6',  isWarp: true },
+            'ipv6_warp':       { color: '#EF4444', label: 'WARP[v6]→v6', badge: 'badge-ipv6-warp',       isWarp: true },
+            'ipv6_warp_ipv4':  { color: '#A855F7', label: 'WARP[v6]→v4', badge: 'badge-ipv6-warp-ipv4',  isWarp: true },
+        };
+
+        // 节点定义（坐标在 resize 时计算）
+        let nodes = {};
+
+        function waitForApi(timeoutMs) {
+            timeoutMs = timeoutMs || 10000;
+            return new Promise((resolve, reject) => {
+                if (window.pywebview && window.pywebview.api) {
+                    api = window.pywebview.api; resolve(); return;
+                }
+                const start = Date.now();
+                const check = setInterval(() => {
+                    if (window.pywebview && window.pywebview.api) {
+                        api = window.pywebview.api; clearInterval(check); resolve();
+                    } else if (Date.now() - start > timeoutMs) {
+                        clearInterval(check); reject(new Error('API 等待超时'));
+                    }
+                }, 100);
+            });
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg; t.className = 'toast show';
+            setTimeout(() => { t.className = 'toast'; }, 2000);
+        }
+
+        function closeWindow() {
+            if (api && api.close_flow_window) api.close_flow_window();
+        }
+
+        // ===================== Canvas 可视化 =====================
+
+        function initCanvas() {
+            canvas = document.getElementById('flowCanvas');
+            ctx = canvas.getContext('2d');
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            startAnimation();
+        }
+
+        function resizeCanvas() {
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+            ctx.scale(dpr, dpr);
+            computeNodes(rect.width, rect.height);
+        }
+
+        function computeNodes(w, h) {
+            // 布局：本机在左侧，WARP隧道在中间，6个目标在右侧分两列
+            const cx = w * 0.12;
+            const cy = h * 0.5;
+            const tunnelX = w * 0.40;
+            const tunnelW = 80;
+            const tunnelH = 110;
+            const destX = w * 0.82;
+            const spacing = h * 0.13;
+            const startY = h * 0.5 - spacing * 2.5;
+
+            nodes = {
+                local: { x: cx, y: cy, label: '本机', color: '#A3A3A3' },
+                tunnel: { x: tunnelX, y: cy, w: tunnelW, h: tunnelH, label: 'WARP 隧道', color: '#F68320' },
+                // 直连目标（不经过隧道）
+                ipv4: { x: destX, y: startY, label: 'IPv4 直连', color: '#3b82f6' },
+                ipv6: { x: destX, y: startY + spacing, label: 'IPv6 直连', color: '#22C55E' },
+                // WARP 目标（经过隧道），标签格式：WARP[v4/v6]→v4/v6
+                ipv4_warp:       { x: destX, y: startY + spacing * 2, label: 'WARP[v4]→v4', color: '#F59E0B' },
+                ipv4_warp_ipv6:  { x: destX, y: startY + spacing * 3, label: 'WARP[v4]→v6', color: '#EAB308' },
+                ipv6_warp:       { x: destX, y: startY + spacing * 4, label: 'WARP[v6]→v6', color: '#EF4444' },
+                ipv6_warp_ipv4:  { x: destX, y: startY + spacing * 5, label: 'WARP[v6]→v4', color: '#A855F7' },
+            };
+        }
+
+        // 路径：直连 = local → dest；WARP = local → tunnel → dest
+        function getPathPoints(routeType) {
+            const local = nodes.local;
+            const dest = nodes[routeType];
+            if (!dest) return null;
+            const cfg = ROUTE_CONFIG[routeType];
+            if (cfg && cfg.isWarp) {
+                const tunnel = nodes.tunnel;
+                return [
+                    { x: local.x, y: local.y },
+                    { x: tunnel.x + tunnel.w / 2, y: tunnel.y },
+                    { x: dest.x, y: dest.y },
+                ];
+            } else {
+                return [
+                    { x: local.x, y: local.y },
+                    { x: dest.x, y: dest.y },
+                ];
+            }
+        }
+
+        // 贝塞尔曲线上某点的坐标
+        function bezierPoint(points, t) {
+            if (points.length === 2) {
+                return {
+                    x: (1 - t) * points[0].x + t * points[1].x,
+                    y: (1 - t) * points[0].y + t * points[1].y,
+                };
+            } else if (points.length === 3) {
+                const u = 1 - t;
+                return {
+                    x: u * u * points[0].x + 2 * u * t * points[1].x + t * t * points[2].x,
+                    y: u * u * points[0].y + 2 * u * t * points[1].y + t * t * points[2].y,
+                };
+            }
+            return points[points.length - 1];
+        }
+
+        function drawNode(node, isTunnel) {
+            if (isTunnel) {
+                const x = node.x - node.w / 2;
+                const y = node.y - node.h / 2;
+                ctx.shadowColor = node.color;
+                ctx.shadowBlur = 15;
+                ctx.fillStyle = 'rgba(246,131,32,0.08)';
+                roundRect(ctx, x, y, node.w, node.h, 12);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = node.color;
+                ctx.lineWidth = 1.5;
+                roundRect(ctx, x, y, node.w, node.h, 12);
+                ctx.stroke();
+                ctx.fillStyle = node.color;
+                ctx.font = '600 10px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(node.label, node.x, node.y - 12);
+                // WARP 底层类型
+                ctx.fillStyle = '#A3A3A3';
+                ctx.font = '500 8px sans-serif';
+                ctx.fillText(warpUnderlay === 'ipv6' ? '(IPv6)' : '(IPv4)', node.x, node.y - 2);
+                // WARP 总连接数
+                const warpCount = stats.ipv4_warp + stats.ipv4_warp_ipv6 + stats.ipv6_warp + stats.ipv6_warp_ipv4;
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = '700 14px sans-serif';
+                ctx.fillText(warpCount.toString(), node.x, node.y + 14);
+            } else {
+                ctx.shadowColor = node.color;
+                ctx.shadowBlur = 10;
+                ctx.fillStyle = node.color + '22';
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, 18, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = node.color;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, 18, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.fillStyle = node.color;
+                ctx.font = '600 9px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(node.label, node.x, node.y - 30);
+            }
+        }
+
+        function drawLocalNode() {
+            const n = nodes.local;
+            const pulse = Math.sin(Date.now() / 500) * 0.3 + 0.7;
+            ctx.shadowColor = '#F68320';
+            ctx.shadowBlur = 20 * pulse;
+            ctx.fillStyle = 'rgba(246,131,32,0.12)';
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, 26, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = 'rgba(246,131,32,0.25)';
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, 18, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#F68320';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, 18, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '700 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(n.label, n.x, n.y);
+            // 总连接数
+            const total = stats.ipv4 + stats.ipv6 + stats.ipv4_warp + stats.ipv4_warp_ipv6 + stats.ipv6_warp + stats.ipv6_warp_ipv4;
+            ctx.fillStyle = '#A3A3A3';
+            ctx.font = '500 8px sans-serif';
+            ctx.fillText(total + ' 连接', n.x, n.y + 32);
+        }
+
+        function drawPath(routeType) {
+            const points = getPathPoints(routeType);
+            if (!points) return;
+            const color = ROUTE_CONFIG[routeType].color;
+            const count = stats[routeType] || 0;
+
+            ctx.strokeStyle = count > 0 ? color + '55' : color + '15';
+            ctx.lineWidth = count > 0 ? 2 : 1;
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            if (points.length === 3) {
+                ctx.quadraticCurveTo(points[1].x, points[1].y, points[2].x, points[2].y);
+            } else {
+                ctx.lineTo(points[1].x, points[1].y);
+            }
+            ctx.stroke();
+
+            // 连接数标签（路径中点）
+            const mid = bezierPoint(points, 0.5);
+            if (count > 0) {
+                ctx.fillStyle = 'rgba(13,13,13,0.85)';
+                ctx.beginPath();
+                ctx.arc(mid.x, mid.y, 11, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.arc(mid.x, mid.y, 11, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.fillStyle = color;
+                ctx.font = '700 10px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(count.toString(), mid.x, mid.y);
+            }
+        }
+
+        function drawParticles() {
+            for (const rt of Object.keys(ROUTE_CONFIG)) {
+                const count = stats[rt] || 0;
+                if (count === 0) continue;
+                const points = getPathPoints(rt);
+                if (!points) continue;
+                const color = ROUTE_CONFIG[rt].color;
+                const particleCount = Math.min(count, 6);
+                const speed = 0.003 + count * 0.0004;
+
+                for (let i = 0; i < particleCount; i++) {
+                    let t = (Date.now() * speed + i / particleCount) % 1;
+                    const pos = bezierPoint(points, t);
+                    const trailLen = 4;
+                    for (let j = 0; j < trailLen; j++) {
+                        const tt = Math.max(0, t - j * 0.02);
+                        const tp = bezierPoint(points, tt);
+                        const alpha = (1 - j / trailLen) * 0.6;
+                        ctx.fillStyle = color + Math.floor(alpha * 255).toString(16).padStart(2, '0');
+                        ctx.beginPath();
+                        ctx.arc(tp.x, tp.y, 2.5 - j * 0.4, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    ctx.shadowColor = color;
+                    ctx.shadowBlur = 6;
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.arc(pos.x, pos.y, 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                }
+            }
+        }
+
+        function roundRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+        }
+
+        function drawScene() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            ctx.clearRect(0, 0, rect.width, rect.height);
+
+            // 背景网格
+            ctx.strokeStyle = 'rgba(255,255,255,0.02)';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < rect.width; x += 40) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, rect.height); ctx.stroke();
+            }
+            for (let y = 0; y < rect.height; y += 40) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(rect.width, y); ctx.stroke();
+            }
+
+            // 绘制路径（先画路径再画节点）
+            for (const rt of Object.keys(ROUTE_CONFIG)) {
+                drawPath(rt);
+            }
+
+            // 绘制粒子
+            drawParticles();
+
+            // 绘制节点
+            drawLocalNode();
+            // 直连节点
+            drawNode(nodes.ipv4, false);
+            drawNode(nodes.ipv6, false);
+            // WARP 隧道
+            drawNode(nodes.tunnel, true);
+            // WARP 目标节点
+            drawNode(nodes.ipv4_warp, false);
+            drawNode(nodes.ipv4_warp_ipv6, false);
+            drawNode(nodes.ipv6_warp, false);
+            drawNode(nodes.ipv6_warp_ipv4, false);
+        }
+
+        function startAnimation() {
+            function loop() {
+                drawScene();
+                animFrame = requestAnimationFrame(loop);
+            }
+            loop();
+        }
+
+        // ===================== 数据获取 =====================
+
+        async function refresh() {
+            if (!api) return;
+            try {
+                const data = await api.get_traffic_status();
+                lastData = data;
+                stats = data.stats || stats;
+                warpUnderlay = data.warp_underlay || 'ipv4';
+                updateStats();
+                renderConnList();
+            } catch (e) {
+                showToast('获取失败: ' + e);
+                const container = document.getElementById('connList');
+                if (container && (!lastData || !lastData.connections)) {
+                    container.innerHTML = '<div class="empty-hint">获取数据失败，请点击刷新重试</div>';
+                }
+            }
+        }
+
+        function updateStats() {
+            // 更新顶部统计条
+            const container = document.getElementById('topStats');
+            let html = '';
+            for (const [key, cfg] of Object.entries(ROUTE_CONFIG)) {
+                const count = stats[key] || 0;
+                html += `<div class="stat-pill">
+                    <span class="stat-dot" style="background:${cfg.color}"></span>
+                    <span class="stat-num" style="color:${cfg.color}">${count}</span>
+                    <span class="stat-label">${cfg.label}</span>
+                </div>`;
+            }
+            container.innerHTML = html;
+
+            // 更新标题栏 WARP 信息
+            const infoEl = document.getElementById('warpInfo');
+            if (infoEl) {
+                infoEl.textContent = 'WARP 底层: ' + (warpUnderlay === 'ipv6' ? 'IPv6' : 'IPv4');
+            }
+        }
+
+        function renderConnList() {
+            const container = document.getElementById('connList');
+            if (!lastData || !lastData.connections || !lastData.connections.length) {
+                container.innerHTML = '<div class="empty-hint">暂无活动连接</div>';
+                return;
+            }
+            const kw = (document.getElementById('searchInput').value || '').trim().toLowerCase();
+            let conns = lastData.connections;
+            if (kw) {
+                conns = conns.filter(c =>
+                    (c.process || '').toLowerCase().includes(kw) ||
+                    (c.remote_ip || '').toLowerCase().includes(kw) ||
+                    (c.hostname || '').toLowerCase().includes(kw)
+                );
+            }
+            if (!conns.length) {
+                container.innerHTML = '<div class="empty-hint">无匹配连接</div>';
+                return;
+            }
+            let html = '';
+            for (const c of conns) {
+                const cfg = ROUTE_CONFIG[c.route_type] || ROUTE_CONFIG['ipv4'];
+                const hostDisplay = c.hostname ? escapeHtml(c.hostname) : '(无域名)';
+                html += `<div class="conn-row">
+                    <span class="conn-proc">${escapeHtml(c.process)}</span>
+                    <span class="conn-host">
+                        <span class="conn-hostname">${hostDisplay}</span>
+                        <span class="conn-ip">${escapeHtml(c.remote_ip)}:${c.remote_port}</span>
+                    </span>
+                    <span class="conn-badge ${cfg.badge}">${cfg.label}</span>
+                </div>`;
+            }
+            container.innerHTML = html;
+        }
+
+        function escapeHtml(s) {
+            if (!s) return '';
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function toggleAuto() {
+            if (document.getElementById('autoToggle').checked) { startAuto(); } else { stopAuto(); }
+        }
+
+        function startAuto() {
+            stopAuto();
+            autoTimer = setInterval(refresh, 3000);
+        }
+
+        function stopAuto() {
+            if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+        }
+
+        async function init() {
+            if (_initStarted) return;
+            _initStarted = true;
+            try {
+                await waitForApi(15000);
+            } catch (e) {
+                document.getElementById('connList').innerHTML =
+                    '<div class="empty-hint">API 加载超时，请关闭窗口重试</div>';
+                showToast('API 加载超时: ' + e.message);
+                return;
+            }
+            initCanvas();
+            await refresh();
+            startAuto();
+        }
+
+        window.addEventListener('pywebviewready', init);
+        setTimeout(() => { if (window.pywebview && window.pywebview.api && !_initStarted) init(); }, 1000);
+    </script>
+</body>
+</html>

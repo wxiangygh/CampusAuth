@@ -14,10 +14,13 @@
             --text-secondary: #A3A3A3;
             --text-tertiary: #737373;
             --border: rgba(255,255,255,0.08);
-            --ipv4-direct: #3b82f6;
-            --ipv6-direct: #22C55E;
-            --ipv4-warp: #F59E0B;
-            --ipv6-warp: #EF4444;
+            /* 6 种分类颜色 */
+            --c-ipv4: #3b82f6;
+            --c-ipv6: #22C55E;
+            --c-ipv4-warp: #F59E0B;
+            --c-ipv4-warp-ipv6: #EAB308;
+            --c-ipv6-warp: #EF4444;
+            --c-ipv6-warp-ipv4: #A855F7;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -39,6 +42,7 @@
             -webkit-app-region: drag;
         }
         .title-bar-text { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+        .title-bar-info { font-size: 10px; color: var(--text-tertiary); margin-left: 8px; }
         .title-bar-btns { display: flex; gap: 6px; -webkit-app-region: no-drag; }
         .title-bar-btn {
             width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
@@ -46,27 +50,37 @@
             color: var(--text-tertiary); transition: all 0.15s; padding: 0;
         }
         .title-bar-btn:hover { background: var(--bg-tertiary); color: var(--text-secondary); }
-        .title-bar-btn.close:hover { background: rgba(239,68,68,0.2); color: var(--ipv6-warp); }
+        .title-bar-btn.close:hover { background: rgba(239,68,68,0.2); color: var(--c-ipv6-warp); }
         .title-bar-btn svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 
-        /* 统计卡片 */
+        /* 统计卡片 - 6 个 */
         .stats-grid {
-            display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
-            padding: 12px;
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+            padding: 10px;
         }
         .stat-card {
             background: var(--bg-secondary); border: 1px solid var(--border);
-            border-radius: 10px; padding: 12px 10px; text-align: center;
-            transition: border-color 0.2s;
+            border-radius: 8px; padding: 8px 6px; text-align: center;
+            transition: border-color 0.2s; position: relative;
         }
         .stat-card:hover { border-color: var(--accent); }
-        .stat-card .stat-icon { font-size: 18px; margin-bottom: 4px; }
-        .stat-card .stat-count { font-size: 24px; font-weight: 700; line-height: 1.2; }
-        .stat-card .stat-label { font-size: 10px; color: var(--text-tertiary); margin-top: 2px; }
-        .stat-card.ipv4-direct .stat-count { color: var(--ipv4-direct); }
-        .stat-card.ipv6-direct .stat-count { color: var(--ipv6-direct); }
-        .stat-card.ipv4-warp .stat-count { color: var(--ipv4-warp); }
-        .stat-card.ipv6-warp .stat-count { color: var(--ipv6-warp); }
+        .stat-card .stat-count { font-size: 20px; font-weight: 700; line-height: 1.2; }
+        .stat-card .stat-label { font-size: 9px; color: var(--text-tertiary); margin-top: 2px; }
+        .stat-card .stat-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 3px; vertical-align: middle; }
+        .stat-card.c-ipv4 .stat-count, .stat-card.c-ipv4 .stat-dot { color: var(--c-ipv4); background: var(--c-ipv4); }
+        .stat-card.c-ipv4 .stat-dot { background: var(--c-ipv4); }
+        .stat-card.c-ipv4 .stat-count { color: var(--c-ipv4); background: transparent; }
+
+        .stat-card.c-ipv6 .stat-count { color: var(--c-ipv6); }
+        .stat-card.c-ipv6 .stat-dot { background: var(--c-ipv6); }
+        .stat-card.c-ipv4-warp .stat-count { color: var(--c-ipv4-warp); }
+        .stat-card.c-ipv4-warp .stat-dot { background: var(--c-ipv4-warp); }
+        .stat-card.c-ipv4-warp-ipv6 .stat-count { color: var(--c-ipv4-warp-ipv6); }
+        .stat-card.c-ipv4-warp-ipv6 .stat-dot { background: var(--c-ipv4-warp-ipv6); }
+        .stat-card.c-ipv6-warp .stat-count { color: var(--c-ipv6-warp); }
+        .stat-card.c-ipv6-warp .stat-dot { background: var(--c-ipv6-warp); }
+        .stat-card.c-ipv6-warp-ipv4 .stat-count { color: var(--c-ipv6-warp-ipv4); }
+        .stat-card.c-ipv6-warp-ipv4 .stat-dot { background: var(--c-ipv6-warp-ipv4); }
 
         /* 工具栏 */
         .toolbar {
@@ -86,12 +100,9 @@
             cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 4px;
         }
         .btn:hover { background: var(--bg-secondary); border-color: var(--accent); }
-        .btn.active { background: var(--accent); border-color: var(--accent); color: #000; }
         .btn-sm { padding: 4px 10px; font-size: 11px; }
         .auto-refresh-label { font-size: 11px; color: var(--text-tertiary); display: flex; align-items: center; gap: 4px; }
-        .toggle-switch {
-            position: relative; width: 32px; height: 18px; cursor: pointer;
-        }
+        .toggle-switch { position: relative; width: 32px; height: 18px; cursor: pointer; }
         .toggle-switch input { opacity: 0; width: 0; height: 0; }
         .toggle-slider {
             position: absolute; inset: 0; background: var(--bg-tertiary);
@@ -106,12 +117,8 @@
         .toggle-switch input:checked + .toggle-slider::before { transform: translateX(14px); background: #000; }
 
         /* 连接列表 */
-        .conn-list {
-            flex: 1; overflow-y: auto; padding: 0 12px 12px;
-        }
-        .conn-group {
-            margin-bottom: 8px;
-        }
+        .conn-list { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
+        .conn-group { margin-bottom: 8px; }
         .conn-group-header {
             font-size: 11px; font-weight: 600; color: var(--text-secondary);
             padding: 4px 8px; background: var(--bg-secondary); border-radius: 6px;
@@ -129,23 +136,16 @@
             min-width: 80px; max-width: 120px; font-weight: 500;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
-        .conn-addr { flex: 1; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'Consolas', 'Monaco', monospace; font-size: 11px; }
-        .conn-host { color: var(--text-tertiary); font-size: 10px; }
-        .conn-badge {
-            font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; white-space: nowrap;
-        }
-        .badge-ipv4-direct { background: rgba(59,130,246,0.15); color: var(--ipv4-direct); }
-        .badge-ipv6-direct { background: rgba(34,197,94,0.15); color: var(--ipv6-direct); }
-        .badge-ipv4-warp { background: rgba(245,158,11,0.15); color: var(--ipv4-warp); }
-        .badge-ipv6-warp { background: rgba(239,68,68,0.15); color: var(--ipv6-warp); }
+        .conn-host { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+        .conn-hostname { font-size: 12px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .conn-ip { font-size: 10px; color: var(--text-tertiary); font-family: 'Consolas', 'Monaco', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .conn-badge { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; white-space: nowrap; }
 
         /* 空状态 */
         .empty-hint { text-align: center; color: var(--text-tertiary); font-size: 12px; padding: 40px 20px; }
 
         /* 加载状态 */
-        .loading-bar {
-            height: 2px; background: var(--bg-tertiary); overflow: hidden; display: none;
-        }
+        .loading-bar { height: 2px; background: var(--bg-tertiary); overflow: hidden; display: none; }
         .loading-bar.active { display: block; }
         .loading-bar::after {
             content: ''; display: block; width: 30%; height: 100%; background: var(--accent);
@@ -153,35 +153,33 @@
         }
         @keyframes loading-slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
 
-        /* Toast */
+        /* Toast：默认用 opacity+visibility 彻底隐藏，避免空 toast 残留显示 */
         .toast {
             position: fixed; bottom: 16px; left: 50%;
-            transform: translateX(-50%) translateY(80px);
+            transform: translateX(-50%) translateY(20px);
+            opacity: 0; visibility: hidden;
             background: var(--bg-tertiary); color: var(--text-primary);
             padding: 8px 16px; border-radius: 8px; font-size: 12px;
-            border: 1px solid var(--border); transition: transform 0.3s; z-index: 1000;
+            border: 1px solid var(--border);
+            transition: transform 0.3s, opacity 0.3s, visibility 0.3s; z-index: 1000;
         }
-        .toast.show { transform: translateX(-50%) translateY(0); }
+        .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; visibility: visible; }
 
         /* 滚动条 */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
-
-        /* 图例 */
-        .legend {
-            display: flex; gap: 10px; padding: 0 12px 6px; flex-wrap: wrap;
-        }
-        .legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-tertiary); }
-        .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
     </style>
 </head>
 <body>
     <div class="container">
         <!-- 标题栏 -->
         <div class="title-bar pywebview-drag-region">
-            <span class="title-bar-text">网络流量监控</span>
+            <div>
+                <span class="title-bar-text">网络流量监控</span>
+                <span class="title-bar-info" id="warpInfo"></span>
+            </div>
             <div class="title-bar-btns">
                 <button class="title-bar-btn close" onclick="closeWindow()" title="关闭">
                     <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -192,41 +190,37 @@
         <!-- 加载条 -->
         <div class="loading-bar" id="loadingBar"></div>
 
-        <!-- 统计卡片 -->
+        <!-- 统计卡片 - 6 个 -->
         <div class="stats-grid">
-            <div class="stat-card ipv4-direct">
-                <div class="stat-icon">🌐</div>
-                <div class="stat-count" id="countIpv4Direct">0</div>
-                <div class="stat-label">IPv4 直连</div>
+            <div class="stat-card c-ipv4">
+                <div class="stat-count" id="count-ipv4">0</div>
+                <div class="stat-label"><span class="stat-dot"></span>IPv4 直连</div>
             </div>
-            <div class="stat-card ipv6-direct">
-                <div class="stat-icon">🟢</div>
-                <div class="stat-count" id="countIpv6Direct">0</div>
-                <div class="stat-label">IPv6 直连</div>
+            <div class="stat-card c-ipv6">
+                <div class="stat-count" id="count-ipv6">0</div>
+                <div class="stat-label"><span class="stat-dot"></span>IPv6 直连</div>
             </div>
-            <div class="stat-card ipv4-warp">
-                <div class="stat-icon">🟠</div>
-                <div class="stat-count" id="countIpv4Warp">0</div>
-                <div class="stat-label">IPv4 + WARP</div>
+            <div class="stat-card c-ipv4-warp">
+                <div class="stat-count" id="count-ipv4_warp">0</div>
+                <div class="stat-label"><span class="stat-dot"></span>IPv4-WARP→IPv4</div>
             </div>
-            <div class="stat-card ipv6-warp">
-                <div class="stat-icon">🔴</div>
-                <div class="stat-count" id="countIpv6Warp">0</div>
-                <div class="stat-label">IPv6 + WARP</div>
+            <div class="stat-card c-ipv4-warp-ipv6">
+                <div class="stat-count" id="count-ipv4_warp_ipv6">0</div>
+                <div class="stat-label"><span class="stat-dot"></span>IPv4-WARP→IPv6</div>
             </div>
-        </div>
-
-        <!-- 图例 -->
-        <div class="legend">
-            <div class="legend-item"><span class="legend-dot" style="background:var(--ipv4-direct)"></span>校园网 IPv4</div>
-            <div class="legend-item"><span class="legend-dot" style="background:var(--ipv6-direct)"></span>校园网 IPv6</div>
-            <div class="legend-item"><span class="legend-dot" style="background:var(--ipv4-warp)"></span>WARP 隧道 IPv4</div>
-            <div class="legend-item"><span class="legend-dot" style="background:var(--ipv6-warp)"></span>WARP 隧道 IPv6</div>
+            <div class="stat-card c-ipv6-warp">
+                <div class="stat-count" id="count-ipv6_warp">0</div>
+                <div class="stat-label"><span class="stat-dot"></span>IPv6-WARP→IPv6</div>
+            </div>
+            <div class="stat-card c-ipv6-warp-ipv4">
+                <div class="stat-count" id="count-ipv6_warp_ipv4">0</div>
+                <div class="stat-label"><span class="stat-dot"></span>IPv6-WARP→IPv4</div>
+            </div>
         </div>
 
         <!-- 工具栏 -->
         <div class="toolbar">
-            <input type="text" class="search-input" id="searchInput" placeholder="搜索进程名或 IP..." oninput="renderConnections()">
+            <input type="text" class="search-input" id="searchInput" placeholder="搜索进程名/域名/IP..." oninput="renderConnections()">
             <label class="auto-refresh-label">
                 <span class="toggle-switch">
                     <input type="checkbox" id="autoRefreshToggle" checked onchange="toggleAutoRefresh()">
@@ -250,15 +244,32 @@
         let api = window.pywebview ? window.pywebview.api : null;
         let lastData = null;
         let autoRefreshTimer = null;
+        let _initStarted = false;
 
-        function waitForApi() {
-            return new Promise((resolve) => {
+        // 6 种分类配置
+        // 标签格式：WARP[v4]→v4 表示 WARP 底层为 IPv4，内部传输 IPv4
+        const ROUTE_LABELS = {
+            'ipv4':            { text: 'IPv4 直连',    color: '#3b82f6', badgeClass: 'badge-ipv4' },
+            'ipv6':            { text: 'IPv6 直连',    color: '#22C55E', badgeClass: 'badge-ipv6' },
+            'ipv4_warp':       { text: 'WARP[v4]→v4',  color: '#F59E0B', badgeClass: 'badge-ipv4-warp' },
+            'ipv4_warp_ipv6':  { text: 'WARP[v4]→v6',  color: '#EAB308', badgeClass: 'badge-ipv4-warp-ipv6' },
+            'ipv6_warp':       { text: 'WARP[v6]→v6',  color: '#EF4444', badgeClass: 'badge-ipv6-warp' },
+            'ipv6_warp_ipv4':  { text: 'WARP[v6]→v4',  color: '#A855F7', badgeClass: 'badge-ipv6-warp-ipv4' },
+        };
+
+        function waitForApi(timeoutMs) {
+            timeoutMs = timeoutMs || 10000;
+            return new Promise((resolve, reject) => {
                 if (api) { resolve(); return; }
+                const start = Date.now();
                 const check = setInterval(() => {
                     if (window.pywebview && window.pywebview.api) {
                         api = window.pywebview.api;
                         clearInterval(check);
                         resolve();
+                    } else if (Date.now() - start > timeoutMs) {
+                        clearInterval(check);
+                        reject(new Error('API 等待超时'));
                     }
                 }, 100);
             });
@@ -275,14 +286,6 @@
             if (api && api.close_traffic_window) api.close_traffic_window();
         }
 
-        // 走向标签配置
-        const ROUTE_LABELS = {
-            'ipv4_direct': { text: 'IPv4 直连', class: 'badge-ipv4-direct' },
-            'ipv6_direct': { text: 'IPv6 直连', class: 'badge-ipv6-direct' },
-            'ipv4_warp':   { text: 'IPv4+WARP', class: 'badge-ipv4-warp' },
-            'ipv6_warp':   { text: 'IPv6+WARP', class: 'badge-ipv6-warp' },
-        };
-
         async function refresh() {
             const btn = document.getElementById('refreshBtn');
             const bar = document.getElementById('loadingBar');
@@ -292,19 +295,31 @@
                 const data = await api.get_traffic_status();
                 lastData = data;
                 renderStats(data.stats);
+                renderWarpInfo(data.warp_underlay);
                 renderConnections();
             } catch (e) {
                 showToast('获取失败: ' + e);
+                const container = document.getElementById('connList');
+                if (container && (!lastData || !lastData.connections)) {
+                    container.innerHTML = '<div class="empty-hint">获取数据失败，请点击刷新重试</div>';
+                }
             }
             btn.disabled = false;
             bar.classList.remove('active');
         }
 
         function renderStats(stats) {
-            document.getElementById('countIpv4Direct').textContent = stats.ipv4_direct || 0;
-            document.getElementById('countIpv6Direct').textContent = stats.ipv6_direct || 0;
-            document.getElementById('countIpv4Warp').textContent = stats.ipv4_warp || 0;
-            document.getElementById('countIpv6Warp').textContent = stats.ipv6_warp || 0;
+            for (const key of Object.keys(ROUTE_LABELS)) {
+                const el = document.getElementById('count-' + key);
+                if (el) el.textContent = stats[key] || 0;
+            }
+        }
+
+        function renderWarpInfo(underlay) {
+            const el = document.getElementById('warpInfo');
+            if (el && underlay) {
+                el.textContent = 'WARP 底层: ' + (underlay === 'ipv6' ? 'IPv6' : 'IPv4');
+            }
         }
 
         function renderConnections() {
@@ -344,12 +359,15 @@
                 html += `<div class="conn-group">`;
                 html += `<div class="conn-group-header">${escapeHtml(procName)} <span class="conn-group-count">${groupConns.length}</span></div>`;
                 for (const c of groupConns) {
-                    const label = ROUTE_LABELS[c.route_type] || ROUTE_LABELS['ipv4_direct'];
-                    const host = c.hostname ? `<span class="conn-host"> (${escapeHtml(c.hostname)})</span>` : '';
+                    const label = ROUTE_LABELS[c.route_type] || ROUTE_LABELS['ipv4'];
+                    const hostDisplay = c.hostname ? escapeHtml(c.hostname) : '(无域名)';
                     html += `<div class="conn-item">
                         <span class="conn-process">${escapeHtml(c.process)}</span>
-                        <span class="conn-addr">${escapeHtml(c.remote_ip)}:${c.remote_port}${host}</span>
-                        <span class="conn-badge ${label.class}">${label.text}</span>
+                        <span class="conn-host">
+                            <span class="conn-hostname">${hostDisplay}</span>
+                            <span class="conn-ip">${escapeHtml(c.remote_ip)}:${c.remote_port}</span>
+                        </span>
+                        <span class="conn-badge ${label.badgeClass}">${label.text}</span>
                     </div>`;
                 }
                 html += `</div>`;
@@ -364,11 +382,7 @@
 
         function toggleAutoRefresh() {
             const enabled = document.getElementById('autoRefreshToggle').checked;
-            if (enabled) {
-                startAutoRefresh();
-            } else {
-                stopAutoRefresh();
-            }
+            if (enabled) { startAutoRefresh(); } else { stopAutoRefresh(); }
         }
 
         function startAutoRefresh() {
@@ -381,13 +395,32 @@
         }
 
         async function init() {
-            await waitForApi();
+            if (_initStarted) return;
+            _initStarted = true;
+            try {
+                await waitForApi(15000);
+            } catch (e) {
+                document.getElementById('connList').innerHTML =
+                    '<div class="empty-hint">API 加载超时，请关闭窗口重试</div>';
+                showToast('API 加载超时: ' + e.message);
+                return;
+            }
             await refresh();
             startAutoRefresh();
         }
 
         window.addEventListener('pywebviewready', init);
-        setTimeout(() => { if (api) init(); }, 500);
+        setTimeout(() => { if (window.pywebview && window.pywebview.api && !_initStarted) init(); }, 1000);
     </script>
+
+    <style>
+        /* badge 颜色 */
+        .badge-ipv4 { background: rgba(59,130,246,0.15); color: var(--c-ipv4); }
+        .badge-ipv6 { background: rgba(34,197,94,0.15); color: var(--c-ipv6); }
+        .badge-ipv4-warp { background: rgba(245,158,11,0.15); color: var(--c-ipv4-warp); }
+        .badge-ipv4-warp-ipv6 { background: rgba(234,179,8,0.15); color: var(--c-ipv4-warp-ipv6); }
+        .badge-ipv6-warp { background: rgba(239,68,68,0.15); color: var(--c-ipv6-warp); }
+        .badge-ipv6-warp-ipv4 { background: rgba(168,85,247,0.15); color: var(--c-ipv6-warp-ipv4); }
+    </style>
 </body>
 </html>

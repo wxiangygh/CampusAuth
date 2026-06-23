@@ -267,23 +267,24 @@
         .warp-range-line { color: var(--text-secondary); }
         .warp-range-line:hover { color: var(--text-primary); }
 
-        /* 提示信息 */
+        /* 提示信息：默认用 opacity+visibility 彻底隐藏，避免空 toast 残留显示 */
         .toast {
             position: fixed;
             bottom: 20px;
             left: 50%;
-            transform: translateX(-50%) translateY(100px);
+            transform: translateX(-50%) translateY(20px);
+            opacity: 0; visibility: hidden;
             background: var(--bg-tertiary);
             color: var(--text-primary);
             padding: 10px 20px;
             border-radius: 8px;
             font-size: 12px;
             border: 1px solid var(--border);
-            transition: transform 0.3s cubic-bezier(0.16,1,0.3,1);
+            transition: transform 0.3s cubic-bezier(0.16,1,0.3,1), opacity 0.3s, visibility 0.3s;
             z-index: 1000;
             max-width: 90%;
         }
-        .toast.show { transform: translateX(-50%) translateY(0); }
+        .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; visibility: visible; }
         .toast.success { border-color: var(--success); }
         .toast.error { border-color: var(--error); }
 
@@ -455,6 +456,7 @@
                     <div style="margin-bottom:10px; display:flex; gap:8px; flex-wrap:wrap;">
                         <button class="btn btn-sm btn-primary" onclick="applyAllToWarp()">同步到WARP</button>
                         <button class="btn btn-sm" onclick="syncFromWarp()">从WARP同步</button>
+                        <button class="btn btn-sm" onclick="checkIpv6Support()" title="检测所有 IPv6 路由域名是否真的支持 IPv6，不支持则降级为 IPv4">检测 IPv6 支持</button>
                     </div>
                     <div id="rulesList">
                         <div class="empty-hint">暂无排除规则，请通过学习模式或手动添加</div>
@@ -467,7 +469,10 @@
                     <div style="margin-bottom:12px;">
                         <div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">手动添加 IP 范围</div>
                         <div class="add-domain-row">
-                            <input type="text" class="input" id="ipRangeInput" placeholder="输入 CIDR，如 10.0.0.0/8 或 2001:db8::/32" onkeydown="if(event.key==='Enter')addIpRangeManually()" style="flex:2;">
+                            <input type="text" class="input" id="ipRangeInput" placeholder="输入 IP 或 CIDR，如 10.0.0.0/8 或 2402:4e00::" onkeydown="if(event.key==='Enter')addIpRangeManually()" style="flex:2;">
+                            <select id="ipPrefixSelect" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-primary); font-size:13px; cursor:pointer; min-width:90px;" onchange="onPrefixChange()">
+                                <option value="auto">自动前缀</option>
+                            </select>
                             <select id="ipRouteSelect" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-primary); font-size:13px; cursor:pointer;">
                                 <option value="ipv4">走 IPv4 校园网</option>
                                 <option value="ipv6">走 IPv6 校园网</option>
@@ -476,9 +481,25 @@
                         </div>
                         <div style="font-size:11px; color:var(--text-tertiary); margin-top:4px; line-height:1.5;">
                             <strong>走 IPv4 校园网：</strong>CIDR 排除，流量走校园网 IPv4<br>
-                            <strong>走 IPv6 校园网：</strong>CIDR 排除，流量走校园网 IPv6
+                            <strong>走 IPv6 校园网：</strong>CIDR 排除，流量走校园网 IPv6<br>
+                            <strong>前缀长度：</strong>/32(单IP)、/24(IPv4子网)、/32或/48(IPv6网段)、/64(IPv6子网)
                         </div>
                     </div>
+
+                    <!-- 从当前连接推荐 -->
+                    <div style="margin-bottom:12px; padding:10px; background:var(--bg-secondary); border-radius:8px; border:1px solid var(--border-color);">
+                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                            <div style="font-size:12px; font-weight:600; color:var(--text-secondary);">从当前连接推荐</div>
+                            <button class="btn btn-sm" onclick="loadTrafficForExclude()">刷新连接</button>
+                        </div>
+                        <div style="font-size:11px; color:var(--text-tertiary); margin-bottom:8px; line-height:1.5;">
+                            显示当前未走 WARP 的连接（直连），点击可一键将其 IP 网段加入排除列表。
+                        </div>
+                        <div id="trafficRecommendList" style="max-height:200px; overflow-y:auto;">
+                            <div class="empty-hint" style="padding:8px;">点击"刷新连接"加载</div>
+                        </div>
+                    </div>
+
                     <div id="ipRangesList">
                         <div class="empty-hint">暂无 IP 排除规则</div>
                     </div>
@@ -832,12 +853,65 @@
             }).join('');
         }
 
+        // 根据输入的 IP 自动更新前缀长度选项
+        function updatePrefixOptions() {
+            const input = document.getElementById('ipRangeInput');
+            const select = document.getElementById('ipPrefixSelect');
+            const value = input.value.trim();
+            // 解析 IP（去掉可能的已有前缀）
+            const ipPart = value.split('/')[0];
+            const isIpv6 = ipPart.includes(':');
+            const currentVal = select.value;
+            // 构建前缀选项
+            let options = ['<option value="auto">自动前缀</option>'];
+            if (isIpv6) {
+                [128, 64, 48, 32].forEach(p => {
+                    options.push(`<option value="${p}">/${p}</option>`);
+                });
+            } else if (ipPart && /^\d+\.\d+\.\d+\.\d+$/.test(ipPart)) {
+                [32, 24, 16, 8].forEach(p => {
+                    options.push(`<option value="${p}">/${p}</option>`);
+                });
+            }
+            select.innerHTML = options.join('');
+            // 尝试保留之前的选择
+            if ([...select.options].some(o => o.value === currentVal)) {
+                select.value = currentVal;
+            }
+        }
+
+        // 输入框内容变化时更新前缀选项
+        document.addEventListener('DOMContentLoaded', () => {
+            const ipInput = document.getElementById('ipRangeInput');
+            if (ipInput) ipInput.addEventListener('input', updatePrefixOptions);
+        });
+
+        // 根据 IP 和前缀长度生成 CIDR
+        function buildCidr(ipOrCidr, prefixLen) {
+            if (prefixLen === 'auto' || !prefixLen) {
+                // 自动模式：如果输入已含 /，直接用；否则单 IP 用 /32 或 /128
+                if (ipOrCidr.includes('/')) return ipOrCidr;
+                return ipOrCidr.includes(':') ? ipOrCidr + '/128' : ipOrCidr + '/32';
+            }
+            // 取 IP 部分（去掉可能的前缀），拼接选择的前缀
+            const ipPart = ipOrCidr.split('/')[0];
+            return `${ipPart}/${prefixLen}`;
+        }
+
+        // 前缀选择变化时的提示
+        function onPrefixChange() {
+            // 仅触发，无特殊处理
+        }
+
         async function addIpRangeManually() {
             const input = document.getElementById('ipRangeInput');
             const routeSelect = document.getElementById('ipRouteSelect');
-            const cidr = input.value.trim();
+            const prefixSelect = document.getElementById('ipPrefixSelect');
+            const rawValue = input.value.trim();
             const route = routeSelect.value;
-            if (!cidr) { showToast('请输入 CIDR', 'error'); return; }
+            const prefixLen = prefixSelect.value;
+            if (!rawValue) { showToast('请输入 IP 或 CIDR', 'error'); return; }
+            const cidr = buildCidr(rawValue, prefixLen);
             showLoading('正在添加 IP 范围...');
             try {
                 const r = await api.add_ip_range(cidr, route);
@@ -847,6 +921,78 @@
                     await loadIpRanges();
                 } else {
                     showToast(r.message, 'error');
+                }
+            } catch(e) { showToast('添加失败: ' + e, 'error'); }
+            hideLoading();
+        }
+
+        // ---------- 从当前连接推荐 ----------
+        let _trafficForExclude = null;
+
+        async function loadTrafficForExclude() {
+            const container = document.getElementById('trafficRecommendList');
+            container.innerHTML = '<div class="empty-hint" style="padding:8px;">加载中...</div>';
+            try {
+                const data = await api.get_traffic_status();
+                _trafficForExclude = data;
+                renderTrafficRecommend(data);
+            } catch(e) {
+                container.innerHTML = `<div class="empty-hint" style="padding:8px; color:var(--c-ipv6-warp);">加载失败: ${escapeHtml(String(e))}</div>`;
+            }
+        }
+
+        function renderTrafficRecommend(data) {
+            const container = document.getElementById('trafficRecommendList');
+            if (!data || !data.connections || !data.connections.length) {
+                container.innerHTML = '<div class="empty-hint" style="padding:8px;">暂无连接</div>';
+                return;
+            }
+            // 只显示未走 WARP 的连接（直连），按 IP 去重
+            const directConns = data.connections.filter(c => !c.is_warp);
+            if (!directConns.length) {
+                container.innerHTML = '<div class="empty-hint" style="padding:8px;">暂无直连连接（所有流量都走 WARP）</div>';
+                return;
+            }
+            // 按 IP 去重，保留进程名和域名
+            const ipMap = new Map();
+            for (const c of directConns) {
+                if (!ipMap.has(c.remote_ip)) {
+                    ipMap.set(c.remote_ip, { ip: c.remote_ip, process: c.process, hostname: c.hostname || '', route_type: c.route_type });
+                }
+            }
+            const uniqueConns = Array.from(ipMap.values());
+            let html = '';
+            for (const c of uniqueConns) {
+                const isIpv6 = c.ip.includes(':');
+                const recommendedPrefix = isIpv6 ? 32 : 24;
+                const recommendedCidr = buildCidr(c.ip, String(recommendedPrefix));
+                const hostDisplay = c.hostname ? escapeHtml(c.hostname) : '(无域名)';
+                const routeTag = c.route_type === 'ipv6' ? 'IPv6直连' : 'IPv4直连';
+                html += `<div style="display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; background:var(--bg-tertiary); margin-bottom:4px; font-size:12px;">
+                    <div style="flex:1; min-width:0; overflow:hidden;">
+                        <div style="display:flex; gap:6px; align-items:center;">
+                            <span style="font-weight:500; color:var(--text-primary);">${escapeHtml(c.process)}</span>
+                            <span style="font-size:10px; padding:1px 6px; border-radius:3px; background:var(--bg-secondary); color:var(--text-tertiary);">${routeTag}</span>
+                        </div>
+                        <div style="font-size:11px; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${hostDisplay}</div>
+                        <div style="font-size:10px; color:var(--text-tertiary); font-family:Consolas,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(c.ip)}</div>
+                    </div>
+                    <div style="display:flex; gap:4px; flex-shrink:0;">
+                        <button class="btn btn-sm" style="padding:3px 8px; font-size:11px;" onclick="addRecommendedCidr('${escapeHtml(recommendedCidr)}', '${isIpv6 ? 'ipv6' : 'ipv4'}')" title="添加 /${recommendedPrefix} 网段">/${recommendedPrefix}</button>
+                        <button class="btn btn-sm" style="padding:3px 8px; font-size:11px;" onclick="addRecommendedCidr('${escapeHtml(c.ip + (isIpv6 ? '/128' : '/32'))}', '${isIpv6 ? 'ipv6' : 'ipv4'}')" title="添加单 IP">单IP</button>
+                    </div>
+                </div>`;
+            }
+            container.innerHTML = html;
+        }
+
+        async function addRecommendedCidr(cidr, route) {
+            showLoading('正在添加排除规则...');
+            try {
+                const r = await api.add_ip_range(cidr, route);
+                showToast(r.message, r.success ? 'success' : 'error');
+                if (r.success) {
+                    await loadIpRanges();
                 }
             } catch(e) { showToast('添加失败: ' + e, 'error'); }
             hideLoading();
@@ -980,6 +1126,35 @@
                 await loadRules();
                 await loadDnsFallbackRules();
             } catch(e) { showToast('同步失败: ' + e, 'error'); }
+            hideLoading();
+        }
+
+        // 检测所有 IPv6 路由域名是否真的支持 IPv6
+        async function checkIpv6Support() {
+            showLoading('正在检测 IPv6 支持...');
+            try {
+                const r = await api.check_ipv6_support();
+                if (r.success) {
+                    // 构建详细结果
+                    let detailMsg = r.message;
+                    if (r.details && r.details.length) {
+                        const downgraded = r.details.filter(d => d.action === 'downgraded');
+                        const kept = r.details.filter(d => d.action === 'kept');
+                        if (downgraded.length) {
+                            detailMsg += '\n\n已降级（无 IPv6）:\n' + downgraded.map(d => `  • ${d.domain}`).join('\n');
+                        }
+                        if (kept.length) {
+                            detailMsg += `\n\n支持 IPv6（保持）:\n` + kept.map(d => `  • ${d.domain}`).join('\n');
+                        }
+                    }
+                    showToast(r.message, 'success');
+                    // 用 alert 显示详细信息
+                    setTimeout(() => alert(detailMsg), 100);
+                    await loadRules();
+                } else {
+                    showToast(r.message, 'error');
+                }
+            } catch(e) { showToast('检测失败: ' + e, 'error'); }
             hideLoading();
         }
 

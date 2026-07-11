@@ -42,7 +42,7 @@ def bring_window_to_top(title):
 
 def create_webview_window(api, title, html_file, width, height,
                           resizable=True, frameless=True,
-                          on_closing_callback=None):
+                          on_closing_callback=None, **kwargs):
     """创建 WebView 窗口。
 
     Args:
@@ -54,6 +54,8 @@ def create_webview_window(api, title, html_file, width, height,
         resizable: 是否可调整大小
         frameless: 是否无边框
         on_closing_callback: 窗口关闭时的回调函数
+        **kwargs: 透传给 webview.create_window 的额外参数
+            （如 background_color、easy_drag、x、y、hidden 等）
 
     Returns:
         webview.Window 实例，或 None 如果创建失败
@@ -63,6 +65,7 @@ def create_webview_window(api, title, html_file, width, height,
             title, html_file, js_api=api,
             width=width, height=height,
             resizable=resizable, frameless=frameless,
+            **kwargs
         )
         if on_closing_callback:
             win.events.closing += on_closing_callback

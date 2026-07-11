@@ -2071,6 +2071,13 @@ class TrayApp:
         # 创建新的排除管理窗口
         html_file = get_resource_path('warp_exclusion.html')
         html_url = f'file:///{html_file.replace(chr(92), "/")}'
+        # 计算窗口居中位置
+        user32 = ctypes.windll.user32
+        screen_w = user32.GetSystemMetrics(0)
+        screen_h = user32.GetSystemMetrics(1)
+        ex_w, ex_h = 520, 700
+        ex_x = (screen_w - ex_w) // 2
+        ex_y = (screen_h - ex_h) // 2
         # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
         # 返回 None 允许窗口正常关闭，pywebview 会自动销毁 WebView2 进程
         def _on_exclusion_closing():
@@ -2078,8 +2085,10 @@ class TrayApp:
             self._exclusion_window = None
             return None
         self._exclusion_window = create_webview_window(
-            self.api, 'WARP排除管理', html_url, 520, 700,
+            self.api, 'WARP排除管理', html_url, ex_w, ex_h,
             on_closing_callback=_on_exclusion_closing,
+            background_color='#0D0D0D', easy_drag=False,
+            x=ex_x, y=ex_y,
         )
         if self._exclusion_window:
             logger.info(f"[show_exclusion] Window created, url={html_url}")
@@ -2100,14 +2109,23 @@ class TrayApp:
 
         html_file = get_resource_path('traffic_monitor.html')
         html_url = f'file:///{html_file.replace(chr(92), "/")}'
+        # 计算窗口居中位置
+        user32 = ctypes.windll.user32
+        screen_w = user32.GetSystemMetrics(0)
+        screen_h = user32.GetSystemMetrics(1)
+        mon_w, mon_h = 640, 760
+        mon_x = (screen_w - mon_w) // 2
+        mon_y = (screen_h - mon_h) // 2
         # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
         def _on_traffic_closing():
             logger.info("[traffic] Window closing, clearing reference")
             self._traffic_window = None
             return None
         self._traffic_window = create_webview_window(
-            self.api, '流量监控', html_url, 640, 760,
+            self.api, '流量监控', html_url, mon_w, mon_h,
             on_closing_callback=_on_traffic_closing,
+            background_color='#0D0D0D', easy_drag=False,
+            x=mon_x, y=mon_y,
         )
         if self._traffic_window:
             logger.info(f"[show_traffic_monitor] Window created, url={html_url}")
@@ -2128,14 +2146,23 @@ class TrayApp:
 
         html_file = get_resource_path('traffic_flow.html')
         html_url = f'file:///{html_file.replace(chr(92), "/")}'
+        # 计算窗口居中位置
+        user32 = ctypes.windll.user32
+        screen_w = user32.GetSystemMetrics(0)
+        screen_h = user32.GetSystemMetrics(1)
+        flow_w, flow_h = 960, 820
+        flow_x = (screen_w - flow_w) // 2
+        flow_y = (screen_h - flow_h) // 2
         # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
         def _on_flow_closing():
             logger.info("[flow] Window closing, clearing reference")
             self._flow_window = None
             return None
         self._flow_window = create_webview_window(
-            self.api, '流量可视化', html_url, 960, 820,
+            self.api, '流量可视化', html_url, flow_w, flow_h,
             on_closing_callback=_on_flow_closing,
+            background_color='#0D0D0D', easy_drag=False,
+            x=flow_x, y=flow_y,
         )
         if self._flow_window:
             logger.info(f"[show_flow_monitor] Window created, url={html_url}")

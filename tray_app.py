@@ -22,6 +22,11 @@ import core.state
 from core.state import _auth_lock, _auth_cancelled, WIFI_EVENT_NAME
 from core.command import run_command, run_elevated_powershell
 from core.webview import bring_window_to_top, create_webview_window
+from core.network import (
+    scan_wifi_networks, get_wifi_interface_name, get_local_ip,
+    get_mac_address, get_current_wifi_ssid, wait_for_network_ready,
+    _wait_for_ipv6_ready, is_warp_connected, _check_internet,
+)
 
 def get_resource_path(relative_path):
     """获取资源文件路径（支持开发环境和PyInstaller打包）"""
@@ -212,64 +217,6 @@ def ensure_app_icon():
         logger.info(f"App icon saved to {icon_path}")
     return str(icon_path)
 
-def scan_wifi_networks():
-    code, output, _ = run_command('netsh wlan show networks')
-    networks = []
-    for line in output.split('\n'):
-        line = line.strip()
-        if line.startswith('SSID') and ':' in line:
-            ssid = line.split(':', 1)[1].strip()
-            if ssid and ssid not in networks:
-                networks.append(ssid)
-    return networks
-
-def get_wifi_interface_name():
-    code, output, _ = run_command('netsh wlan show interfaces')
-    for line in output.split('\n'):
-        line = line.strip()
-        if (line.startswith('名称') or line.startswith('Name')) and ':' in line:
-            return line.split(':', 1)[1].strip()
-    return None
-
-def get_local_ip():
-    wifi_name = get_wifi_interface_name()
-    if wifi_name:
-        code, output, _ = run_command('ipconfig')
-        lines = output.split('\n')
-        found_wifi = False
-        for line in lines:
-            line_stripped = line.strip()
-            if wifi_name in line_stripped or '无线' in line_stripped or 'Wireless' in line_stripped:
-                found_wifi = True
-                continue
-            if found_wifi and ('IPv4' in line_stripped or 'IPv4 地址' in line_stripped) and ':' in line_stripped:
-                ip = line_stripped.split(':', 1)[1].strip()
-                if ip and not ip.startswith('172.16.'):
-                    return ip
-                continue
-            if found_wifi and line_stripped == '':
-                found_wifi = False
-    import socket
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('8.8.8.8', 80))
-        ip = s.getsockname()[0]
-        s.close()
-        if ip.startswith('172.16.'):
-            return ''
-        return ip
-    except:
-        return ''
-
-def get_mac_address():
-    code, output, _ = run_command('getmac /fo csv /nh')
-    for line in output.split('\n'):
-        if line.strip():
-            parts = line.split(',')
-            mac = parts[0].strip().strip('"').replace('-', '')
-            return mac
-    return '000000000000'
-
 def disconnect_warp(full=True):
     warp_cli = get_warp_cli()
     if warp_cli:
@@ -339,54 +286,6 @@ def enable_ipv4(interface_name):
         logger.info(f"enable_ipv4: IPv4 enabled on {interface_name} (elevated)")
         return True
     logger.error(f"enable_ipv4: failed to enable IPv4 on {interface_name} (both methods)")
-    return False
-
-def wait_for_network_ready(portal_ip, portal_port='801', max_retries=5):
-    logger.info("Waiting for network to be ready...")
-    portal_addr = f"{portal_ip}:{portal_port}" if portal_port else portal_ip
-    for i in range(max_retries):
-        if _check_cancel(): return False
-        try:
-            import urllib.request
-            req = urllib.request.Request(f'http://{portal_addr}/eportal/portal/login', method='GET')
-            req.add_header('User-Agent', 'Mozilla/5.0')
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            response = opener.open(req, timeout=5)
-            logger.info(f"Network ready ({i+1}/{max_retries}, HTTP {response.status})")
-            return True
-        except urllib.error.HTTPError as e:
-            if e.code in (200, 302, 401, 403):
-                logger.info(f"Network ready ({i+1}/{max_retries}, HTTP {e.code})")
-                return True
-            logger.info(f"Network not ready ({i+1}/{max_retries}): HTTP {e.code}")
-        except Exception as e:
-            logger.info(f"Network not ready ({i+1}/{max_retries}): {e}")
-        if not _interruptible_sleep(2): return False
-    logger.info("Network may not be fully connected, continuing...")
-    return False
-
-def _wait_for_ipv6_ready(max_retries=8):
-    logger.info("Waiting for IPv6 to be ready...")
-    ipv6_test_targets = [
-        ('2606:4700:d0::a29f:c001', 443),
-        ('2606:4700:4700::1111', 443),
-        ('2606:4700:103::1', 443),
-    ]
-    for i in range(max_retries):
-        if _check_cancel(): return False
-        for addr, port in ipv6_test_targets:
-            try:
-                import socket
-                sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-                sock.settimeout(3)
-                sock.connect((addr, port))
-                sock.close()
-                logger.info(f"IPv6 ready via {addr} ({i+1}/{max_retries})")
-                return True
-            except Exception as e:
-                logger.debug(f"IPv6 not ready via {addr} ({i+1}/{max_retries}): {e}")
-        if not _interruptible_sleep(2): return False
-    logger.warning(f"IPv6 not ready after {max_retries} retries")
     return False
 
 def portal_login():
@@ -631,23 +530,6 @@ def _connect_warp_inner(warp_cli):
     logger.warning("WARP connection failed after 2 attempts")
     return False
 
-def is_warp_connected():
-    warp_cli = get_warp_cli()
-    if not warp_cli:
-        return False
-    code, output, _ = run_command([warp_cli, 'status'], shell=False, timeout=10)
-    if code == 0 and ('Network: healthy' in output or 'Status update: Connected' in output):
-        return True
-    try:
-        ps_cmd = 'Get-NetAdapter -Name *WARP* | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1 -ExpandProperty Name'
-        code2, output2, _ = run_command(['powershell', '-Command', ps_cmd], shell=False, timeout=5)
-        if code2 == 0 and output2.strip():
-            logger.info(f"is_warp_connected: warp-cli failed but WARP adapter '{output2.strip()}' is up")
-            return True
-    except Exception:
-        pass
-    return False
-
 def update_tray_icon(success, message=''):
     try:
         if core.state._tray_app_instance and core.state._tray_app_instance.icon:
@@ -741,16 +623,6 @@ def signal_wifi_event():
     err = ctypes.get_last_error()
     logger.error(f"Failed to open WiFi event (error={err}), tray app may not be running")
     return False
-
-def get_current_wifi_ssid():
-    code, output, _ = run_command('netsh wlan show interfaces')
-    for line in output.split('\n'):
-        line_stripped = line.strip()
-        if (line_stripped.startswith('SSID') or line_stripped.startswith('配置文件')) and ':' in line_stripped:
-            ssid = line_stripped.split(':', 1)[1].strip()
-            if ssid:
-                return ssid
-    return ''
 
 def wifi_event_monitor():
     global _wifi_event_handle
@@ -1410,7 +1282,7 @@ class ApiBridge:
                 return {'status': 'connected', 'message': 'WARP已连接，IPv4已禁用'}
             return {'status': 'broken', 'message': 'IPv4已禁用但WARP未连接'}
         else:
-            has_internet = self._check_internet()
+            has_internet = _check_internet()
             if has_internet:
                 return {'status': 'normal', 'message': '正常模式'}
             else:
@@ -1426,14 +1298,6 @@ class ApiBridge:
         except Exception as e:
             logger.debug(f"_check_warp_adapter failed: {e}")
         return False
-
-    def _check_internet(self):
-        try:
-            import socket
-            socket.create_connection(('8.8.8.8', 53), timeout=3)
-            return True
-        except Exception:
-            return False
 
     def restore_network(self):
         logger.info("restore_network called")

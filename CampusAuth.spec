@@ -6,7 +6,12 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('settings.html', '.'), ('warp_exclusion.html', '.'), ('traffic_monitor.html', '.'), ('traffic_flow.html', '.'), ('app.ico', '.')],
-    hiddenimports=['warp_exclusion', 'traffic_monitor', 'dns', 'dns.resolver', 'dns.exception', 'dns.rdatatype', 'dns.rdataclass', 'dns.rcode'],
+    hiddenimports=[
+        'warp_exclusion', 'traffic_monitor',
+        'dns', 'dns.resolver', 'dns.exception', 'dns.rdatatype', 'dns.rdataclass', 'dns.rcode',
+        'core', 'core.state', 'core.command', 'core.webview', 'core.network',
+        'core.warp_manager', 'core.auth', 'core.startup',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

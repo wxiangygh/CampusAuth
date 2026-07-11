@@ -218,3 +218,23 @@ def run_powershell_simple(cmd, timeout=15):
         return -1, '', 'Command timed out'
     except Exception as e:
         return -1, '', str(e)
+
+
+def run_command_simple(cmd, shell=False, timeout=15):
+    """执行命令并返回 (exit_code, stdout, stderr)，避免窗口弹窗。
+    通用命令执行，支持 shell 参数和 list 形式的 cmd。
+    """
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0
+    try:
+        result = subprocess.run(
+            cmd, shell=shell, capture_output=True, text=True,
+            encoding='utf-8', errors='replace', timeout=timeout,
+            startupinfo=si, creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        return result.returncode, result.stdout or '', result.stderr or ''
+    except subprocess.TimeoutExpired:
+        return -1, '', 'Command timed out'
+    except Exception as e:
+        return -1, '', str(e)

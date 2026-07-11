@@ -16,7 +16,7 @@ import subprocess
 
 from core.state import _auth_cancelled
 
-logger = logging.getLogger('tray_app')
+logger = logging.getLogger('wifi_tray')
 
 
 def run_command(cmd, shell=True, timeout=30):

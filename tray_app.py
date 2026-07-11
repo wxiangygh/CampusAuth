@@ -21,6 +21,7 @@ from traffic_monitor import get_traffic_status
 import core.state
 from core.state import _auth_lock, _auth_cancelled, WIFI_EVENT_NAME
 from core.command import run_command, run_elevated_powershell
+from core.webview import bring_window_to_top, create_webview_window
 
 def get_resource_path(relative_path):
     """获取资源文件路径（支持开发环境和PyInstaller打包）"""
@@ -2060,18 +2061,7 @@ class TrayApp:
             try:
                 self._exclusion_window.show()
                 self._exclusion_window.restore()
-                hwnd = ctypes.windll.user32.FindWindowW(None, 'WARP排除管理')
-                if hwnd:
-                    SW_RESTORE = 9
-                    HWND_TOPMOST = -1
-                    HWND_NOTOPMOST = -2
-                    SWP_NOMOVE = 0x0002
-                    SWP_NOSIZE = 0x0001
-                    SWP_SHOWWINDOW = 0x0040
-                    ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
-                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
-                    ctypes.windll.user32.SetForegroundWindow(hwnd)
-                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
+                bring_window_to_top('WARP排除管理')
                 logger.info("[show_exclusion] Existing window shown")
                 return
             except Exception as e:
@@ -2081,37 +2071,18 @@ class TrayApp:
         # 创建新的排除管理窗口
         html_file = get_resource_path('warp_exclusion.html')
         html_url = f'file:///{html_file.replace(chr(92), "/")}'
-        try:
-            user32 = ctypes.windll.user32
-            screen_w = user32.GetSystemMetrics(0)
-            screen_h = user32.GetSystemMetrics(1)
-            ex_w, ex_h = 520, 700
-            ex_x = (screen_w - ex_w) // 2
-            ex_y = (screen_h - ex_h) // 2
-
-            self._exclusion_window = webview.create_window(
-                'WARP排除管理',
-                url=html_url,
-                js_api=self.api,
-                width=ex_w,
-                height=ex_h,
-                x=ex_x,
-                y=ex_y,
-                resizable=True,
-                background_color='#0D0D0D',
-                easy_drag=False,
-                frameless=True,
-            )
-            # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
-            # 返回 None 允许窗口正常关闭，pywebview 会自动销毁 WebView2 进程
-            def _on_exclusion_closing():
-                logger.info("[exclusion] Window closing, clearing reference")
-                self._exclusion_window = None
-                return None
-            self._exclusion_window.events.closing += _on_exclusion_closing
+        # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
+        # 返回 None 允许窗口正常关闭，pywebview 会自动销毁 WebView2 进程
+        def _on_exclusion_closing():
+            logger.info("[exclusion] Window closing, clearing reference")
+            self._exclusion_window = None
+            return None
+        self._exclusion_window = create_webview_window(
+            self.api, 'WARP排除管理', html_url, 520, 700,
+            on_closing_callback=_on_exclusion_closing,
+        )
+        if self._exclusion_window:
             logger.info(f"[show_exclusion] Window created, url={html_url}")
-        except Exception as e:
-            logger.error(f"[show_exclusion] create_window failed: {e}\n{traceback.format_exc()}")
 
     def show_traffic_monitor(self):
         """显示流量监控窗口"""
@@ -2120,18 +2091,7 @@ class TrayApp:
             try:
                 self._traffic_window.show()
                 self._traffic_window.restore()
-                hwnd = ctypes.windll.user32.FindWindowW(None, '流量监控')
-                if hwnd:
-                    SW_RESTORE = 9
-                    HWND_TOPMOST = -1
-                    HWND_NOTOPMOST = -2
-                    SWP_NOMOVE = 0x0002
-                    SWP_NOSIZE = 0x0001
-                    SWP_SHOWWINDOW = 0x0040
-                    ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
-                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
-                    ctypes.windll.user32.SetForegroundWindow(hwnd)
-                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
+                bring_window_to_top('流量监控')
                 logger.info("[show_traffic_monitor] Existing window shown")
                 return
             except Exception as e:
@@ -2140,36 +2100,17 @@ class TrayApp:
 
         html_file = get_resource_path('traffic_monitor.html')
         html_url = f'file:///{html_file.replace(chr(92), "/")}'
-        try:
-            user32 = ctypes.windll.user32
-            screen_w = user32.GetSystemMetrics(0)
-            screen_h = user32.GetSystemMetrics(1)
-            mon_w, mon_h = 640, 760
-            mon_x = (screen_w - mon_w) // 2
-            mon_y = (screen_h - mon_h) // 2
-
-            self._traffic_window = webview.create_window(
-                '流量监控',
-                url=html_url,
-                js_api=self.api,
-                width=mon_w,
-                height=mon_h,
-                x=mon_x,
-                y=mon_y,
-                resizable=True,
-                background_color='#0D0D0D',
-                easy_drag=False,
-                frameless=True,
-            )
-            # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
-            def _on_traffic_closing():
-                logger.info("[traffic] Window closing, clearing reference")
-                self._traffic_window = None
-                return None
-            self._traffic_window.events.closing += _on_traffic_closing
+        # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
+        def _on_traffic_closing():
+            logger.info("[traffic] Window closing, clearing reference")
+            self._traffic_window = None
+            return None
+        self._traffic_window = create_webview_window(
+            self.api, '流量监控', html_url, 640, 760,
+            on_closing_callback=_on_traffic_closing,
+        )
+        if self._traffic_window:
             logger.info(f"[show_traffic_monitor] Window created, url={html_url}")
-        except Exception as e:
-            logger.error(f"[show_traffic_monitor] create_window failed: {e}\n{traceback.format_exc()}")
 
     def show_flow_monitor(self):
         """显示流量可视化窗口（数据流动画）"""
@@ -2178,18 +2119,7 @@ class TrayApp:
             try:
                 self._flow_window.show()
                 self._flow_window.restore()
-                hwnd = ctypes.windll.user32.FindWindowW(None, '流量可视化')
-                if hwnd:
-                    SW_RESTORE = 9
-                    HWND_TOPMOST = -1
-                    HWND_NOTOPMOST = -2
-                    SWP_NOMOVE = 0x0002
-                    SWP_NOSIZE = 0x0001
-                    SWP_SHOWWINDOW = 0x0040
-                    ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
-                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
-                    ctypes.windll.user32.SetForegroundWindow(hwnd)
-                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
+                bring_window_to_top('流量可视化')
                 logger.info("[show_flow_monitor] Existing window shown")
                 return
             except Exception as e:
@@ -2198,36 +2128,17 @@ class TrayApp:
 
         html_file = get_resource_path('traffic_flow.html')
         html_url = f'file:///{html_file.replace(chr(92), "/")}'
-        try:
-            user32 = ctypes.windll.user32
-            screen_w = user32.GetSystemMetrics(0)
-            screen_h = user32.GetSystemMetrics(1)
-            flow_w, flow_h = 960, 820
-            flow_x = (screen_w - flow_w) // 2
-            flow_y = (screen_h - flow_h) // 2
-
-            self._flow_window = webview.create_window(
-                '流量可视化',
-                url=html_url,
-                js_api=self.api,
-                width=flow_w,
-                height=flow_h,
-                x=flow_x,
-                y=flow_y,
-                resizable=True,
-                background_color='#0D0D0D',
-                easy_drag=False,
-                frameless=True,
-            )
-            # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
-            def _on_flow_closing():
-                logger.info("[flow] Window closing, clearing reference")
-                self._flow_window = None
-                return None
-            self._flow_window.events.closing += _on_flow_closing
+        # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
+        def _on_flow_closing():
+            logger.info("[flow] Window closing, clearing reference")
+            self._flow_window = None
+            return None
+        self._flow_window = create_webview_window(
+            self.api, '流量可视化', html_url, 960, 820,
+            on_closing_callback=_on_flow_closing,
+        )
+        if self._flow_window:
             logger.info(f"[show_flow_monitor] Window created, url={html_url}")
-        except Exception as e:
-            logger.error(f"[show_flow_monitor] create_window failed: {e}\n{traceback.format_exc()}")
 
     def show_settings(self, tab=None):
         """显示应用窗口。tab参数保留但不再使用，窗口保持上次的状态。"""

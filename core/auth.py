@@ -8,7 +8,7 @@ import threading
 import logging
 
 import core.state
-from core.state import _auth_cancelled, _auth_lock
+from core.state import _auth_cancelled
 from core.command import run_command, run_elevated_powershell
 from core.network import (
     get_wifi_interface_name, get_local_ip, get_mac_address,
@@ -16,7 +16,7 @@ from core.network import (
 )
 from core.warp_manager import (
     connect_warp, disconnect_warp, get_warp_cli,
-    _set_warp_masque_mode, update_tray_icon, update_tray_icon_restore,
+    _set_warp_masque_mode,
 )
 
 logger = logging.getLogger('wifi_tray')
@@ -190,7 +190,7 @@ def portal_logout():
     }
     query_string = urllib.parse.urlencode(params)
     full_url = f"{url}?{query_string}"
-    logger.info(f"Logout URL: {full_url[:80]}...")
+    logger.info(f"Logout URL length: {len(full_url)}")
     try:
         req = urllib.request.Request(full_url)
         req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')

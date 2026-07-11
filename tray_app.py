@@ -655,11 +655,10 @@ class ApiBridge:
     # ------------------------------------------------------------------
     def get_traffic_status(self):
         """获取当前网络流量走向统计和连接详情"""
-        import time as _time
-        _t0 = _time.time()
+        _t0 = time.time()
         try:
             result = get_traffic_status()
-            _elapsed = _time.time() - _t0
+            _elapsed = time.time() - _t0
             logger.info(f"[get_traffic_status] OK, elapsed={_elapsed:.2f}s, total={result.get('total', 0)}")
             return result
         except Exception as e:

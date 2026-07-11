@@ -12,8 +12,8 @@ import traceback
 import logging
 
 import core.state
-from core.state import _auth_cancelled, WIFI_EVENT_NAME, _auth_lock
-from core.command import run_command, run_elevated_powershell
+from core.state import WIFI_EVENT_NAME, _auth_lock
+from core.command import run_command
 from core.network import get_current_wifi_ssid, is_warp_connected, get_wifi_interface_name
 from core.warp_manager import update_tray_icon, update_tray_icon_restore
 
@@ -102,13 +102,13 @@ def wifi_event_monitor():
             return
         logger.info("WiFi event monitor thread started")
         kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        # 延迟导入以避免循环依赖（放在循环外，避免每次事件触发都执行导入语句）
+        from tray_app import load_config
+        from core.auth import run_auth_task, run_restore_task
         while True:
             result = kernel32.WaitForSingleObject(core.state._wifi_event_handle, 0xFFFFFFFF)
             if result == 0:
                 logger.info("WiFi connection event signal received")
-                # 延迟导入以避免循环依赖
-                from tray_app import load_config
-                from core.auth import run_auth_task, run_restore_task
                 cfg = load_config()
                 auto_auth = cfg.get('auto_auth', False)
                 auto_restore = cfg.get('auto_restore', False)

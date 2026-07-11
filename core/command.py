@@ -25,9 +25,6 @@ def run_command(cmd, shell=True, timeout=30):
     使用临时文件来捕获输出，避免 Windows Store 版 Python 在管理员权限下的 subprocess 管道问题。
     使用 CREATE_NO_WINDOW + SW_HIDE 彻底避免命令行窗口弹窗。
     """
-    import tempfile
-    import uuid
-
     # 构建命令字符串
     if isinstance(cmd, list):
         cmd_parts = []

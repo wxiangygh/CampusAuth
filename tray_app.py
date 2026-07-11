@@ -18,6 +18,8 @@ from PIL import Image, ImageDraw
 import webview
 from warp_exclusion import get_exclusion_manager, DnsMonitor
 from traffic_monitor import get_traffic_status
+import core.state
+from core.state import _auth_lock, _auth_cancelled, WIFI_EVENT_NAME
 
 def get_resource_path(relative_path):
     """获取资源文件路径（支持开发环境和PyInstaller打包）"""
@@ -82,8 +84,6 @@ def check_single_instance():
             kernel32.CloseHandle(mutex)
             mutex = kernel32.CreateMutexW(None, True, mutex_name + "_v2")
     return mutex
-
-TRAY_MUTEX = None
 
 def load_config():
     defaults = {
@@ -727,8 +727,6 @@ def portal_logout():
         logger.error(f"Logout failed: {e}")
         return False
 
-_conf_json_backup = None
-
 def _set_warp_masque_mode(warp_cli, enable):
     if not warp_cli:
         logger.warning("warp-cli not found, cannot set MASQUE mode")
@@ -878,32 +876,27 @@ def is_warp_connected():
 
 def update_tray_icon(success, message=''):
     try:
-        if _tray_app_instance and _tray_app_instance.icon:
+        if core.state._tray_app_instance and core.state._tray_app_instance.icon:
             if success:
-                _tray_app_instance.icon.icon = create_icon('orange')
-                _tray_app_instance.icon.title = message or 'WARP已连接'
+                core.state._tray_app_instance.icon.icon = create_icon('orange')
+                core.state._tray_app_instance.icon.title = message or 'WARP已连接'
             else:
-                _tray_app_instance.icon.icon = create_icon('red')
-                _tray_app_instance.icon.title = message or '认证失败'
+                core.state._tray_app_instance.icon.icon = create_icon('red')
+                core.state._tray_app_instance.icon.title = message or '认证失败'
     except Exception as e:
         logger.error(f"update_tray_icon failed: {e}")
 
 def update_tray_icon_restore(success, message=''):
     try:
-        if _tray_app_instance and _tray_app_instance.icon:
+        if core.state._tray_app_instance and core.state._tray_app_instance.icon:
             if success:
-                _tray_app_instance.icon.icon = create_icon('green')
-                _tray_app_instance.icon.title = message or '已恢复正常'
+                core.state._tray_app_instance.icon.icon = create_icon('green')
+                core.state._tray_app_instance.icon.title = message or '已恢复正常'
             else:
-                _tray_app_instance.icon.icon = create_icon('red')
-                _tray_app_instance.icon.title = message or '恢复失败'
+                core.state._tray_app_instance.icon.icon = create_icon('red')
+                core.state._tray_app_instance.icon.title = message or '恢复失败'
     except Exception as e:
         logger.error(f"update_tray_icon_restore failed: {e}")
-
-WIFI_EVENT_NAME = "Global\\WiFiAutoAuth_WiFiEvent"
-_auth_lock = threading.Lock()
-_auth_cancelled = threading.Event()
-_wifi_event_handle = None
 
 def _js_escape(s):
     return json.dumps(str(s), ensure_ascii=False)
@@ -1060,8 +1053,6 @@ def wifi_event_monitor():
         global _wifi_monitor_started
         _wifi_monitor_started = False
 
-_wifi_monitor_started = False
-
 def start_wifi_event_monitor():
     global _wifi_monitor_started
     if _wifi_monitor_started:
@@ -1105,19 +1096,19 @@ def check_startup_wifi_and_auth():
 
 def _update_tray_status():
     try:
-        if not _tray_app_instance or not _tray_app_instance.icon:
+        if not core.state._tray_app_instance or not core.state._tray_app_instance.icon:
             return
-        status = _tray_app_instance.api.check_network_status()
+        status = core.state._tray_app_instance.api.check_network_status()
         s = status.get('status', 'disconnected')
         if s == 'connected' or s == 'partial':
-            _tray_app_instance.icon.icon = create_icon('orange')
-            _tray_app_instance.icon.title = status.get('message', 'WARP已连接')
+            core.state._tray_app_instance.icon.icon = create_icon('orange')
+            core.state._tray_app_instance.icon.title = status.get('message', 'WARP已连接')
         elif s == 'normal':
-            _tray_app_instance.icon.icon = create_icon('green')
-            _tray_app_instance.icon.title = '正常模式'
+            core.state._tray_app_instance.icon.icon = create_icon('green')
+            core.state._tray_app_instance.icon.title = '正常模式'
         else:
-            _tray_app_instance.icon.icon = create_icon('gray')
-            _tray_app_instance.icon.title = '未连接'
+            core.state._tray_app_instance.icon.icon = create_icon('gray')
+            core.state._tray_app_instance.icon.title = '未连接'
     except Exception as e:
         logger.error(f"_update_tray_status failed: {e}")
 
@@ -1131,9 +1122,9 @@ def cleanup_wifi_event():
 
 def _push_auth_progress(step, total, message, status='running', action='auth'):
     try:
-        if _tray_app_instance and _tray_app_instance.settings_window:
+        if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
             js_code = f"onAuthProgress({{step:{step}, total:{total}, message:{_js_escape(message)}, status:{_js_escape(status)}, action:{_js_escape(action)}}})"
-            _tray_app_instance.settings_window.evaluate_js(js_code)
+            core.state._tray_app_instance.settings_window.evaluate_js(js_code)
             logger.debug(f"push_auth_progress: step={step}/{total}, status={status}, action={action}, msg={message}")
     except Exception as e:
         logger.error(f"push_auth_progress failed: {e}")
@@ -1286,6 +1277,17 @@ def run_auth_task():
     logger.info("=" * 60)
     logger.info("Authentication completed successfully")
     logger.info("=" * 60)
+    # 认证成功后，根据配置决定是否重新启用 IPv4
+    # auto_enable_ipv4=True：启用 IPv4（同时保持 WARP，用户可同时访问 IPv4 和 IPv6）
+    # auto_enable_ipv4=False：保持 IPv4 禁用，所有流量走 WARP（IPv6）
+    if CONFIG.get('auto_enable_ipv4', True):
+        logger.info("auto_enable_ipv4=True, re-enabling IPv4 after auth")
+        if enable_ipv4(interface_name):
+            logger.info("IPv4 re-enabled after auth")
+        else:
+            logger.warning("Failed to re-enable IPv4 after auth")
+    else:
+        logger.info("auto_enable_ipv4=False, keeping IPv4 disabled (all traffic via WARP)")
     _push_auth_progress(5, 5, '认证成功', 'success')
     return True, "认证成功"
 
@@ -1489,16 +1491,16 @@ class ApiBridge:
 
     def minimize_window(self):
         try:
-            if _tray_app_instance and _tray_app_instance.settings_window:
-                _tray_app_instance.settings_window.minimize()
+            if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
+                core.state._tray_app_instance.settings_window.minimize()
                 logger.info("Window minimized via title bar button")
         except Exception as e:
             logger.error(f"minimize_window failed: {e}")
 
     def close_window(self):
         try:
-            if _tray_app_instance and _tray_app_instance.settings_window:
-                _tray_app_instance.settings_window.hide()
+            if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
+                core.state._tray_app_instance.settings_window.hide()
                 logger.info("Window hidden via title bar button")
         except Exception as e:
             logger.error(f"close_window failed: {e}")
@@ -1537,9 +1539,9 @@ class ApiBridge:
         if _auth_lock.locked():
             _auth_cancelled.set()
             logger.info("Cancel flag set, notifying frontend immediately")
-            if _tray_app_instance and _tray_app_instance.settings_window:
+            if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
                 js_code = f"onAuthProgress({{step:0, total:1, message:{_js_escape('已取消')}, status:{_js_escape('cancelled')}}})"
-                _tray_app_instance.settings_window.evaluate_js(js_code)
+                core.state._tray_app_instance.settings_window.evaluate_js(js_code)
             return {'success': True, 'message': '已取消'}
         return {'success': True, 'message': '没有正在进行的操作'}
 
@@ -1547,8 +1549,8 @@ class ApiBridge:
         def _do_auth():
             if not _auth_lock.acquire(blocking=False):
                 js_code = f"onAuthProgress({{step:5, total:5, message:{_js_escape('认证正在进行中，请稍候')}, status:{_js_escape('error')}}})"
-                if _tray_app_instance and _tray_app_instance.settings_window:
-                    _tray_app_instance.settings_window.evaluate_js(js_code)
+                if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
+                    core.state._tray_app_instance.settings_window.evaluate_js(js_code)
                 return
             try:
                 success, msg = run_auth_task()
@@ -1557,15 +1559,15 @@ class ApiBridge:
                 else:
                     status = "success" if success else "error"
                     js_code = f"onAuthProgress({{step:5, total:5, message:{_js_escape(msg)}, status:{_js_escape(status)}}})"
-                    if _tray_app_instance and _tray_app_instance.settings_window:
-                        _tray_app_instance.settings_window.evaluate_js(js_code)
+                    if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
+                        core.state._tray_app_instance.settings_window.evaluate_js(js_code)
                     update_tray_icon(success, msg)
             except Exception as e:
                 logger.error(f"test_auth thread error: {e}")
                 if not _auth_cancelled.is_set():
                     js_code = f"onAuthProgress({{step:5, total:5, message:{_js_escape(str(e))}, status:{_js_escape('error')}}})"
-                    if _tray_app_instance and _tray_app_instance.settings_window:
-                        _tray_app_instance.settings_window.evaluate_js(js_code)
+                    if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
+                        core.state._tray_app_instance.settings_window.evaluate_js(js_code)
                     update_tray_icon(False, str(e))
             finally:
                 _auth_cancelled.clear()
@@ -1670,8 +1672,8 @@ class ApiBridge:
                 if not _auth_lock.acquire(timeout=3):
                     logger.error("restore_network: could not acquire lock after cancel")
                     js_code = f"onAuthProgress({{step:3, total:3, message:{_js_escape('无法取消当前操作')}, status:{_js_escape('error')}}})"
-                    if _tray_app_instance and _tray_app_instance.settings_window:
-                        _tray_app_instance.settings_window.evaluate_js(js_code)
+                    if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
+                        core.state._tray_app_instance.settings_window.evaluate_js(js_code)
                     return
             try:
                 success, msg = run_restore_task()
@@ -1680,8 +1682,8 @@ class ApiBridge:
                 else:
                     status = "success" if success else "error"
                     js_code = f"onAuthProgress({{step:3, total:3, message:{_js_escape(msg)}, status:{_js_escape(status)}, action:'restore'}})"
-                    if _tray_app_instance and _tray_app_instance.settings_window:
-                        _tray_app_instance.settings_window.evaluate_js(js_code)
+                    if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
+                        core.state._tray_app_instance.settings_window.evaluate_js(js_code)
                     update_tray_icon_restore(success, msg)
             except Exception as e:
                 logger.error(f"restore_network thread error: {e}")
@@ -1706,16 +1708,16 @@ class ApiBridge:
             if setup_startup_task():
                 CONFIG['auto_startup'] = True
                 save_config_to_file(CONFIG)
-                if _tray_app_instance:
-                    _tray_app_instance._refresh_tray_menu()
+                if core.state._tray_app_instance:
+                    core.state._tray_app_instance._refresh_tray_menu()
                 return {'success': True, 'message': '开机自启已开启'}
             return {'success': False, 'message': '设置失败'}
         else:
             remove_startup_task()
             CONFIG['auto_startup'] = False
             save_config_to_file(CONFIG)
-            if _tray_app_instance:
-                _tray_app_instance._refresh_tray_menu()
+            if core.state._tray_app_instance:
+                core.state._tray_app_instance._refresh_tray_menu()
             return {'success': True, 'message': '开机自启已关闭'}
 
     def browse_folder(self, title='选择文件'):
@@ -1818,10 +1820,12 @@ class ApiBridge:
         connections: [{hostname, remote_ip}, ...]
         route: 'ipv4' | 'ipv6' | 'warp'（warp=不直连，走WARP）
         有域名的用域名排除，无域名的用 IP 排除。
+        修改后刷新 DNS 缓存，确保排除规则对新连接立即生效。
         """
         from warp_exclusion import warp_add_ip, warp_remove_ip
         mgr = self._get_mgr()
         results = []
+        need_flush_dns = False  # 是否需要刷新 DNS 缓存
         for conn in connections:
             hostname = (conn.get('hostname') or '').strip()
             remote_ip = (conn.get('remote_ip') or '').strip()
@@ -1836,16 +1840,36 @@ class ApiBridge:
                         ok, msg = mgr.remove_domain(hostname)
                     else:
                         ok, msg = warp_remove_ip(remote_ip)
+                    if ok:
+                        need_flush_dns = True
                 else:
                     # 直连：添加排除规则
                     if hostname:
+                        # 域名可能已存在（之前已排除），先移除旧规则再添加，确保 route 类型正确切换
+                        mgr.remove_domain(hostname)
                         ok, msg, _ = mgr.add_domain(hostname, route=route)
                     else:
                         ok, msg = warp_add_ip(remote_ip)
+                    if ok:
+                        need_flush_dns = True
             except Exception as e:
                 ok, msg = False, str(e)
             results.append({'hostname': hostname, 'remote_ip': remote_ip,
                             'success': ok, 'message': msg})
+        # 刷新系统 DNS 缓存，让排除规则对新连接立即生效
+        # WARP 的 tunnel host add 只对新 DNS 查询生效，旧缓存会导致流量仍走 WARP
+        if need_flush_dns:
+            try:
+                import subprocess
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = subprocess.SW_HIDE
+                subprocess.Popen('ipconfig /flushdns', shell=True,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 startupinfo=si, creationflags=subprocess.CREATE_NO_WINDOW)
+                logger.info('DNS cache flushed after route change')
+            except Exception as e:
+                logger.warning(f'Failed to flush DNS cache: {e}')
         success_count = sum(1 for r in results if r['success'])
         total = len(results)
         return {
@@ -1940,10 +1964,13 @@ class ApiBridge:
         return {'success': True, 'message': '已更新'}
 
     def close_exclusion_window(self):
-        """关闭 WARP 排除管理窗口"""
-        if _tray_app_instance and _tray_app_instance._exclusion_window:
-            _tray_app_instance._exclusion_window.hide()
-            _tray_app_instance._exclusion_window = None
+        """关闭 WARP 排除管理窗口（销毁 WebView2 进程，释放资源）"""
+        if core.state._tray_app_instance and core.state._tray_app_instance._exclusion_window:
+            try:
+                core.state._tray_app_instance._exclusion_window.destroy()
+            except Exception as e:
+                logger.debug(f'close_exclusion_window destroy: {e}')
+            core.state._tray_app_instance._exclusion_window = None
 
     # ------------------------------------------------------------------
     # 流量监控 API（供 traffic_monitor.html 前端调用）
@@ -1962,19 +1989,24 @@ class ApiBridge:
             raise
 
     def close_traffic_window(self):
-        """关闭流量监控窗口"""
-        if _tray_app_instance and _tray_app_instance._traffic_window:
-            _tray_app_instance._traffic_window.hide()
-            _tray_app_instance._traffic_window = None
+        """关闭流量监控窗口（销毁 WebView2 进程，释放资源）"""
+        if core.state._tray_app_instance and core.state._tray_app_instance._traffic_window:
+            try:
+                core.state._tray_app_instance._traffic_window.destroy()
+            except Exception as e:
+                logger.debug(f'close_traffic_window destroy: {e}')
+            core.state._tray_app_instance._traffic_window = None
 
     def close_flow_window(self):
-        """关闭流量可视化窗口"""
-        if _tray_app_instance and _tray_app_instance._flow_window:
-            _tray_app_instance._flow_window.hide()
-            _tray_app_instance._flow_window = None
+        """关闭流量可视化窗口（销毁 WebView2 进程，释放资源）"""
+        if core.state._tray_app_instance and core.state._tray_app_instance._flow_window:
+            try:
+                core.state._tray_app_instance._flow_window.destroy()
+            except Exception as e:
+                logger.debug(f'close_flow_window destroy: {e}')
+            core.state._tray_app_instance._flow_window = None
 
 icon_instance = None
-_tray_app_instance = None
 
 def on_settings(icon, item):
     logger.info("User clicked: Settings")
@@ -2039,31 +2071,66 @@ def _run_restore(icon):
     finally:
         _auth_lock.release()
 
+def on_reauth(icon, item):
+    """注销并重新认证：先注销 Portal，再重新执行认证流程"""
+    logger.info("User clicked: Re-auth (logout + auth)")
+    icon.icon = create_icon('orange')
+    icon.title = '正在重新认证...'
+    icon.notify('正在注销并重新认证...', '校园网助手')
+    threading.Thread(target=_run_reauth, args=(icon,), daemon=True).start()
+
+def _run_reauth(icon):
+    if not _auth_lock.acquire(blocking=False):
+        icon.notify('操作正在进行中，请稍候', '校园网助手')
+        icon.icon = create_icon('green')
+        icon.title = '校园网助手'
+        return
+    try:
+        # 1. 先注销 Portal
+        logger.info("[reauth] Logging out from portal...")
+        portal_logout()
+        # 2. 重新认证
+        logger.info("[reauth] Starting re-authentication...")
+        success, msg = run_auth_task()
+        if success:
+            icon.icon = create_icon('orange')
+            icon.title = 'WARP已连接'
+            icon.notify(msg, '校园网助手')
+        else:
+            icon.icon = create_icon('red')
+            icon.title = '认证失败'
+            icon.notify(f'失败: {msg}', '校园网助手')
+    except Exception as e:
+        logger.error(f"Re-auth error: {e}")
+        icon.icon = create_icon('red')
+        icon.title = '错误'
+        icon.notify(f'错误: {e}', '校园网助手')
+    finally:
+        _auth_lock.release()
+
 def on_exit(icon, item):
     logger.info("on_exit: user clicked Exit")
-    global _tray_app_instance
-    if _tray_app_instance:
-        _tray_app_instance._should_exit = True
-        if not _tray_app_instance._webview_started:
-            _tray_app_instance._webview_start_event.set()
+    if core.state._tray_app_instance:
+        core.state._tray_app_instance._should_exit = True
+        if not core.state._tray_app_instance._webview_started:
+            core.state._tray_app_instance._webview_start_event.set()
         # 销毁所有 webview 窗口，让 webview.start() 退出
         for win_attr in ('settings_window', '_exclusion_window', '_traffic_window', '_flow_window'):
-            win = getattr(_tray_app_instance, win_attr, None)
+            win = getattr(core.state._tray_app_instance, win_attr, None)
             if win:
                 try:
                     win.destroy()
                 except Exception as e:
                     logger.debug(f"on_exit: destroy {win_attr} failed: {e}")
-                setattr(_tray_app_instance, win_attr, None)
+                setattr(core.state._tray_app_instance, win_attr, None)
     cleanup_wifi_event()
     icon.stop()
-    if _tray_app_instance and _tray_app_instance.settings_window:
-        _tray_app_instance.save_window_position()
-    global TRAY_MUTEX
-    if TRAY_MUTEX:
+    if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
+        core.state._tray_app_instance.save_window_position()
+    if core.state.TRAY_MUTEX:
         kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-        kernel32.CloseHandle(TRAY_MUTEX)
-        TRAY_MUTEX = None
+        kernel32.CloseHandle(core.state.TRAY_MUTEX)
+        core.state.TRAY_MUTEX = None
         logger.debug("on_exit: mutex released")
     logger.info("on_exit: application exiting")
     # 强制退出，防止残留线程阻止进程退出
@@ -2112,6 +2179,7 @@ class TrayApp:
             pystray.MenuItem('显示主窗口', lambda i, item: self.show_settings()),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('手动认证', on_auth),
+            pystray.MenuItem('注销并重新认证', on_reauth),
             pystray.MenuItem('恢复正常模式', on_restore),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('WARP排除管理', lambda i, item: self.show_exclusion()),
@@ -2190,6 +2258,7 @@ class TrayApp:
             startup_label = '取消开机自启' if startup_enabled else '设置开机自启'
             menu_items = [
                 pystray.MenuItem('手动认证', on_auth),
+                pystray.MenuItem('注销并重新认证', on_reauth),
                 pystray.MenuItem('恢复正常模式', on_restore),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem('WARP排除管理', lambda i, item: self.show_exclusion()),
@@ -2260,6 +2329,13 @@ class TrayApp:
                 easy_drag=False,
                 frameless=True,
             )
+            # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
+            # 返回 None 允许窗口正常关闭，pywebview 会自动销毁 WebView2 进程
+            def _on_exclusion_closing():
+                logger.info("[exclusion] Window closing, clearing reference")
+                self._exclusion_window = None
+                return None
+            self._exclusion_window.events.closing += _on_exclusion_closing
             logger.info(f"[show_exclusion] Window created, url={html_url}")
         except Exception as e:
             logger.error(f"[show_exclusion] create_window failed: {e}\n{traceback.format_exc()}")
@@ -2312,6 +2388,12 @@ class TrayApp:
                 easy_drag=False,
                 frameless=True,
             )
+            # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
+            def _on_traffic_closing():
+                logger.info("[traffic] Window closing, clearing reference")
+                self._traffic_window = None
+                return None
+            self._traffic_window.events.closing += _on_traffic_closing
             logger.info(f"[show_traffic_monitor] Window created, url={html_url}")
         except Exception as e:
             logger.error(f"[show_traffic_monitor] create_window failed: {e}\n{traceback.format_exc()}")
@@ -2364,6 +2446,12 @@ class TrayApp:
                 easy_drag=False,
                 frameless=True,
             )
+            # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
+            def _on_flow_closing():
+                logger.info("[flow] Window closing, clearing reference")
+                self._flow_window = None
+                return None
+            self._flow_window.events.closing += _on_flow_closing
             logger.info(f"[show_flow_monitor] Window created, url={html_url}")
         except Exception as e:
             logger.error(f"[show_flow_monitor] create_window failed: {e}\n{traceback.format_exc()}")
@@ -2430,8 +2518,7 @@ class TrayApp:
             logger.error(f"save_window_position exception: {e}")
 
     def run(self):
-        global _tray_app_instance
-        _tray_app_instance = self
+        core.state._tray_app_instance = self
         cfg = load_config()
         self.create_tray()
         logger.info(f"Tray started (admin: {is_admin()})")
@@ -2601,7 +2688,7 @@ class TrayApp:
             self.icon.stop()
 
 def main():
-    global CONFIG, TRAY_MUTEX
+    global CONFIG
     logger.info("=" * 50)
     logger.info("WiFi Auto-Auth App Starting")
     logger.info(f"SCRIPT_DIR: {SCRIPT_DIR}")
@@ -2614,7 +2701,7 @@ def main():
         logger.info("Not running as admin, elevating...")
         elevate_if_needed()
         return
-    TRAY_MUTEX = check_single_instance()
+    core.state.TRAY_MUTEX = check_single_instance()
     hide_console()
     silent = '--silent' in sys.argv
     if silent:

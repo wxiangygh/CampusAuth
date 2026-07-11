@@ -8,7 +8,6 @@ import subprocess
 import logging
 from logging.handlers import RotatingFileHandler
 import time
-import functools
 import traceback
 import tempfile
 from pathlib import Path
@@ -19,8 +18,8 @@ import webview
 from warp_exclusion import get_exclusion_manager, DnsMonitor
 from traffic_monitor import get_traffic_status
 import core.state
-from core.state import _auth_lock, _auth_cancelled, WIFI_EVENT_NAME
-from core.command import run_command, run_elevated_powershell
+from core.state import _auth_lock, _auth_cancelled
+from core.command import run_command
 from core.webview import bring_window_to_top, create_webview_window
 from core.network import (
     scan_wifi_networks, get_wifi_interface_name, get_local_ip,
@@ -74,22 +73,6 @@ logger = logging.getLogger('wifi_tray')
 logging.getLogger('PIL').setLevel(logging.WARNING)
 logging.getLogger('pystray').setLevel(logging.WARNING)
 
-def log_func_call(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        logger.debug(f"→ {func.__name__}() called")
-        t0 = time.time()
-        try:
-            result = func(*args, **kwargs)
-            elapsed = time.time() - t0
-            logger.debug(f"← {func.__name__}() returned in {elapsed:.3f}s")
-            return result
-        except Exception as e:
-            elapsed = time.time() - t0
-            logger.error(f"✗ {func.__name__}() failed in {elapsed:.3f}s: {e}\n{traceback.format_exc()}")
-            raise
-    return wrapper
-
 def load_config():
     defaults = {
         'username': '',
@@ -138,7 +121,7 @@ CONFIG = load_config()
 def is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
-    except:
+    except Exception:
         return False
 
 def create_icon(color='orange'):
@@ -442,7 +425,7 @@ class ApiBridge:
             )
             try:
                 os.remove(tmp_ps)
-            except:
+            except Exception:
                 pass
             path = result.stdout.strip() if result.returncode == 0 else ''
             logger.info(f"browse_folder: selected={path!r}, rc={result.returncode}, stderr={result.stderr[:200]!r}")
@@ -828,8 +811,8 @@ def on_exit(icon, item):
         core.state.TRAY_MUTEX = None
         logger.debug("on_exit: mutex released")
     logger.info("on_exit: application exiting")
-    # 强制退出，防止残留线程阻止进程退出
-    os._exit(0)
+    # 退出应用，允许 atexit 和 finally 执行清理
+    sys.exit(0)
 
 def on_show_log(icon, item):
     logger.info("User clicked: Show Log")

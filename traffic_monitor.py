@@ -22,6 +22,7 @@ import ipaddress
 import logging
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from core.command import run_powershell_simple as _run_ps
 
 logger = logging.getLogger('traffic_monitor')
 
@@ -38,24 +39,6 @@ ROUTE_TYPES = {
     'ipv6_warp':       {'label': 'WARP[v6]→v6',       'color': '#EF4444'},
     'ipv6_warp_ipv4':  {'label': 'WARP[v6]→v4',       'color': '#A855F7'},
 }
-
-
-def _run_ps(cmd, timeout=15):
-    """执行 PowerShell 命令，返回 (exit_code, stdout, stderr)"""
-    si = subprocess.STARTUPINFO()
-    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    si.wShowWindow = 0
-    try:
-        result = subprocess.run(
-            ['powershell', '-Command', cmd],
-            capture_output=True, text=True, encoding='utf-8', errors='replace',
-            timeout=timeout, startupinfo=si, creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        return result.returncode, result.stdout or '', result.stderr or ''
-    except subprocess.TimeoutExpired:
-        return -1, '', 'Command timed out'
-    except Exception as e:
-        return -1, '', str(e)
 
 
 def _get_network_snapshot():

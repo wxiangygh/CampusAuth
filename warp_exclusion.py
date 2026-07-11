@@ -19,6 +19,7 @@ import time
 import subprocess
 import logging
 from pathlib import Path
+from core.command import run_powershell_simple
 
 logger = logging.getLogger('warp_exclusion')
 
@@ -29,27 +30,9 @@ if getattr(__import__('sys'), 'frozen', False):
 EXCLUSION_CONFIG_FILE = SCRIPT_DIR / 'warp_exclusion_config.json'
 
 
-def _run_command(cmd, shell=False, timeout=15):
-    """执行命令并返回 (exit_code, stdout, stderr)，避免窗口弹窗"""
-    si = subprocess.STARTUPINFO()
-    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    si.wShowWindow = 0
-    try:
-        result = subprocess.run(
-            cmd, shell=shell, capture_output=True, text=True,
-            encoding='utf-8', errors='replace', timeout=timeout,
-            startupinfo=si, creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        return result.returncode, result.stdout or '', result.stderr or ''
-    except subprocess.TimeoutExpired:
-        return -1, '', 'Command timed out'
-    except Exception as e:
-        return -1, '', str(e)
-
-
 def get_warp_cli_path():
     """查找 warp-cli 可执行文件路径"""
-    code, _, _ = _run_command('warp-cli --version', shell=True)
+    code, _, _ = run_powershell_simple('warp-cli --version', shell=True)
     if code == 0:
         return 'warp-cli'
     default_paths = [
@@ -93,7 +76,7 @@ def _is_valid_domain(domain):
 def get_dns_cache_domains():
     """通过 PowerShell Get-DnsClientCache 获取DNS缓存中的所有域名"""
     ps_cmd = 'Get-DnsClientCache | Select-Object -ExpandProperty Name | Sort-Object -Unique'
-    code, output, _ = _run_command(['powershell', '-Command', ps_cmd], timeout=10)
+    code, output, _ = run_powershell_simple(['powershell', '-Command', ps_cmd], timeout=10)
     if code != 0 or not output:
         return []
     domains = set()
@@ -308,13 +291,13 @@ def _add_ipv6_hosts_entry(domain, ipv6_addr):
     code, output, err = _run_elevated_copy(tmp_file, HOSTS_FILE)
     try:
         os.remove(tmp_file)
-    except:
+    except Exception:
         pass
 
     if code == 0:
         logger.info(f'Hosts entry added: {entry_line}')
         # 清空 DNS 缓存，让新条目立即生效
-        _run_command(['powershell', '-Command', 'Clear-DnsClientCache'], shell=False, timeout=5)
+        run_powershell_simple(['powershell', '-Command', 'Clear-DnsClientCache'], shell=False, timeout=5)
         return True, 'hosts 条目已添加'
     else:
         logger.error(f'Failed to copy hosts file: {err or output}')
@@ -365,12 +348,12 @@ def _remove_ipv6_hosts_entry(domain):
     code, output, err = _run_elevated_copy(tmp_file, HOSTS_FILE)
     try:
         os.remove(tmp_file)
-    except:
+    except Exception:
         pass
 
     if code == 0:
         logger.info(f'Hosts entry removed for {domain}')
-        _run_command(['powershell', '-Command', 'Clear-DnsClientCache'], shell=False, timeout=5)
+        run_powershell_simple(['powershell', '-Command', 'Clear-DnsClientCache'], shell=False, timeout=5)
         return True, 'hosts 条目已移除'
     else:
         return False, f'复制 hosts 失败: {err or output}'
@@ -380,7 +363,7 @@ def _run_elevated_copy(src, dst):
     """提权复制文件。返回 (exit_code, stdout, stderr)"""
     # 使用 PowerShell Start-Process 提权
     ps_cmd = f'Copy-Item -Path "{src}" -Destination "{dst}" -Force'
-    code, output, err = _run_command(
+    code, output, err = run_powershell_simple(
         ['powershell', '-Command',
          f'Start-Process powershell -Verb RunAs -Wait -ArgumentList \'-Command\', \'{ps_cmd}\''],
         shell=False, timeout=30
@@ -441,12 +424,12 @@ def _add_ipv4_firewall_block(domain, ipv4_addrs):
     rule_name = f"CampusAuth_IPv6Route_{domain}"
 
     # 先移除已有规则（避免重复）
-    _run_command(['powershell', '-Command',
+    run_powershell_simple(['powershell', '-Command',
         f'Remove-NetFirewallRule -DisplayName "{rule_name}" -ErrorAction SilentlyContinue'],
         timeout=10)
 
     # 创建新规则：阻止所有协议的出站 IPv4 流量
-    code, output, err = _run_command([
+    code, output, err = run_powershell_simple([
         'powershell', '-Command',
         f'New-NetFirewallRule -DisplayName "{rule_name}" '
         f'-Direction Outbound -Action Block '
@@ -461,7 +444,7 @@ def _add_ipv4_firewall_block(domain, ipv4_addrs):
     # 尝试提权
     if 'Access is denied' in msg or '拒绝访问' in msg:
         logger.info(f'IPv4 firewall block for {domain} needs elevation, retrying...')
-        code2, _, _ = _run_command([
+        code2, _, _ = run_powershell_simple([
             'powershell', '-Command',
             f'Start-Process powershell -Verb RunAs -Wait -ArgumentList '
             f'"-Command", "New-NetFirewallRule -DisplayName \\"{rule_name}\\" '
@@ -479,7 +462,7 @@ def _add_ipv4_firewall_block(domain, ipv4_addrs):
 def _remove_ipv4_firewall_block(domain):
     """移除指定域名的 IPv4 防火墙阻止规则"""
     rule_name = f"CampusAuth_IPv6Route_{domain}"
-    code, output, err = _run_command([
+    code, output, err = run_powershell_simple([
         'powershell', '-Command',
         f'Remove-NetFirewallRule -DisplayName "{rule_name}" -ErrorAction SilentlyContinue'
     ], timeout=10)
@@ -489,7 +472,7 @@ def _remove_ipv4_firewall_block(domain):
     # 尝试提权
     msg = (output + err).strip()[:200]
     if 'Access is denied' in msg or '拒绝访问' in msg:
-        code2, _, _ = _run_command([
+        code2, _, _ = run_powershell_simple([
             'powershell', '-Command',
             f'Start-Process powershell -Verb RunAs -Wait -ArgumentList '
             f'"-Command", "Remove-NetFirewallRule -DisplayName \\"{rule_name}\\" -ErrorAction SilentlyContinue"'
@@ -502,7 +485,7 @@ def _remove_ipv4_firewall_block(domain):
 
 def _remove_all_ipv4_firewall_blocks():
     """移除所有 CampusAuth 创建的防火墙规则"""
-    _run_command(['powershell', '-Command',
+    run_powershell_simple(['powershell', '-Command',
         'Remove-NetFirewallRule -DisplayName "CampusAuth_IPv6Route_*" -ErrorAction SilentlyContinue'],
         timeout=15)
     return True
@@ -524,7 +507,7 @@ def warp_add_host(host, route='ipv6'):
     blocked_ipv4 = []
 
     # 两种路由都用 tunnel host add，确保域名排除 WARP（不走 WARP）
-    code, output, err = _run_command([warp_cli, 'tunnel', 'host', 'add', host], shell=False)
+    code, output, err = run_powershell_simple([warp_cli, 'tunnel', 'host', 'add', host], shell=False)
     if code == 0:
         logger.info(f'WARP add host {host}: success')
     else:
@@ -548,13 +531,13 @@ def warp_add_host(host, route='ipv6'):
             # 所以只能降级为 IPv4 路由（走校园网 IPv4 直连）
             logger.warning(f'{host} has no AAAA records, cannot use IPv6 route, falling back to IPv4')
             # 仍然添加 DNS fallback（可能有助于未来获得 IPv6）
-            code, output, err = _run_command([warp_cli, 'dns', 'fallback', 'add', host], shell=False)
+            code, output, err = run_powershell_simple([warp_cli, 'dns', 'fallback', 'add', host], shell=False)
             if code == 0:
                 logger.info(f'WARP add dns fallback {host} (no AAAA, fallback added): success')
             return True, f'域名 {host} 无 IPv6 地址，已自动改为 IPv4 直连模式（WARP 排除+IPv4 直连）', []
 
         # 1. DNS fallback：让 DNS 走校园网本地解析（获取校园 IPv6 地址）
-        code, output, err = _run_command([warp_cli, 'dns', 'fallback', 'add', host], shell=False)
+        code, output, err = run_powershell_simple([warp_cli, 'dns', 'fallback', 'add', host], shell=False)
         if code == 0:
             logger.info(f'WARP add dns fallback {host} (ipv6 route): success')
         else:
@@ -562,7 +545,7 @@ def warp_add_host(host, route='ipv6'):
 
         # 2. IPv6 CIDR 排除：让 IPv6 流量走校园网直连
         for cidr in ipv6_prefixes:
-            c, o, e = _run_command([warp_cli, 'tunnel', 'ip', 'add-range', cidr], shell=False)
+            c, o, e = run_powershell_simple([warp_cli, 'tunnel', 'ip', 'add-range', cidr], shell=False)
             if c == 0:
                 logger.info(f'WARP auto-exclude IPv6 CIDR {cidr} for {host}: success')
             else:
@@ -608,7 +591,7 @@ def warp_remove_host(host, route='ipv6'):
         return False, 'warp-cli 未找到'
 
     # 两种路由都移除 tunnel host
-    code, output, err = _run_command([warp_cli, 'tunnel', 'host', 'remove', host], shell=False)
+    code, output, err = run_powershell_simple([warp_cli, 'tunnel', 'host', 'remove', host], shell=False)
     if code == 0:
         logger.info(f'WARP remove host {host}: success')
     else:
@@ -621,7 +604,7 @@ def warp_remove_host(host, route='ipv6'):
     if route == 'ipv6':
         # IPv6 路由额外清理
         # 1. 移除 DNS fallback
-        code, output, err = _run_command([warp_cli, 'dns', 'fallback', 'remove', host], shell=False)
+        code, output, err = run_powershell_simple([warp_cli, 'dns', 'fallback', 'remove', host], shell=False)
         if code == 0:
             logger.info(f'WARP remove dns fallback {host}: success')
         else:
@@ -630,7 +613,7 @@ def warp_remove_host(host, route='ipv6'):
         # 2. 移除 IPv6 CIDR
         ipv6_prefixes = _resolve_ipv6_prefixes(host)
         for cidr in ipv6_prefixes:
-            c, o, e = _run_command([warp_cli, 'tunnel', 'ip', 'remove-range', cidr], shell=False)
+            c, o, e = run_powershell_simple([warp_cli, 'tunnel', 'ip', 'remove-range', cidr], shell=False)
             if c == 0:
                 logger.info(f'WARP auto-remove IPv6 CIDR {cidr} for {host}: success')
             else:
@@ -654,7 +637,7 @@ def warp_list_hosts():
     warp_cli = get_warp_cli_path()
     if not warp_cli:
         return []
-    code, output, _ = _run_command([warp_cli, 'tunnel', 'host', 'list'], shell=False)
+    code, output, _ = run_powershell_simple([warp_cli, 'tunnel', 'host', 'list'], shell=False)
     if code != 0:
         return []
     # 解析输出，格式如：
@@ -677,7 +660,7 @@ def warp_list_ip_ranges():
     warp_cli = get_warp_cli_path()
     if not warp_cli:
         return [], []
-    code, output, _ = _run_command([warp_cli, 'tunnel', 'ip', 'list'], shell=False)
+    code, output, _ = run_powershell_simple([warp_cli, 'tunnel', 'ip', 'list'], shell=False)
     if code != 0:
         return [], []
     cli_ranges = []  # 用户通过CLI添加的规则（带 CLI exclude 标注）
@@ -699,7 +682,7 @@ def warp_remove_ip_range(cidr):
     warp_cli = get_warp_cli_path()
     if not warp_cli:
         return False, 'warp-cli 未找到'
-    code, output, err = _run_command([warp_cli, 'tunnel', 'ip', 'remove-range', cidr], shell=False)
+    code, output, err = run_powershell_simple([warp_cli, 'tunnel', 'ip', 'remove-range', cidr], shell=False)
     if code == 0:
         logger.info(f'WARP remove ip range {cidr}: success')
         return True, '删除成功'
@@ -715,7 +698,7 @@ def warp_add_ip(ip):
     warp_cli = get_warp_cli_path()
     if not warp_cli:
         return False, 'warp-cli 未找到'
-    code, output, err = _run_command([warp_cli, 'tunnel', 'ip', 'add', ip], shell=False)
+    code, output, err = run_powershell_simple([warp_cli, 'tunnel', 'ip', 'add', ip], shell=False)
     if code == 0:
         logger.info(f'WARP add ip {ip}: success')
         return True, '添加成功'
@@ -731,7 +714,7 @@ def warp_remove_ip(ip):
     warp_cli = get_warp_cli_path()
     if not warp_cli:
         return False, 'warp-cli 未找到'
-    code, output, err = _run_command([warp_cli, 'tunnel', 'ip', 'remove', ip], shell=False)
+    code, output, err = run_powershell_simple([warp_cli, 'tunnel', 'ip', 'remove', ip], shell=False)
     if code == 0:
         logger.info(f'WARP remove ip {ip}: success')
         return True, '移除成功'
@@ -807,7 +790,7 @@ def warp_add_dns_fallback(domain):
     warp_cli = get_warp_cli_path()
     if not warp_cli:
         return False, 'warp-cli 未找到'
-    code, output, err = _run_command([warp_cli, 'dns', 'fallback', 'add', domain], shell=False)
+    code, output, err = run_powershell_simple([warp_cli, 'dns', 'fallback', 'add', domain], shell=False)
     if code == 0:
         logger.info(f'WARP add dns fallback {domain}: success')
         return True, '添加成功'
@@ -823,7 +806,7 @@ def warp_remove_dns_fallback(domain):
     warp_cli = get_warp_cli_path()
     if not warp_cli:
         return False, 'warp-cli 未找到'
-    code, output, err = _run_command([warp_cli, 'dns', 'fallback', 'remove', domain], shell=False)
+    code, output, err = run_powershell_simple([warp_cli, 'dns', 'fallback', 'remove', domain], shell=False)
     if code == 0:
         logger.info(f'WARP remove dns fallback {domain}: success')
         return True, '删除成功'
@@ -842,7 +825,7 @@ def warp_list_dns_fallback():
     warp_cli = get_warp_cli_path()
     if not warp_cli:
         return []
-    code, output, _ = _run_command([warp_cli, 'dns', 'fallback', 'list'], shell=False)
+    code, output, _ = run_powershell_simple([warp_cli, 'dns', 'fallback', 'list'], shell=False)
     if code != 0:
         return []
     # 输出格式：
@@ -1199,7 +1182,7 @@ class ExclusionManager:
             # 立即应用到 WARP
             warp_cli = get_warp_cli_path()
             if warp_cli:
-                code, output, err = _run_command([warp_cli, 'tunnel', 'ip', 'add-range', cidr], shell=False)
+                code, output, err = run_powershell_simple([warp_cli, 'tunnel', 'ip', 'add-range', cidr], shell=False)
                 if code != 0:
                     msg = (output + err).strip()[:200]
                     return False, f'添加失败: {msg}', None
@@ -1242,7 +1225,7 @@ class ExclusionManager:
                     if enabled:
                         warp_cli = get_warp_cli_path()
                         if warp_cli:
-                            _run_command([warp_cli, 'tunnel', 'ip', 'add-range', cidr], shell=False)
+                            run_powershell_simple([warp_cli, 'tunnel', 'ip', 'add-range', cidr], shell=False)
                     else:
                         warp_remove_ip_range(cidr)
                     return True, f'IP 范围 {cidr} 已{"启用" if enabled else "禁用"}'
@@ -1467,7 +1450,7 @@ class ExclusionManager:
 def _find_wlan_adapter():
     """查找 WLAN 适配器名称，优先找 Intel Wireless，其次找 WLAN"""
     try:
-        code, output, _ = _run_command(
+        code, output, _ = run_powershell_simple(
             ['powershell', '-Command',
              'Get-NetAdapter | Where-Object {$_.Status -eq "Up" -and $_.InterfaceDescription -like "*Wireless*"} | Select-Object -ExpandProperty Name'],
             timeout=10
@@ -1483,7 +1466,7 @@ def is_wlan_ipv4_enabled():
     """检查 WLAN 适配器的 IPv4 是否启用"""
     adapter = _find_wlan_adapter()
     try:
-        code, output, _ = _run_command(
+        code, output, _ = run_powershell_simple(
             ['powershell', '-Command',
              f'(Get-NetAdapterBinding -Name "{adapter}" -ComponentID ms_tcpip).Enabled'],
             timeout=10
@@ -1498,7 +1481,7 @@ def is_wlan_ipv4_enabled():
 def enable_wlan_ipv4():
     """启用 WLAN 适配器的 IPv4（需要管理员权限）"""
     adapter = _find_wlan_adapter()
-    code, output, err = _run_command(
+    code, output, err = run_powershell_simple(
         ['powershell', '-Command',
          f'Enable-NetAdapterBinding -Name "{adapter}" -ComponentID ms_tcpip'],
         timeout=15
@@ -1509,7 +1492,7 @@ def enable_wlan_ipv4():
     msg = (output + err).strip()[:200]
     # 权限不足时用提权方式重试
     if 'Access is denied' in msg or '拒绝访问' in msg:
-        code2, _, _ = _run_command(
+        code2, _, _ = run_powershell_simple(
             ['powershell', '-Command',
              f'Start-Process powershell -Verb RunAs -ArgumentList \'-Command\', \'Enable-NetAdapterBinding -Name "{adapter}" -ComponentID ms_tcpip\' -Wait'],
             timeout=30
@@ -1524,7 +1507,7 @@ def enable_wlan_ipv4():
 def disable_wlan_ipv4():
     """禁用 WLAN 适配器的 IPv4（需要管理员权限）"""
     adapter = _find_wlan_adapter()
-    code, output, err = _run_command(
+    code, output, err = run_powershell_simple(
         ['powershell', '-Command',
          f'Disable-NetAdapterBinding -Name "{adapter}" -ComponentID ms_tcpip'],
         timeout=15
@@ -1534,7 +1517,7 @@ def disable_wlan_ipv4():
         return True, 'IPv4 已禁用'
     msg = (output + err).strip()[:200]
     if 'Access is denied' in msg or '拒绝访问' in msg:
-        code2, _, _ = _run_command(
+        code2, _, _ = run_powershell_simple(
             ['powershell', '-Command',
              f'Start-Process powershell -Verb RunAs -ArgumentList \'-Command\', \'Disable-NetAdapterBinding -Name "{adapter}" -ComponentID ms_tcpip\' -Wait'],
             timeout=30

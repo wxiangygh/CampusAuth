@@ -20,6 +20,7 @@ from warp_exclusion import get_exclusion_manager, DnsMonitor
 from traffic_monitor import get_traffic_status
 import core.state
 from core.state import _auth_lock, _auth_cancelled, WIFI_EVENT_NAME
+from core.command import run_command, run_elevated_powershell
 
 def get_resource_path(relative_path):
     """获取资源文件路径（支持开发环境和PyInstaller打包）"""
@@ -135,234 +136,6 @@ def is_admin():
         return ctypes.windll.shell32.IsUserAnAdmin()
     except:
         return False
-
-def run_command(cmd, shell=True, timeout=30):
-    """
-    执行命令并返回结果。
-    使用临时文件来捕获输出，避免 Windows Store 版 Python 在管理员权限下的 subprocess 管道问题。
-    使用 CREATE_NO_WINDOW + SW_HIDE 彻底避免命令行窗口弹窗。
-    """
-    import tempfile
-    import uuid
-
-    # 构建命令字符串
-    if isinstance(cmd, list):
-        cmd_parts = []
-        for part in cmd:
-            if ' ' in part or '\t' in part:
-                cmd_parts.append(f'"{part}"')
-            else:
-                cmd_parts.append(part)
-        cmd_str = ' '.join(cmd_parts)
-    else:
-        cmd_str = cmd
-
-    # 创建临时文件（使用唯一标识符避免冲突）
-    unique_id = uuid.uuid4().hex
-    tmp_out = os.path.join(tempfile.gettempdir(), f'cmd_out_{os.getpid()}_{unique_id}.txt')
-    tmp_err = os.path.join(tempfile.gettempdir(), f'cmd_err_{os.getpid()}_{unique_id}.txt')
-
-    # 构建重定向命令
-    redirect_cmd = f'chcp 65001 >nul & {cmd_str} > "{tmp_out}" 2> "{tmp_err}"'
-
-    # 使用 subprocess.Popen 避免窗口弹窗
-    si = subprocess.STARTUPINFO()
-    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    si.wShowWindow = subprocess.SW_HIDE
-
-    try:
-        proc = subprocess.Popen(
-            redirect_cmd,
-            shell=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            startupinfo=si,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        try:
-            poll_interval = 0.5
-            elapsed = 0.0
-            exit_code = None
-            while elapsed < timeout:
-                exit_code = proc.poll()
-                if exit_code is not None:
-                    break
-                if _auth_cancelled.is_set():
-                    proc.kill()
-                    logger.info(f"run_command: killed due to cancellation: {cmd_str[:80]}")
-                    exit_code = -1
-                    break
-                time.sleep(poll_interval)
-                elapsed += poll_interval
-            if exit_code is None:
-                proc.kill()
-                exit_code = -1
-        except Exception as e2:
-            logger.error(f"run_command wait error: {e2}")
-            try:
-                proc.kill()
-            except:
-                pass
-            exit_code = -1
-    except Exception as e:
-        logger.error(f"run_command Popen error: {e}")
-        exit_code = -1
-
-    # 读取输出文件
-    stdout = ''
-    stderr = ''
-    for _attempt in range(3):
-        try:
-            if os.path.exists(tmp_out):
-                with open(tmp_out, 'r', encoding='utf-8', errors='replace') as f:
-                    stdout = f.read()
-                if '\ufffd' in stdout:
-                    try:
-                        with open(tmp_out, 'r', encoding='gbk', errors='replace') as f:
-                            stdout = f.read()
-                    except Exception:
-                        pass
-                try:
-                    os.remove(tmp_out)
-                except Exception:
-                    pass
-            break
-        except Exception as e:
-            if _attempt < 2:
-                time.sleep(0.3)
-            else:
-                logger.debug(f"run_command: failed to read stdout: {e}")
-
-    for _attempt in range(3):
-        try:
-            if os.path.exists(tmp_err):
-                with open(tmp_err, 'r', encoding='utf-8', errors='replace') as f:
-                    stderr = f.read()
-                if '\ufffd' in stderr:
-                    try:
-                        with open(tmp_err, 'r', encoding='gbk', errors='replace') as f:
-                            stderr = f.read()
-                    except Exception:
-                        pass
-                try:
-                    os.remove(tmp_err)
-                except Exception:
-                    pass
-            break
-        except Exception as e:
-            if _attempt < 2:
-                time.sleep(0.3)
-            else:
-                logger.debug(f"run_command: failed to read stderr: {e}")
-
-    if exit_code == -1:
-        stderr = "Command timed out" if not stderr else stderr
-
-    return exit_code, stdout, stderr
-
-def run_command_os_system(cmd_str):
-    """使用 subprocess.Popen 执行命令，避免 os.system 的弹窗问题"""
-    import tempfile
-    import uuid
-    unique_id = uuid.uuid4().hex
-    tmp_out = os.path.join(tempfile.gettempdir(), f'cmd_out_{os.getpid()}_{unique_id}.txt')
-    tmp_err = os.path.join(tempfile.gettempdir(), f'cmd_err_{os.getpid()}_{unique_id}.txt')
-
-    redirect_cmd = f'{cmd_str} >"{tmp_out}" 2>"{tmp_err}"'
-
-    si = subprocess.STARTUPINFO()
-    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    si.wShowWindow = subprocess.SW_HIDE
-
-    try:
-        proc = subprocess.Popen(
-            redirect_cmd,
-            shell=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            startupinfo=si,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        try:
-            exit_code = proc.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            exit_code = -1
-    except Exception as e:
-        logger.error(f"run_command_os_system Popen error: {e}")
-        exit_code = -1
-
-    stdout = ''
-    stderr = ''
-    try:
-        if os.path.exists(tmp_out):
-            with open(tmp_out, 'r', encoding='utf-8', errors='ignore') as f:
-                stdout = f.read()
-            os.remove(tmp_out)
-    except:
-        pass
-    try:
-        if os.path.exists(tmp_err):
-            with open(tmp_err, 'r', encoding='utf-8', errors='ignore') as f:
-                stderr = f.read()
-            os.remove(tmp_err)
-    except:
-        pass
-    return exit_code, stdout, stderr
-
-def run_elevated_powershell(ps_command, timeout=30):
-    logger.info(f"run_elevated_powershell: cmd={ps_command[:120]!r}")
-    tmp_out = os.path.join(tempfile.gettempdir(), f'ipv6_elev_{os.getpid()}_{int(time.time()*1000)}.txt')
-    tmp_err = os.path.join(tempfile.gettempdir(), f'ipv6_elev_err_{os.getpid()}_{int(time.time()*1000)}.txt')
-    tmp_done = os.path.join(tempfile.gettempdir(), f'ipv6_elev_done_{os.getpid()}_{int(time.time()*1000)}.txt')
-    wrapped = (
-        f'$ErrorActionPreference="Stop"; '
-        f'try {{ {ps_command}; "0" | Out-File -FilePath "{tmp_done}" -Encoding utf8 }} '
-        f'catch {{ "1" | Out-File -FilePath "{tmp_done}" -Encoding utf8; $_.Exception.Message | Out-File -FilePath "{tmp_err}" -Encoding utf8 }}'
-    )
-    full_cmd = f'-ExecutionPolicy Bypass -Command "{wrapped}"'
-    logger.debug(f"run_elevated_powershell: full_cmd={full_cmd[:200]!r}")
-    ret = ctypes.windll.shell32.ShellExecuteW(
-        None, "runas", "powershell.exe", full_cmd, None, 0
-    )
-    logger.debug(f"run_elevated_powershell: ShellExecuteW returned {ret}")
-    if ret <= 32:
-        logger.error(f"run_elevated_powershell: ShellExecuteW failed with code {ret}")
-        for f in [tmp_out, tmp_err, tmp_done]:
-            try: os.remove(f)
-            except: pass
-        return -1, "", f"ShellExecuteW failed with code {ret}"
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        if os.path.exists(tmp_done):
-            break
-        time.sleep(0.3)
-    else:
-        logger.error(f"run_elevated_powershell: timed out after {timeout}s")
-        for f in [tmp_out, tmp_err, tmp_done]:
-            try: os.remove(f)
-            except: pass
-        return -1, "", "Command timed out"
-    time.sleep(0.2)
-    out_text = ""
-    err_text = ""
-    try:
-        with open(tmp_done, 'r', encoding='utf-8', errors='ignore') as f:
-            exit_flag = f.read().strip()
-    except:
-        exit_flag = "1"
-    try:
-        if os.path.exists(tmp_err):
-            with open(tmp_err, 'r', encoding='utf-8', errors='ignore') as f:
-                err_text = f.read().strip()
-    except:
-        pass
-    code = 0 if exit_flag == "0" else 1
-    logger.debug(f"run_elevated_powershell: code={code}, err={err_text[:200]!r}")
-    for f in [tmp_out, tmp_err, tmp_done]:
-        try: os.remove(f)
-        except: pass
-    return code, out_text, err_text
 
 def get_warp_cli():
     custom = CONFIG.get('warp_cli_path', '').strip()
@@ -1368,7 +1141,7 @@ def setup_startup_task():
         tr_value = _build_schtasks_tr(args)
         cmd_str = f'schtasks /Create /TN "{TASK_NAME_STARTUP}" /TR "{tr_value}" /SC ONLOGON /RL HIGHEST /F'
         logger.info(f"setup_startup_task: cmd={cmd_str}")
-        code, output, err = run_command_os_system(cmd_str)
+        code, output, err = run_command(cmd_str)
         if code == 0:
             logger.info("Startup task created successfully")
             return True
@@ -1381,7 +1154,7 @@ def register_wifi_event_task():
     if not CONFIG.get('wifi_name'):
         return False
     try:
-        run_command_os_system('schtasks /Delete /TN WiFiAutoAuthEvent /F')
+        run_command('schtasks /Delete /TN WiFiAutoAuthEvent /F')
         logger.info("Old WiFi event task deleted (if existed)")
     except Exception:
         pass
@@ -1391,7 +1164,7 @@ def register_wifi_event_task():
     cmd_str = f'schtasks /Create /TN "WiFiAutoAuthEvent" /TR "{tr_value}" /SC ONEVENT /EC "{event_channel}" /MO "{event_filter}" /RL HIGHEST /F'
     logger.info(f"register_wifi_event_task: cmd={cmd_str}")
     try:
-        code, output, err = run_command_os_system(cmd_str)
+        code, output, err = run_command(cmd_str)
         if code == 0:
             logger.info("WiFi event task registered")
             try:
@@ -1416,19 +1189,19 @@ def register_wifi_event_task():
 
 def unregister_wifi_event_task():
     try:
-        run_command_os_system('schtasks /Delete /TN WiFiAutoAuthEvent /F')
+        run_command('schtasks /Delete /TN WiFiAutoAuthEvent /F')
         logger.info("WiFi event task unregistered")
     except:
         pass
 
 def check_startup_status():
-    code, output, _ = run_command_os_system(f'schtasks /Query /TN "{TASK_NAME_STARTUP}"')
+    code, output, _ = run_command(f'schtasks /Query /TN "{TASK_NAME_STARTUP}"')
     enabled = code == 0
     logger.debug(f"check_startup_status: enabled={enabled}")
     return enabled
 
 def remove_startup_task():
-    code, output, _ = run_command_os_system(f'schtasks /Delete /TN "{TASK_NAME_STARTUP}" /F')
+    code, output, _ = run_command(f'schtasks /Delete /TN "{TASK_NAME_STARTUP}" /F')
     if code == 0:
         logger.info("Startup task removed")
         return True

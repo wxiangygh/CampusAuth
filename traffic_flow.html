@@ -690,6 +690,71 @@
         // ===================== 数据获取 =====================
 
         let _refreshTimer = null;  // 防抖定时器，避免短时间内多次刷新叠加
+        let _loadingFast = false;  // fast 请求加载标志，防止自动刷新堆积
+        let _loadingSlow = false;  // slow 请求加载标志，独立于 fast
+
+        async function refreshFast() {
+            if (!api || _loadingFast) return;
+            _loadingFast = true;
+            try {
+                const data = await api.get_traffic_status_fast();
+                lastData = data;
+                stats = data.stats || stats;
+                warpUnderlay = data.warp_underlay || 'ipv4';
+                // 累计展示模式：将当前连接合并到历史（同 ID 覆盖为最新）
+                if (cumulativeMode && data.connections && data.connections.length > 0) {
+                    for (const c of data.connections) {
+                        cumulativeConns.set(connId(c), c);
+                    }
+                }
+                updateStats();
+                renderConnList();
+            } catch (e) {
+                showToast('获取失败: ' + e);
+                const container = document.getElementById('connList');
+                if (container && (!lastData || !lastData.connections)) {
+                    container.innerHTML = '<div class="empty-hint">获取数据失败，请点击刷新重试</div>';
+                }
+            } finally {
+                _loadingFast = false;
+            }
+        }
+
+        async function refreshSlow() {
+            if (!api || _loadingSlow) return;
+            _loadingSlow = true;
+            try {
+                // 收集当前未命中域名的 IP
+                const missingIps = [];
+                for (const c of (lastData?.connections || [])) {
+                    if (!c.hostname && c.remote_ip) missingIps.push(c.remote_ip);
+                }
+                if (missingIps.length === 0) return;
+                const ipToHost = await api.get_traffic_status_slow(missingIps);
+                // 增量更新已渲染连接的域名
+                let updated = false;
+                for (const c of (lastData?.connections || [])) {
+                    if (!c.hostname && ipToHost[c.remote_ip]) {
+                        c.hostname = ipToHost[c.remote_ip];
+                        updated = true;
+                    }
+                }
+                if (updated) {
+                    // 同步更新累计模式中的连接
+                    if (cumulativeMode) {
+                        for (const c of (lastData?.connections || [])) {
+                            if (c.hostname) cumulativeConns.set(connId(c), c);
+                        }
+                    }
+                    renderConnList();
+                }
+            } catch (e) {
+                // slow 失败不影响主流程，域名保持 IP 显示
+                console.warn('refreshSlow failed:', e);
+            } finally {
+                _loadingSlow = false;
+            }
+        }
 
         async function refresh() {
             if (!api) return;
@@ -1031,7 +1096,7 @@
 
         function startAuto() {
             stopAuto();
-            autoTimer = setInterval(refresh, 3000);
+            autoTimer = setInterval(refreshFast, 3000);
         }
 
         function stopAuto() {
@@ -1050,8 +1115,9 @@
                 return;
             }
             initCanvas();
-            await refresh();
-            startAuto();
+            await refreshFast();        // 先拿 fast 数据，立即渲染（域名显示 IP）
+            refreshSlow();              // 后台异步（不 await），拿到域名后增量更新
+            startAuto();                // 自动刷新改为 fast-only
         }
 
         window.addEventListener('pywebviewready', init);

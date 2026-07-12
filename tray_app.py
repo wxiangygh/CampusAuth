@@ -25,6 +25,7 @@ from core.network import (
     scan_wifi_networks, get_wifi_interface_name, get_local_ip,
     get_mac_address, get_current_wifi_ssid, wait_for_network_ready,
     _wait_for_ipv6_ready, is_warp_connected, _check_internet,
+    has_public_ipv6,
 )
 from core.warp_manager import (
     get_warp_cli, connect_warp, disconnect_warp,
@@ -683,9 +684,9 @@ class ApiBridge:
             raise
 
     def save_ui_prefs(self, prefs):
-        """保存 UI 偏好（page_size, traffic_subview）。
+        """保存 UI 偏好（page_size, traffic_subview, network_detail_collapsed）。
         Args:
-            prefs: dict，如 {'page_size': 50} 或 {'traffic_subview': 'canvas'}
+            prefs: dict，如 {'page_size': 50} 或 {'traffic_subview': 'canvas'} 或 {'network_detail_collapsed': True}
         Returns:
             dict: {'success': bool}
         """
@@ -704,14 +705,15 @@ class ApiBridge:
     def get_ui_prefs(self):
         """读取 UI 偏好，供前端初始化。
         Returns:
-            dict: {'page_size': int, 'traffic_subview': str}
+            dict: {'page_size': int, 'traffic_subview': str, 'network_detail_collapsed': bool}
         """
         try:
             cfg = load_config()
             prefs = cfg.get('ui_prefs') or {}
             result = {
                 'page_size': int(prefs.get('page_size', 20)),
-                'traffic_subview': prefs.get('traffic_subview', 'list')
+                'traffic_subview': prefs.get('traffic_subview', 'list'),
+                'network_detail_collapsed': bool(prefs.get('network_detail_collapsed', False))
             }
             # 校验 page_size 取值范围
             if result['page_size'] not in (10, 20, 50, 100):
@@ -722,7 +724,68 @@ class ApiBridge:
             return result
         except Exception as e:
             logger.error(f"[get_ui_prefs] FAILED: {e}\n{traceback.format_exc()}")
-            return {'page_size': 20, 'traffic_subview': 'list'}
+            return {'page_size': 20, 'traffic_subview': 'list', 'network_detail_collapsed': False}
+
+    def get_network_detail(self):
+        """聚合网络详情，供主页tab展示。
+        复用 core.network 现有函数，任一字段获取失败返回空字符串。
+        Returns:
+            dict: {'ipv4': str, 'ipv6': str, 'ipv6_status': str,
+                   'mac': str, 'wifi_ssid': str, 'interface': str,
+                   'warp_connected': bool}
+        """
+        result = {
+            'ipv4': '', 'ipv6': '', 'ipv6_status': 'none',
+            'mac': '', 'wifi_ssid': '', 'interface': '',
+            'warp_connected': False
+        }
+        try:
+            # IPv4 地址
+            try:
+                result['ipv4'] = get_local_ip() or ''
+            except Exception as e:
+                logger.warning(f"[get_network_detail] get_local_ip failed: {e}")
+
+            # IPv6 公网地址（has_public_ipv6 返回 tuple[bool, str]）
+            try:
+                has_ipv6, ipv6_addr = has_public_ipv6()
+                if has_ipv6 and ipv6_addr:
+                    result['ipv6'] = ipv6_addr
+                    result['ipv6_status'] = 'public'
+            except Exception as e:
+                logger.warning(f"[get_network_detail] has_public_ipv6 failed: {e}")
+
+            # MAC 地址
+            try:
+                result['mac'] = get_mac_address() or ''
+            except Exception as e:
+                logger.warning(f"[get_network_detail] get_mac_address failed: {e}")
+
+            # WiFi SSID
+            try:
+                result['wifi_ssid'] = get_current_wifi_ssid() or ''
+            except Exception as e:
+                logger.warning(f"[get_network_detail] get_current_wifi_ssid failed: {e}")
+
+            # 网络接口名
+            try:
+                result['interface'] = get_wifi_interface_name() or ''
+            except Exception as e:
+                logger.warning(f"[get_network_detail] get_wifi_interface_name failed: {e}")
+
+            # WARP 连接状态（复用 check_network_status 逻辑）
+            try:
+                status = self.check_network_status()
+                # status 为 'connected' 或 'partial' 时认为 WARP 已连接
+                result['warp_connected'] = status.get('status') in ('connected', 'partial')
+            except Exception as e:
+                logger.warning(f"[get_network_detail] check_network_status failed: {e}")
+
+            logger.info(f"[get_network_detail] Returning: ipv4={result['ipv4']}, ipv6_status={result['ipv6_status']}, warp={result['warp_connected']}")
+            return result
+        except Exception as e:
+            logger.error(f"[get_network_detail] FAILED: {e}\n{traceback.format_exc()}")
+            return result
 
 icon_instance = None
 

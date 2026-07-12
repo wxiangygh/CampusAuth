@@ -118,6 +118,8 @@
             background: var(--bg-secondary);
             border-bottom: 1px solid var(--border);
             padding: 0 8px;
+            -webkit-app-region: drag;  /* tab栏可拖动 */
+            user-select: none;
         }
 
         .tab-btn {
@@ -128,6 +130,7 @@
             border: none;
             cursor: pointer;
             position: relative;
+            -webkit-app-region: no-drag;  /* tab按钮本身不可拖动 */
             transition: color 0.2s;
         }
 
@@ -270,16 +273,17 @@
         }
         .network-detail.collapsed .network-detail-arrow { transform: rotate(-90deg); }
 
-        /* 折叠动画：max-height 过渡（grid 内容动态高度，用足够大的 max-height）*/
+        /* 折叠动画：用 max-height 过渡，展开时不限制高度（设足够大值）*/
         .network-detail-body {
-            max-height: 600px;
-            transition: max-height 0.25s ease, padding 0.25s ease;
+            max-height: 2000px;
+            transition: max-height 0.3s ease, padding 0.3s ease;
             padding: 0 14px 12px;
-            overflow: hidden;
+            overflow: visible;  /* 允许内容自然撑开，不被截断 */
         }
         .network-detail.collapsed .network-detail-body {
             max-height: 0;
             padding: 0 14px 0;
+            overflow: hidden;
         }
 
         /* 6 项网格布局 */
@@ -614,7 +618,6 @@
 
         /* Status Page */
         .status-page {
-            flex: 1;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -627,7 +630,7 @@
         #tab-home {
             flex: 1;
             flex-direction: column;
-            overflow-y: auto;
+            overflow-y: auto;  /* 内容超出时上下滚动 */
         }
 
         /* Status Indicator - Hexagon Shape */

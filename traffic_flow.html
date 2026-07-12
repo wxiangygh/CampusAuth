@@ -698,6 +698,18 @@
             _loadingFast = true;
             try {
                 const data = await api.get_traffic_status_fast();
+                // 保留上一轮已解析的 hostname，避免自动刷新时域名闪失
+                if (lastData && lastData.connections) {
+                    const oldHost = new Map();
+                    for (const c of lastData.connections) {
+                        if (c.hostname) oldHost.set(c.remote_ip, c.hostname);
+                    }
+                    for (const c of data.connections) {
+                        if (!c.hostname && oldHost.has(c.remote_ip)) {
+                            c.hostname = oldHost.get(c.remote_ip);
+                        }
+                    }
+                }
                 lastData = data;
                 stats = data.stats || stats;
                 warpUnderlay = data.warp_underlay || 'ipv4';

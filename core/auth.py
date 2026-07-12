@@ -13,10 +13,11 @@ from core.command import run_command, run_elevated_powershell
 from core.network import (
     get_wifi_interface_name, get_local_ip, get_mac_address,
     wait_for_network_ready, _wait_for_ipv6_ready, is_warp_connected,
+    has_public_ipv6,
 )
 from core.warp_manager import (
     connect_warp, disconnect_warp, get_warp_cli,
-    _set_warp_masque_mode,
+    _set_warp_masque_mode, _set_warp_endpoint_ipv6,
 )
 
 logger = logging.getLogger('wifi_tray')
@@ -351,9 +352,50 @@ def run_auth_task():
     if warp_service_was_running:
         logger.info("Re-enabling WARP virtual adapter...")
         run_command('netsh interface set interface "CloudflareWARP" enable')
-    if not _wait_for_ipv6_ready(max_retries=5):
-        _push_auth_progress(5, 5, 'IPv6网络不可用', 'error')
-        return False, "IPv6网络不可用，无法连接WARP"
+    # 等待公网 IPv6 地址（2001 开头），最多 60 秒
+    if not _wait_for_ipv6_ready(max_retries=20):
+        # IPv6 不可达，进入重新认证回退循环（最多 2 轮）
+        ipv6_ready = False
+        for retry in range(2):
+            if _check_cancel(): return False, "已取消"
+            _push_auth_progress(5, 5, f'IPv6未就绪，重新认证以获取IPv6（第{retry+1}轮）...')
+            logger.info(f"IPv6 not ready, re-authenticating to trigger IPv6 assignment (round {retry+1}/2)")
+            # 临时启用 IPv4 以恢复网络连接
+            if not enable_ipv4(interface_name):
+                logger.warning("Failed to temporarily enable IPv4 during re-auth retry")
+            if _check_cancel(): return False, "已取消"
+            # 注销当前会话
+            portal_logout()
+            if not _interruptible_sleep(2): return False, "已取消"
+            if _check_cancel(): return False, "已取消"
+            # 重新认证
+            success, msg = portal_login()
+            if not success:
+                _push_auth_progress(5, 5, f'重新认证失败: {msg}', 'error')
+                logger.error(f"Re-auth failed during IPv6 retry: {msg}")
+                return False, f"重新认证失败: {msg}"
+            if _check_cancel(): return False, "已取消"
+            # 再次禁用 IPv4
+            if not disable_ipv4(interface_name):
+                _push_auth_progress(5, 5, '禁用IPv4失败', 'error')
+                return False, "禁用IPv4失败"
+            if _check_cancel(): return False, "已取消"
+            # 等待 IPv6 就绪
+            if _wait_for_ipv6_ready(max_retries=20):
+                ipv6_ready = True
+                logger.info(f"IPv6 ready after re-auth round {retry+1}")
+                break
+            logger.warning(f"IPv6 still not ready after re-auth round {retry+1}")
+        if not ipv6_ready:
+            # 2 轮重新认证后 IPv6 仍不可达，恢复 IPv4 并返回失败
+            enable_ipv4(interface_name)
+            _push_auth_progress(5, 5, 'IPv6网络不可用，已尝试重新认证', 'error')
+            return False, "IPv6网络不可用，无法连接WARP（已尝试重新认证）"
+    if _check_cancel(): return False, "已取消"
+    # IPv6 可达，清空 conf.json 的 IPv4 端点以强制 WARP 走 IPv6
+    if not _set_warp_endpoint_ipv6(True):
+        logger.warning("_set_warp_endpoint_ipv6(True) failed, continuing with default endpoints")
+    if _check_cancel(): return False, "已取消"
     run_command('sc config "CloudflareWARP" start= auto')
     code, svc_output, _ = run_command('sc query "CloudflareWARP"')
     if 'RUNNING' not in svc_output:
@@ -363,10 +405,25 @@ def run_auth_task():
     warp_cli = get_warp_cli()
     _set_warp_masque_mode(warp_cli, True)
     if not connect_warp():
+        # WARP 连接失败：记录诊断日志
+        logger.error("WARP connection failed. Diagnostics:")
+        try:
+            code, status_output, _ = run_command([warp_cli, 'status'], shell=False)
+            logger.error(f"warp-cli status:\n{status_output}")
+        except Exception as diag_e:
+            logger.error(f"Failed to get warp-cli status: {diag_e}")
+        has_v6, v6_addr = has_public_ipv6()
+        logger.error(f"Public IPv6: {has_v6}, addr={v6_addr}")
+        code, route_output, _ = run_command('netsh interface ipv6 show route')
+        logger.error(f"IPv6 routes (first 500 chars):\n{route_output[:500]}")
+        # 恢复配置
         _set_warp_masque_mode(warp_cli, False)
+        _set_warp_endpoint_ipv6(False)
         _push_auth_progress(5, 5, 'WARP连接超时，请手动检查', 'error')
         return False, "WARP连接超时，请手动检查"
+    # WARP 连接成功，恢复配置
     _set_warp_masque_mode(warp_cli, False)
+    _set_warp_endpoint_ipv6(False)
     logger.info("=" * 60)
     logger.info("Authentication completed successfully")
     logger.info("=" * 60)

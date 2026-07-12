@@ -28,7 +28,7 @@ from core.network import (
 )
 from core.warp_manager import (
     get_warp_cli, connect_warp, disconnect_warp,
-    _set_warp_masque_mode, _set_warp_endpoint_ipv6,
+    _set_warp_masque_mode,
     update_tray_icon, update_tray_icon_restore,
 )
 from core.auth import (

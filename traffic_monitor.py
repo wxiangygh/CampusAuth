@@ -178,6 +178,158 @@ def _get_network_snapshot():
         return {'WarpIfIndex': -1, 'WarpUnderlay': 'ipv4', 'Connections': [], 'Routes': [], 'UnderlayDebug': '', 'DnsMap': {}}
 
 
+def _get_network_snapshot_fast():
+    """快速获取网络快照（不含 DNS 缓存），用于首屏快速展示。
+
+    与 _get_network_snapshot 的区别：移除 Get-DnsClientCache 调用，
+    返回的 DnsMap 为空字典。目标耗时 <2 秒。
+    """
+    import os
+    my_pid = os.getpid()
+    ps_script = r'''
+    $ErrorActionPreference = 'SilentlyContinue'
+
+    # 1. 获取 WARP 虚拟网卡
+    $warp = Get-NetAdapter | Where-Object {$_.InterfaceDescription -like "*Cloudflare*" -or $_.Name -like "*WARP*"} | Select-Object -First 1
+    $warpIfIndex = if ($warp) { [int]$warp.ifIndex } else { -1 }
+
+    # 2. 获取 TCP 连接和进程名映射
+    $conns = Get-NetTCPConnection -State Established
+    $procTable = @{}
+    Get-Process | ForEach-Object { $procTable[$_.Id] = $_.ProcessName }
+
+    # 需要过滤的进程名（辅助/系统进程，不是用户实际发起的网络请求）
+    $filterNames = @('powershell','conhost','wsmprovhost','WmiPrvSE','svchost','lsass','services','wininit','smss','csrss','dwm','RuntimeBroker','SearchHost','StartMenuExperienceHost','TextInputHost','ShellExperienceHost')
+
+    $connList = @()
+    foreach ($c in $conns) {
+        $procId = [int]$c.OwningProcess
+        $pname = if ($procTable.ContainsKey($procId)) { $procTable[$procId] } else { 'unknown' }
+        if ($filterNames -contains $pname) { continue }
+        $connList += [PSCustomObject]@{
+            RemoteAddress = [string]$c.RemoteAddress
+            RemotePort = [int]$c.RemotePort
+            ProcessId = $procId
+            ProcessName = $pname
+            InterfaceIndex = if ($c.InterfaceIndex) { [int]$c.InterfaceIndex } else { -1 }
+        }
+    }
+
+    # 3. 获取路由表（只获取默认路由和 WARP 接口路由）
+    $routeList = @()
+    Get-NetRoute -PolicyStore ActiveStore | Where-Object {
+        $_.DestinationPrefix -eq '0.0.0.0/0' -or
+        $_.DestinationPrefix -eq '::/0' -or
+        $_.ifIndex -eq $warpIfIndex
+    } | ForEach-Object {
+        $routeList += [PSCustomObject]@{
+            ifIndex = [int]$_.ifIndex
+            DestinationPrefix = [string]$_.DestinationPrefix
+        }
+    }
+
+    # 4. 判断 WARP 底层连接类型（IPv4 或 IPv6）
+    $warpUnderlay = 'ipv4'
+    $underlayDebug = @()
+    if ($warp -and $warpIfIndex -gt 0) {
+        $warpSvcProcs = Get-Process | Where-Object {
+            $_.ProcessName -like "*warp*" -or $_.ProcessName -like "*cloudflare*"
+        }
+        $underlayDebug += "WARP processes: $($warpSvcProcs.Count)"
+
+        if ($warpSvcProcs) {
+            $warpProcIds = $warpSvcProcs | Select-Object -ExpandProperty Id
+            $warpUdp = Get-NetUDPEndpoint -ErrorAction SilentlyContinue | Where-Object {
+                $warpProcIds -contains $_.OwningProcess
+            }
+            $underlayDebug += "WARP UDP endpoints: $($warpUdp.Count)"
+
+            foreach ($ep in $warpUdp) {
+                $localAddr = [string]$ep.LocalAddress
+                $localPort = [int]$ep.LocalPort
+                $underlayDebug += "  UDP $localAddr`:$localPort"
+
+                if ($localAddr -like "127.*" -or $localAddr -eq "::1") { continue }
+
+                if ($localAddr -like "*:*") {
+                    $warpUnderlay = 'ipv6'
+                    $underlayDebug += "    => IPv6 (non-loopback)"
+                    break
+                } else {
+                    $warpUnderlay = 'ipv4'
+                    $underlayDebug += "    => IPv4 (non-loopback)"
+                    break
+                }
+            }
+        }
+        $underlayDebug += "WARP underlay => $warpUnderlay"
+    }
+
+    [PSCustomObject]@{
+        WarpIfIndex = $warpIfIndex
+        WarpUnderlay = $warpUnderlay
+        UnderlayDebug = ($underlayDebug -join "`n")
+        Connections = $connList
+        Routes = $routeList
+        DnsMap = @{}
+    } | ConvertTo-Json -Depth 3 -Compress
+    '''
+    code, output, _ = _run_ps(ps_script, timeout=10)
+    if code != 0 or not output.strip():
+        logger.error(f'get_network_snapshot_fast failed: code={code}')
+        return {'WarpIfIndex': -1, 'WarpUnderlay': 'ipv4', 'Connections': [], 'Routes': [], 'UnderlayDebug': '', 'DnsMap': {}}
+    try:
+        result = json.loads(output)
+        debug_info = result.get('UnderlayDebug', '')
+        if debug_info:
+            logger.info(f'WARP underlay detection (fast):\n{debug_info}')
+        return result
+    except json.JSONDecodeError as e:
+        logger.error(f'Failed to parse fast snapshot JSON: {e}')
+        return {'WarpIfIndex': -1, 'WarpUnderlay': 'ipv4', 'Connections': [], 'Routes': [], 'UnderlayDebug': '', 'DnsMap': {}}
+
+
+def _get_dns_cache_only():
+    """仅获取系统 DNS 缓存，返回 IP→域名映射。
+
+    执行独立的 PowerShell 脚本，仅调用 Get-DnsClientCache。
+    用于 get_traffic_status_slow 的第一步。
+
+    Returns:
+        dict[str, str]: {ip: hostname}（仅包含缓存命中的）
+    """
+    ps_script = r'''
+    $ErrorActionPreference = 'SilentlyContinue'
+    $dnsMap = @{}
+    Get-DnsClientCache -ErrorAction SilentlyContinue | ForEach-Object {
+        $entryName = [string]$_.Entry
+        $entryData = [string]$_.Data
+        if ($entryData -and $entryData -ne '') {
+            if ($entryData -match '^\d+\.\d+\.\d+\.\d+$' -or $entryData -match ':') {
+                if (-not $dnsMap.ContainsKey($entryData)) {
+                    $dnsMap[$entryData] = $entryName
+                }
+            }
+        }
+    }
+    $dnsMap | ConvertTo-Json -Compress
+    '''
+    code, output, _ = _run_ps(ps_script, timeout=8)
+    if code != 0 or not output.strip():
+        logger.warning(f'get_dns_cache_only failed: code={code}')
+        return {}
+    try:
+        # PowerShell 空字典会输出 "" 或 "{}"，需处理
+        result = json.loads(output) if output.strip() != '{}' else {}
+        if isinstance(result, dict):
+            return result
+        # PowerShell 单条记录可能返回非 dict 格式，兜底处理
+        return {}
+    except json.JSONDecodeError as e:
+        logger.warning(f'Failed to parse DNS cache JSON: {e}')
+        return {}
+
+
 def _ip_in_network(ip_str, network_str, prefix_len):
     """判断 IP 是否在指定网段内"""
     try:
@@ -253,6 +405,75 @@ def _batch_reverse_dns(ip_list, timeout=1.0, max_workers=10):
             for f in futures:
                 f.cancel()
     return result
+
+
+def get_traffic_status_fast():
+    """快速获取流量走向统计和连接详情（不含域名）。
+
+    与 get_traffic_status 的区别：不获取 DNS 缓存，不执行反向 DNS，
+    hostname 字段为空字符串。目标耗时 <2 秒。
+
+    Returns:
+        dict: 与 get_traffic_status 相同结构，但 connections 中 hostname 为空
+    """
+    snapshot = _get_network_snapshot_fast()
+    warp_ifindex = snapshot.get('WarpIfIndex', -1)
+    warp_underlay = snapshot.get('WarpUnderlay', 'ipv4')
+    connections = snapshot.get('Connections', [])
+    routes = snapshot.get('Routes', [])
+
+    import os
+    my_pid = os.getpid()
+
+    stats = {k: 0 for k in ROUTE_TYPES}
+    conn_details = []
+
+    for conn in connections:
+        if conn.get('ProcessId') == my_pid:
+            continue
+        remote_ip = conn.get('RemoteAddress', '')
+        if not remote_ip or remote_ip in _LOCAL_ADDRS:
+            continue
+
+        is_ipv6 = ':' in remote_ip
+        conn_ifindex = conn.get('InterfaceIndex', -1)
+        if conn_ifindex and conn_ifindex > 0 and warp_ifindex > 0:
+            is_warp = (conn_ifindex == warp_ifindex)
+        else:
+            matched_ifindex = _match_route_ifindex(remote_ip, routes)
+            is_warp = (matched_ifindex == warp_ifindex and warp_ifindex > 0)
+
+        if not is_warp:
+            route_type = 'ipv6' if is_ipv6 else 'ipv4'
+        else:
+            if warp_underlay == 'ipv6':
+                route_type = 'ipv6_warp_ipv4' if not is_ipv6 else 'ipv6_warp'
+            else:
+                route_type = 'ipv4_warp' if not is_ipv6 else 'ipv4_warp_ipv6'
+
+        stats[route_type] = stats.get(route_type, 0) + 1
+
+        conn_details.append({
+            'process': conn.get('ProcessName', 'unknown'),
+            'remote_ip': remote_ip,
+            'remote_port': conn.get('RemotePort', 0),
+            'hostname': '',  # 快速模式不获取域名，留空由 slow 接口填充
+            'route_type': route_type,
+            'is_warp': is_warp,
+            'is_ipv6': is_ipv6,
+            'warp_underlay': warp_underlay,
+        })
+
+    conn_details.sort(key=lambda x: (x['process'].lower(), x['remote_ip']))
+
+    return {
+        'stats': stats,
+        'connections': conn_details,
+        'warp_ifindex': warp_ifindex,
+        'warp_underlay': warp_underlay,
+        'total': len(conn_details),
+        'route_types': ROUTE_TYPES,
+    }
 
 
 def get_traffic_status():

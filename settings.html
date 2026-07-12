@@ -270,9 +270,9 @@
         }
         .network-detail.collapsed .network-detail-arrow { transform: rotate(-90deg); }
 
-        /* 折叠动画：max-height 过渡 */
+        /* 折叠动画：max-height 过渡（grid 内容动态高度，用足够大的 max-height）*/
         .network-detail-body {
-            max-height: 400px;
+            max-height: 600px;
             transition: max-height 0.25s ease, padding 0.25s ease;
             padding: 0 14px 12px;
             overflow: hidden;
@@ -287,6 +287,8 @@
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 8px;
+            /* 网格项高度自适应内容，不被父容器截断 */
+            align-content: start;
         }
         .network-detail-item {
             padding: 8px 10px;
@@ -308,6 +310,14 @@
         .network-detail-value.empty { color: var(--text-tertiary); }
         .network-detail-value.success { color: var(--success); }
         .network-detail-value.warning { color: var(--warning); }
+        /* 加载中提示 */
+        .network-detail-loading {
+            text-align: center;
+            color: var(--text-tertiary);
+            font-size: 12px;
+            padding: 16px;
+            grid-column: 1 / -1;
+        }
 
         /* 响应式适配（窄窗口）*/
         @media (max-width: 600px) {
@@ -613,10 +623,9 @@
             position: relative;
         }
 
-        /* 主页tab容器 */
+        /* 主页tab容器（仅设置 flex-direction，display 由 .tab-content.active 控制）*/
         #tab-home {
             flex: 1;
-            display: flex;
             flex-direction: column;
             overflow-y: auto;
         }
@@ -1291,15 +1300,15 @@
                 </div>
             </div>
 
-            <!-- 网络详情卡（中，可折叠）-->
-            <div class="network-detail" id="networkDetail">
+            <!-- 网络详情卡（中，可折叠）— 初始折叠，获取数据后展开 -->
+            <div class="network-detail collapsed" id="networkDetail">
                 <div class="network-detail-header" onclick="HomeTab.toggleDetail()">
                     <span class="network-detail-title">网络详情</span>
                     <span class="network-detail-arrow" id="networkDetailArrow">▼</span>
                 </div>
                 <div class="network-detail-body" id="networkDetailBody">
                     <div class="network-detail-grid" id="networkDetailGrid">
-                        <!-- JS 动态填充 6 项 -->
+                        <div class="network-detail-loading">请稍后...</div>
                     </div>
                 </div>
             </div>
@@ -2357,15 +2366,32 @@
                 } catch (e) { console.error('Failed to load config:', e); }
             },
 
-            // 网络详情区：拉取数据并渲染
+            // 网络详情区：拉取数据并渲染。
+            // 获取失败或数据为空时保持折叠状态并显示"请稍后..."
             async refreshDetail() {
                 if (!window.pywebview?.api) return;
+                const grid = document.getElementById('networkDetailGrid');
                 try {
                     const data = await window.pywebview.api.get_network_detail();
+                    // 判断是否获取到有效数据（至少 ipv4/ipv6/mac/wifi_ssid 之一非空）
+                    const hasData = data && (data.ipv4 || data.ipv6 || data.mac || data.wifi_ssid);
+                    if (!hasData) {
+                        // 无有效数据：显示提示，保持折叠
+                        if (grid) grid.innerHTML = '<div class="network-detail-loading">请稍后...</div>';
+                        this._detailCollapsed = true;
+                        this._applyCollapsed();
+                        return;
+                    }
                     this.renderDetailGrid(data);
+                    // 获取到数据后，按用户偏好决定展开/折叠（首次默认展开）
+                    this._detailCollapsed = !!this._userCollapsed;
+                    this._applyCollapsed();
                 } catch (e) {
                     console.error('HomeTab.refreshDetail failed:', e);
-                    Utils.showToast('网络详情获取失败', 'error');
+                    // 获取失败：显示提示，保持折叠
+                    if (grid) grid.innerHTML = '<div class="network-detail-loading">请稍后...</div>';
+                    this._detailCollapsed = true;
+                    this._applyCollapsed();
                 }
             },
 
@@ -2389,9 +2415,10 @@
                 `).join('');
             },
 
-            // 切换详情卡折叠/展开
+            // 切换详情卡折叠/展开（用户手动点击）
             toggleDetail() {
                 this._detailCollapsed = !this._detailCollapsed;
+                this._userCollapsed = this._detailCollapsed;  // 记录用户偏好
                 this._applyCollapsed();
                 // 持久化
                 try {
@@ -2399,10 +2426,9 @@
                 } catch (e) { console.warn('save_ui_prefs failed:', e); }
             },
 
-            // 初始化时设置折叠状态（不触发持久化）
+            // 初始化时设置用户偏好（不立即应用，等 refreshDetail 获取数据后再决定）
             setDetailCollapsed(collapsed) {
-                this._detailCollapsed = !!collapsed;
-                this._applyCollapsed();
+                this._userCollapsed = !!collapsed;
             },
 
             // 应用折叠样式

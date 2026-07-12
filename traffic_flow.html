@@ -138,6 +138,12 @@
             border-radius: 4px; cursor: pointer;
         }
         .proc-group-header:hover { background: var(--bg-tertiary); }
+        .proc-group-header .collapse-icon {
+            width: 10px; height: 10px; color: var(--text-tertiary);
+            transition: transform 0.2s; flex-shrink: 0;
+        }
+        .proc-group.collapsed .collapse-icon { transform: rotate(-90deg); }
+        .proc-group.collapsed .proc-group-body { display: none; }
         .proc-name { font-weight: 600; font-size: 11px; color: var(--text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .proc-count { font-size: 9px; color: var(--text-tertiary); background: var(--bg-primary); padding: 1px 6px; border-radius: 8px; }
 
@@ -217,6 +223,13 @@
                     <input type="text" class="search-box" id="searchInput" placeholder="搜索域名/IP/进程..." oninput="renderConnList()">
                     <label class="auto-toggle">
                         <span class="toggle-switch">
+                            <input type="checkbox" id="cumulativeToggle" onchange="toggleCumulative()">
+                            <span class="toggle-slider"></span>
+                        </span>
+                        累计展示
+                    </label>
+                    <label class="auto-toggle">
+                        <span class="toggle-switch">
                             <input type="checkbox" id="autoToggle" checked onchange="toggleAuto()">
                             <span class="toggle-slider"></span>
                         </span>
@@ -251,6 +264,11 @@
         // 选中连接的 ID 集合 + 连接数据映射（用于多选和批量操作）
         let selectedConns = new Set();
         let connMap = new Map();
+        // 折叠的进程组集合（持久化，刷新后保持折叠状态）
+        let collapsedGroups = new Set();
+        // 累计展示模式：保存历史连接（key=连接唯一标识，value=最新连接数据）
+        let cumulativeMode = false;
+        let cumulativeConns = new Map();
         // 6 种分类的统计和配置
         let stats = { ipv4: 0, ipv6: 0, ipv4_warp: 0, ipv4_warp_ipv6: 0, ipv6_warp: 0, ipv6_warp_ipv4: 0 };
         let warpUnderlay = 'ipv4';
@@ -315,130 +333,201 @@
             canvas.style.height = rect.height + 'px';
             ctx.scale(dpr, dpr);
             computeNodes(rect.width, rect.height);
+            buildGridCanvas(rect.width, rect.height);  // 重建网格预渲染
         }
 
         function computeNodes(w, h) {
-            // 布局：本机在左侧，WARP隧道在中间，6个目标在右侧分两列
-            const cx = w * 0.12;
+            // 布局说明：
+            // - 本机：左侧
+            // - WARP 隧道矩形：中间，内部包含 4 个 WARP 计数节点（圆形，被隧道处理）
+            // - 直连计数节点（2 个）：靠近隧道矩形外侧（右上/右下角外），体现"经过隧道但不被处理"
+            // - 类型节点（6 个）：最右侧竖直排列，端口形状，隧道矩形外
+            const cx = w * 0.08;
             const cy = h * 0.5;
-            const tunnelX = w * 0.40;
-            const tunnelW = 80;
-            const tunnelH = 110;
-            const destX = w * 0.82;
-            const spacing = h * 0.13;
-            const startY = h * 0.5 - spacing * 2.5;
+            const tunnelX = w * 0.35;        // 隧道中心 X
+            const tunnelW = 90;              // 隧道宽度
+            const tunnelH = 230;             // 隧道高度（容纳 4 个 WARP 计数节点）
+            const tunnelRight = tunnelX + tunnelW / 2;  // 隧道右边缘
+            const tunnelTop = cy - tunnelH / 2;         // 隧道顶边
+            const tunnelBottom = cy + tunnelH / 2;      // 隧道底边
+            const typeX = w * 0.82;          // 类型节点 X（最右侧）
+
+            // 类型节点：6 个竖直排列，居中
+            const typeSpacing = Math.min(h * 0.12, 55);
+            const typeStartY = cy - typeSpacing * 2.5;  // 6 个节点居中
+
+            // 直连计数节点：靠近隧道右上/右下角外侧，体现"经过隧道但不进入"
+            const directOffset = 18;  // 距离隧道角的外偏移量
+
+            // WARP 计数节点：4 个，在隧道矩形内部均匀分布
+            const warpCountSpacing = (tunnelH - 50) / 3;
+            const warpCountStartY = cy - warpCountSpacing * 1.5;
 
             nodes = {
                 local: { x: cx, y: cy, label: '本机', color: '#A3A3A3' },
                 tunnel: { x: tunnelX, y: cy, w: tunnelW, h: tunnelH, label: 'WARP 隧道', color: '#F68320' },
-                // 直连目标（不经过隧道）
-                ipv4: { x: destX, y: startY, label: 'IPv4 直连', color: '#3b82f6' },
-                ipv6: { x: destX, y: startY + spacing, label: 'IPv6 直连', color: '#22C55E' },
-                // WARP 目标（经过隧道），标签格式：WARP[v4/v6]→v4/v6
-                ipv4_warp:       { x: destX, y: startY + spacing * 2, label: 'WARP[v4]→v4', color: '#F59E0B' },
-                ipv4_warp_ipv6:  { x: destX, y: startY + spacing * 3, label: 'WARP[v4]→v6', color: '#EAB308' },
-                ipv6_warp:       { x: destX, y: startY + spacing * 4, label: 'WARP[v6]→v6', color: '#EF4444' },
-                ipv6_warp_ipv4:  { x: destX, y: startY + spacing * 5, label: 'WARP[v6]→v4', color: '#A855F7' },
+
+                // === 类型节点（端口形状，最右侧竖直排列，隧道外）===
+                type_ipv4:            { x: typeX, y: typeStartY,                  label: 'IPv4 直连',    color: '#3b82f6', isType: true, routeType: 'ipv4' },
+                type_ipv6:            { x: typeX, y: typeStartY + typeSpacing,    label: 'IPv6 直连',    color: '#22C55E', isType: true, routeType: 'ipv6' },
+                type_ipv4_warp:       { x: typeX, y: typeStartY + typeSpacing * 2, label: 'WARP[v4]→v4', color: '#F59E0B', isType: true, routeType: 'ipv4_warp' },
+                type_ipv4_warp_ipv6:  { x: typeX, y: typeStartY + typeSpacing * 3, label: 'WARP[v4]→v6', color: '#EAB308', isType: true, routeType: 'ipv4_warp_ipv6' },
+                type_ipv6_warp:       { x: typeX, y: typeStartY + typeSpacing * 4, label: 'WARP[v6]→v6', color: '#EF4444', isType: true, routeType: 'ipv6_warp' },
+                type_ipv6_warp_ipv4:  { x: typeX, y: typeStartY + typeSpacing * 5, label: 'WARP[v6]→v4', color: '#A855F7', isType: true, routeType: 'ipv6_warp_ipv4' },
+
+                // === 直连计数节点（圆形，靠近隧道右上/右下角外侧，体现"经过但不进入"）===
+                count_ipv4: { x: tunnelRight + directOffset, y: tunnelTop - directOffset,    color: '#3b82f6', isCount: true, routeType: 'ipv4' },
+                count_ipv6: { x: tunnelRight + directOffset, y: tunnelBottom + directOffset, color: '#22C55E', isCount: true, routeType: 'ipv6' },
+
+                // === WARP 计数节点（圆形，隧道矩形内部，体现"被隧道处理"）===
+                count_ipv4_warp:       { x: tunnelX, y: warpCountStartY,                  color: '#F59E0B', isCount: true, inTunnel: true, routeType: 'ipv4_warp' },
+                count_ipv4_warp_ipv6:  { x: tunnelX, y: warpCountStartY + warpCountSpacing, color: '#EAB308', isCount: true, inTunnel: true, routeType: 'ipv4_warp_ipv6' },
+                count_ipv6_warp:       { x: tunnelX, y: warpCountStartY + warpCountSpacing * 2, color: '#EF4444', isCount: true, inTunnel: true, routeType: 'ipv6_warp' },
+                count_ipv6_warp_ipv4:  { x: tunnelX, y: warpCountStartY + warpCountSpacing * 3, color: '#A855F7', isCount: true, inTunnel: true, routeType: 'ipv6_warp_ipv4' },
             };
         }
 
-        // 路径：直连 = local → dest；WARP = local → tunnel → dest
+        // 路径：本机 → 计数节点 → 类型节点（多段直线，计数节点在连线上）
         function getPathPoints(routeType) {
             const local = nodes.local;
-            const dest = nodes[routeType];
-            if (!dest) return null;
-            const cfg = ROUTE_CONFIG[routeType];
-            if (cfg && cfg.isWarp) {
-                const tunnel = nodes.tunnel;
-                return [
-                    { x: local.x, y: local.y },
-                    { x: tunnel.x + tunnel.w / 2, y: tunnel.y },
-                    { x: dest.x, y: dest.y },
-                ];
-            } else {
-                return [
-                    { x: local.x, y: local.y },
-                    { x: dest.x, y: dest.y },
-                ];
-            }
+            const countNode = nodes['count_' + routeType];
+            const typeNode = nodes['type_' + routeType];
+            if (!countNode || !typeNode) return null;
+            return [
+                { x: local.x, y: local.y },
+                { x: countNode.x, y: countNode.y },
+                { x: typeNode.x, y: typeNode.y },
+            ];
         }
 
-        // 贝塞尔曲线上某点的坐标
-        function bezierPoint(points, t) {
-            if (points.length === 2) {
-                return {
-                    x: (1 - t) * points[0].x + t * points[1].x,
-                    y: (1 - t) * points[0].y + t * points[1].y,
-                };
-            } else if (points.length === 3) {
-                const u = 1 - t;
-                return {
-                    x: u * u * points[0].x + 2 * u * t * points[1].x + t * t * points[2].x,
-                    y: u * u * points[0].y + 2 * u * t * points[1].y + t * t * points[2].y,
-                };
+        // 多段直线上某点的坐标（t ∈ [0, 1]，均匀分布在整条折线上）
+        function pathPoint(points, t) {
+            if (points.length < 2) return points[0];
+            // 计算各段长度，按弧长均匀分布
+            const segs = [];
+            let totalLen = 0;
+            for (let i = 0; i < points.length - 1; i++) {
+                const dx = points[i + 1].x - points[i].x;
+                const dy = points[i + 1].y - points[i].y;
+                const len = Math.sqrt(dx * dx + dy * dy);
+                segs.push(len);
+                totalLen += len;
+            }
+            const target = t * totalLen;
+            let acc = 0;
+            for (let i = 0; i < segs.length; i++) {
+                if (acc + segs[i] >= target) {
+                    const localT = segs[i] > 0 ? (target - acc) / segs[i] : 0;
+                    return {
+                        x: (1 - localT) * points[i].x + localT * points[i + 1].x,
+                        y: (1 - localT) * points[i].y + localT * points[i + 1].y,
+                    };
+                }
+                acc += segs[i];
             }
             return points[points.length - 1];
         }
 
-        function drawNode(node, isTunnel) {
-            if (isTunnel) {
-                const x = node.x - node.w / 2;
-                const y = node.y - node.h / 2;
-                ctx.shadowColor = node.color;
-                ctx.shadowBlur = 15;
-                ctx.fillStyle = 'rgba(246,131,32,0.08)';
-                roundRect(ctx, x, y, node.w, node.h, 12);
-                ctx.fill();
-                ctx.shadowBlur = 0;
-                ctx.strokeStyle = node.color;
-                ctx.lineWidth = 1.5;
-                roundRect(ctx, x, y, node.w, node.h, 12);
+        // 绘制 WARP 隧道矩形容器（虚线边框，内部容纳 WARP 计数节点）
+        function drawTunnel(node) {
+            const x = node.x - node.w / 2;
+            const y = node.y - node.h / 2;
+            ctx.fillStyle = 'rgba(246,131,32,0.06)';
+            roundRect(ctx, x, y, node.w, node.h, 12);
+            ctx.fill();
+            ctx.strokeStyle = node.color;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 3]);  // 虚线边框，表示容器
+            roundRect(ctx, x, y, node.w, node.h, 12);
+            ctx.stroke();
+            ctx.setLineDash([]);  // 恢复实线
+            // 隧道标题在矩形顶部外侧
+            ctx.fillStyle = node.color;
+            ctx.font = '600 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(node.label, node.x, y - 10);
+            // WARP 底层类型标注
+            ctx.fillStyle = '#A3A3A3';
+            ctx.font = '500 8px sans-serif';
+            ctx.fillText(warpUnderlay === 'ipv6' ? '(IPv6)' : '(IPv4)', node.x, y - 22);
+        }
+
+        // 绘制类型节点（端口形状，标签在左侧）
+        function drawPortNode(node) {
+            const w = 44, h = 30;
+            const x = node.x - w / 2;
+            const y = node.y - h / 2;
+            // 端口外框（圆角矩形）
+            ctx.fillStyle = node.color + '22';
+            roundRect(ctx, x, y, w, h, 5);
+            ctx.fill();
+            ctx.strokeStyle = node.color;
+            ctx.lineWidth = 1.5;
+            roundRect(ctx, x, y, w, h, 5);
+            ctx.stroke();
+            // 端口插槽（内部梯形凹陷，模拟 RJ45 网口）
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.beginPath();
+            ctx.moveTo(x + 8, y + 7);
+            ctx.lineTo(x + w - 8, y + 7);
+            ctx.lineTo(x + w - 11, y + h - 7);
+            ctx.lineTo(x + 11, y + h - 7);
+            ctx.closePath();
+            ctx.fill();
+            // 端口针脚
+            ctx.strokeStyle = node.color;
+            ctx.lineWidth = 1;
+            const pinCount = 4;
+            const pinStart = x + 13;
+            const pinEnd = x + w - 13;
+            const pinSpacing = (pinEnd - pinStart) / (pinCount - 1);
+            for (let i = 0; i < pinCount; i++) {
+                const px = pinStart + i * pinSpacing;
+                ctx.beginPath();
+                ctx.moveTo(px, y + 10);
+                ctx.lineTo(px, y + h - 10);
                 ctx.stroke();
+            }
+            // 标签在端口左侧（节点在最右侧，标签向左延伸）
+            ctx.fillStyle = node.color;
+            ctx.font = '600 9px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(node.label, x - 6, node.y);
+        }
+
+        // 绘制计数节点（圆形，内部只显示计数数字，与对应类型节点同色）
+        function drawCountNode(node) {
+            const count = stats[node.routeType] || 0;
+            const r = count > 0 ? 14 : 10;
+            ctx.fillStyle = node.color + (count > 0 ? '44' : '15');
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = node.color;
+            ctx.lineWidth = count > 0 ? 1.5 : 1;
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+            ctx.stroke();
+            // 只显示计数，无其他内容
+            if (count > 0) {
                 ctx.fillStyle = node.color;
-                ctx.font = '600 10px sans-serif';
+                ctx.font = '700 11px sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                ctx.fillText(node.label, node.x, node.y - 12);
-                // WARP 底层类型
-                ctx.fillStyle = '#A3A3A3';
-                ctx.font = '500 8px sans-serif';
-                ctx.fillText(warpUnderlay === 'ipv6' ? '(IPv6)' : '(IPv4)', node.x, node.y - 2);
-                // WARP 总连接数
-                const warpCount = stats.ipv4_warp + stats.ipv4_warp_ipv6 + stats.ipv6_warp + stats.ipv6_warp_ipv4;
-                ctx.fillStyle = '#FFFFFF';
-                ctx.font = '700 14px sans-serif';
-                ctx.fillText(warpCount.toString(), node.x, node.y + 14);
-            } else {
-                ctx.shadowColor = node.color;
-                ctx.shadowBlur = 10;
-                ctx.fillStyle = node.color + '22';
-                ctx.beginPath();
-                ctx.arc(node.x, node.y, 18, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.shadowBlur = 0;
-                ctx.strokeStyle = node.color;
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.arc(node.x, node.y, 18, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.fillStyle = node.color;
-                ctx.font = '600 9px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(node.label, node.x, node.y - 30);
+                ctx.fillText(count.toString(), node.x, node.y);
             }
         }
 
         function drawLocalNode() {
             const n = nodes.local;
-            const pulse = Math.sin(Date.now() / 500) * 0.3 + 0.7;
-            ctx.shadowColor = '#F68320';
-            ctx.shadowBlur = 20 * pulse;
+            // 本机节点用低频脉冲（每秒一次），降低 GPU 负担
+            const pulse = Math.sin(Date.now() / 1000) * 0.3 + 0.7;
             ctx.fillStyle = 'rgba(246,131,32,0.12)';
             ctx.beginPath();
             ctx.arc(n.x, n.y, 26, 0, Math.PI * 2);
             ctx.fill();
-            ctx.shadowBlur = 0;
             ctx.fillStyle = 'rgba(246,131,32,0.25)';
             ctx.beginPath();
             ctx.arc(n.x, n.y, 18, 0, Math.PI * 2);
@@ -470,31 +559,12 @@
             ctx.lineWidth = count > 0 ? 2 : 1;
             ctx.beginPath();
             ctx.moveTo(points[0].x, points[0].y);
-            if (points.length === 3) {
-                ctx.quadraticCurveTo(points[1].x, points[1].y, points[2].x, points[2].y);
-            } else {
-                ctx.lineTo(points[1].x, points[1].y);
+            // 多段直线，确保计数节点在连线上
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i].x, points[i].y);
             }
             ctx.stroke();
-
-            // 连接数标签（路径中点）
-            const mid = bezierPoint(points, 0.5);
-            if (count > 0) {
-                ctx.fillStyle = 'rgba(13,13,13,0.85)';
-                ctx.beginPath();
-                ctx.arc(mid.x, mid.y, 11, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.strokeStyle = color;
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.arc(mid.x, mid.y, 11, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.fillStyle = color;
-                ctx.font = '700 10px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(count.toString(), mid.x, mid.y);
-            }
+            // 计数已由计数节点显示，路径上不再重复标注
         }
 
         function drawParticles() {
@@ -504,29 +574,26 @@
                 const points = getPathPoints(rt);
                 if (!points) continue;
                 const color = ROUTE_CONFIG[rt].color;
-                const particleCount = Math.min(count, 6);
-                const speed = 0.003 + count * 0.0004;
+                const particleCount = Math.min(count, 4);  // 减少粒子数量上限
+                const speed = 0.002 + count * 0.0003;
 
                 for (let i = 0; i < particleCount; i++) {
                     let t = (Date.now() * speed + i / particleCount) % 1;
-                    const pos = bezierPoint(points, t);
-                    const trailLen = 4;
+                    const pos = pathPoint(points, t);
+                    const trailLen = 3;  // 减少拖尾长度
                     for (let j = 0; j < trailLen; j++) {
-                        const tt = Math.max(0, t - j * 0.02);
-                        const tp = bezierPoint(points, tt);
-                        const alpha = (1 - j / trailLen) * 0.6;
+                        const tt = Math.max(0, t - j * 0.025);
+                        const tp = pathPoint(points, tt);
+                        const alpha = (1 - j / trailLen) * 0.5;
                         ctx.fillStyle = color + Math.floor(alpha * 255).toString(16).padStart(2, '0');
                         ctx.beginPath();
-                        ctx.arc(tp.x, tp.y, 2.5 - j * 0.4, 0, Math.PI * 2);
+                        ctx.arc(tp.x, tp.y, 2 - j * 0.4, 0, Math.PI * 2);
                         ctx.fill();
                     }
-                    ctx.shadowColor = color;
-                    ctx.shadowBlur = 6;
                     ctx.fillStyle = color;
                     ctx.beginPath();
                     ctx.arc(pos.x, pos.y, 2.5, 0, Math.PI * 2);
                     ctx.fill();
-                    ctx.shadowBlur = 0;
                 }
             }
         }
@@ -545,18 +612,33 @@
             ctx.closePath();
         }
 
+        // 网格离屏 canvas（静态背景，预渲染避免每帧重绘）
+        let gridCanvas = null;
+
+        function buildGridCanvas(w, h) {
+            gridCanvas = document.createElement('canvas');
+            const dpr = window.devicePixelRatio || 1;
+            gridCanvas.width = w * dpr;
+            gridCanvas.height = h * dpr;
+            const gctx = gridCanvas.getContext('2d');
+            gctx.scale(dpr, dpr);
+            gctx.strokeStyle = 'rgba(255,255,255,0.02)';
+            gctx.lineWidth = 1;
+            for (let x = 0; x < w; x += 40) {
+                gctx.beginPath(); gctx.moveTo(x, 0); gctx.lineTo(x, h); gctx.stroke();
+            }
+            for (let y = 0; y < h; y += 40) {
+                gctx.beginPath(); gctx.moveTo(0, y); gctx.lineTo(w, y); gctx.stroke();
+            }
+        }
+
         function drawScene() {
             const rect = canvas.parentElement.getBoundingClientRect();
             ctx.clearRect(0, 0, rect.width, rect.height);
 
-            // 背景网格
-            ctx.strokeStyle = 'rgba(255,255,255,0.02)';
-            ctx.lineWidth = 1;
-            for (let x = 0; x < rect.width; x += 40) {
-                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, rect.height); ctx.stroke();
-            }
-            for (let y = 0; y < rect.height; y += 40) {
-                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(rect.width, y); ctx.stroke();
+            // 背景网格（使用预渲染的离屏 canvas）
+            if (gridCanvas) {
+                ctx.drawImage(gridCanvas, 0, 0, rect.width, rect.height);
             }
 
             // 绘制路径（先画路径再画节点）
@@ -567,29 +649,47 @@
             // 绘制粒子
             drawParticles();
 
-            // 绘制节点
+            // 绘制本机节点
             drawLocalNode();
-            // 直连节点
-            drawNode(nodes.ipv4, false);
-            drawNode(nodes.ipv6, false);
-            // WARP 隧道
-            drawNode(nodes.tunnel, true);
-            // WARP 目标节点
-            drawNode(nodes.ipv4_warp, false);
-            drawNode(nodes.ipv4_warp_ipv6, false);
-            drawNode(nodes.ipv6_warp, false);
-            drawNode(nodes.ipv6_warp_ipv4, false);
+
+            // WARP 隧道矩形容器（先画容器，再画内部计数节点）
+            drawTunnel(nodes.tunnel);
+            // WARP 计数节点（圆形，在隧道矩形内部）
+            drawCountNode(nodes.count_ipv4_warp);
+            drawCountNode(nodes.count_ipv4_warp_ipv6);
+            drawCountNode(nodes.count_ipv6_warp);
+            drawCountNode(nodes.count_ipv6_warp_ipv4);
+
+            // 直连计数节点（圆形，在隧道矩形外）
+            drawCountNode(nodes.count_ipv4);
+            drawCountNode(nodes.count_ipv6);
+
+            // 类型节点（端口形状，最右侧竖直排列，隧道外）
+            drawPortNode(nodes.type_ipv4);
+            drawPortNode(nodes.type_ipv6);
+            drawPortNode(nodes.type_ipv4_warp);
+            drawPortNode(nodes.type_ipv4_warp_ipv6);
+            drawPortNode(nodes.type_ipv6_warp);
+            drawPortNode(nodes.type_ipv6_warp_ipv4);
         }
 
         function startAnimation() {
+            // 限制为约 20fps（每 50ms 一帧），降低 GPU 占用
+            // requestAnimationFrame 在后台标签页会自动降频，但前台仍 60fps
             function loop() {
                 drawScene();
-                animFrame = requestAnimationFrame(loop);
+                animFrame = setTimeout(loop, 50);
             }
             loop();
         }
 
+        function stopAnimation() {
+            if (animFrame) { clearTimeout(animFrame); animFrame = null; }
+        }
+
         // ===================== 数据获取 =====================
+
+        let _refreshTimer = null;  // 防抖定时器，避免短时间内多次刷新叠加
 
         async function refresh() {
             if (!api) return;
@@ -598,6 +698,13 @@
                 lastData = data;
                 stats = data.stats || stats;
                 warpUnderlay = data.warp_underlay || 'ipv4';
+                // 累计展示模式：将当前连接合并到历史（同 ID 覆盖为最新）
+                // 注意：如果 WARP 正在重连导致连接列表为空，不覆盖历史记录
+                if (cumulativeMode && data.connections && data.connections.length > 0) {
+                    for (const c of data.connections) {
+                        cumulativeConns.set(connId(c), c);
+                    }
+                }
                 updateStats();
                 renderConnList();
             } catch (e) {
@@ -607,6 +714,15 @@
                     container.innerHTML = '<div class="empty-hint">获取数据失败，请点击刷新重试</div>';
                 }
             }
+        }
+
+        // 防抖刷新：短时间内多次调用只执行最后一次，避免 setRoute 延迟刷新与自动刷新叠加
+        function refreshDebounced(delay) {
+            if (_refreshTimer) clearTimeout(_refreshTimer);
+            _refreshTimer = setTimeout(() => {
+                _refreshTimer = null;
+                refresh();
+            }, delay);
         }
 
         function updateStats() {
@@ -635,6 +751,20 @@
             return `${c.process}|${c.remote_ip}|${c.remote_port}`;
         }
 
+        // 根据用户选择的路由和连接当前 IP 推断修改后的 route_type
+        // 用于乐观更新累计模式中的连接类型（与后端 get_traffic_status 的分类逻辑一致）
+        function inferRouteType(route, conn) {
+            const isIpv6 = ':' in (conn.remote_ip || '') || conn.is_ipv6;
+            if (route === 'ipv4') return 'ipv4';       // IPv4 直连
+            if (route === 'ipv6') return 'ipv6';       // IPv6 直连
+            // route === 'warp'：走 WARP，类型取决于 WARP 底层和连接 IP
+            if (warpUnderlay === 'ipv6') {
+                return isIpv6 ? 'ipv6_warp' : 'ipv6_warp_ipv4';
+            } else {
+                return isIpv6 ? 'ipv4_warp_ipv6' : 'ipv4_warp';
+            }
+        }
+
         // HTML 属性转义（用于 data-* 属性中的引号）
         function escapeAttr(s) {
             if (!s) return '';
@@ -643,14 +773,22 @@
 
         function renderConnList() {
             const container = document.getElementById('connList');
-            if (!lastData || !lastData.connections || !lastData.connections.length) {
-                connMap.clear();
-                container.innerHTML = '<div class="empty-hint">暂无活动连接</div>';
-                updateActionBar();
-                return;
+            // 累计展示模式：合并历史连接和当前连接
+            let conns;
+            if (cumulativeMode) {
+                // 累计模式：用历史连接（包含当前最新），不按时间区分
+                conns = Array.from(cumulativeConns.values());
+            } else {
+                if (!lastData || !lastData.connections || !lastData.connections.length) {
+                    connMap.clear();
+                    container.innerHTML = '<div class="empty-hint">暂无活动连接</div>';
+                    updateActionBar();
+                    return;
+                }
+                conns = lastData.connections;
             }
+
             const kw = (document.getElementById('searchInput').value || '').trim().toLowerCase();
-            let conns = lastData.connections;
             if (kw) {
                 conns = conns.filter(c =>
                     (c.process || '').toLowerCase().includes(kw) ||
@@ -659,7 +797,7 @@
                 );
             }
             if (!conns.length) {
-                container.innerHTML = '<div class="empty-hint">无匹配连接</div>';
+                container.innerHTML = '<div class="empty-hint">' + (cumulativeMode ? '暂无累计连接' : '无匹配连接') + '</div>';
                 updateActionBar();
                 return;
             }
@@ -689,12 +827,15 @@
                 const allSelected = items.every(c => selectedConns.has(connId(c)));
                 const someSelected = items.some(c => selectedConns.has(connId(c)));
                 const procEsc = escapeAttr(proc);
-                html += `<div class="proc-group">
-                    <div class="proc-group-header" onclick="toggleGroup('${procEsc}')">
+                const isCollapsed = collapsedGroups.has(proc);
+                html += `<div class="proc-group${isCollapsed ? ' collapsed' : ''}">
+                    <div class="proc-group-header" onclick="toggleGroupCollapse('${procEsc}')">
+                        <svg class="collapse-icon" viewBox="0 0 10 10"><path d="M2 3 L5 7 L8 3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         <input type="checkbox" class="conn-check group-check" ${allSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleGroup('${procEsc}', this.checked)" ${someSelected && !allSelected ? 'style="opacity:0.5"' : ''}>
                         <span class="proc-name">${escapeHtml(proc)}</span>
                         <span class="proc-count">${items.length}</span>
-                    </div>`;
+                    </div>
+                    <div class="proc-group-body">`;
                 for (const c of items) {
                     const id = connId(c);
                     const cfg = ROUTE_CONFIG[c.route_type] || ROUTE_CONFIG['ipv4'];
@@ -711,10 +852,42 @@
                         <span class="conn-badge ${cfg.badge}">${cfg.label}</span>
                     </div>`;
                 }
-                html += '</div>';
+                html += '</div></div>';
             }
             container.innerHTML = html;
             updateActionBar();
+        }
+
+        // 切换分组折叠状态
+        function toggleGroupCollapse(proc) {
+            if (collapsedGroups.has(proc)) {
+                collapsedGroups.delete(proc);
+            } else {
+                collapsedGroups.add(proc);
+            }
+            // 局部更新，避免重渲染
+            const header = event.currentTarget;
+            const group = header.closest('.proc-group');
+            if (group) group.classList.toggle('collapsed');
+        }
+
+        // 累计展示模式切换
+        function toggleCumulative() {
+            cumulativeMode = document.getElementById('cumulativeToggle').checked;
+            if (cumulativeMode) {
+                // 开启累计：将当前连接加入历史
+                if (lastData && lastData.connections) {
+                    for (const c of lastData.connections) {
+                        cumulativeConns.set(connId(c), c);
+                    }
+                }
+                showToast(`累计展示已开启，当前 ${cumulativeConns.size} 个连接`);
+            } else {
+                // 关闭累计：清空历史，切回实时
+                cumulativeConns.clear();
+                showToast('已切换为实时展示');
+            }
+            renderConnList();
         }
 
         // 单个连接复选框切换
@@ -785,21 +958,63 @@
         // 批量设置路由类型
         async function setRoute(route) {
             if (selectedConns.size === 0 || !api) return;
+            // 收集选中连接的标识信息
             const items = [];
+            const connById = {};  // id → 连接对象，用于后续乐观更新
             for (const id of selectedConns) {
                 const c = connMap.get(id);
-                if (c) items.push({ hostname: c.hostname || '', remote_ip: c.remote_ip });
+                if (c) {
+                    items.push({ hostname: c.hostname || '', remote_ip: c.remote_ip });
+                    connById[id] = c;
+                }
             }
             if (items.length === 0) return;
             const routeLabel = route === 'warp' ? '不直连(WARP)' : (route === 'ipv6' ? 'IPv6 直连' : 'IPv4 直连');
             showToast(`正在设置 ${items.length} 个连接为 ${routeLabel}...`);
             try {
                 const result = await api.set_connections_route(items, route);
-                showToast(`${routeLabel}: ${result.message}`);
-                if (result.success || result.results) {
+                // 解析后端返回的逐条结果，按实际成功/失败更新累计连接类型
+                const results = result.results || [];
+                let successCount = 0;
+                let failCount = 0;
+                const failMessages = [];
+                for (let i = 0; i < results.length; i++) {
+                    const r = results[i];
+                    // 通过 hostname+remote_ip 匹配回连接对象
+                    const matchedId = Object.keys(connById).find(id => {
+                        const c = connById[id];
+                        return (c.hostname || '') === r.hostname && c.remote_ip === r.remote_ip;
+                    });
+                    if (r.success) {
+                        successCount++;
+                        // 乐观更新：仅对成功的连接更新类型
+                        if (matchedId && cumulativeMode) {
+                            const c = cumulativeConns.get(matchedId);
+                            if (c) {
+                                c.route_type = inferRouteType(route, c);
+                                c.is_warp = (route === 'warp');
+                                cumulativeConns.set(matchedId, c);
+                            }
+                        }
+                    } else {
+                        failCount++;
+                        failMessages.push(`${r.hostname || r.remote_ip}: ${r.message}`);
+                    }
+                }
+                // 提示实际结果
+                if (failCount === 0) {
+                    showToast(`${routeLabel}: 全部成功 (${successCount}/${items.length})`);
+                } else {
+                    showToast(`${routeLabel}: 成功 ${successCount}，失败 ${failCount}。${failMessages.slice(0, 2).join('; ')}`);
+                }
+                // 立即重新渲染列表（累计模式下能看到类型变化）
+                renderConnList();
+                // 防抖刷新：延迟获取后端实际数据覆盖乐观更新，避免与自动刷新叠加
+                refreshDebounced(1200);
+                // 仅当全部成功时清除选择，失败项保留选中以便重试
+                if (failCount === 0) {
                     clearSelection();
                 }
-                setTimeout(refresh, 800);  // 稍后刷新看效果
             } catch (e) {
                 showToast('设置失败: ' + e);
             }
@@ -849,7 +1064,7 @@
                 // 窗口隐藏：停止动画和轮询
                 _wasAutoBeforeHide = !!autoTimer;
                 stopAuto();
-                if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+                stopAnimation();
             } else {
                 // 窗口显示：恢复动画，如果之前开启了自动刷新则恢复
                 if (!animFrame) startAnimation();

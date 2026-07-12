@@ -239,6 +239,117 @@
         .traffic-subview { display: none; flex: 1; overflow: hidden; flex-direction: column; }
         .traffic-subview.active { display: flex; }
 
+        /* ===== WARP排除tab ===== */
+        .warp-content { padding: 16px; }
+        .section { margin-bottom: 20px; }
+        .section-title {
+            font-size: 13px; font-weight: 600; color: var(--text-secondary);
+            margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+        }
+        .section-title .badge {
+            font-size: 11px; padding: 2px 8px; border-radius: 10px;
+            background: var(--bg-tertiary); color: var(--text-tertiary);
+        }
+        .learn-card {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 10px; padding: 14px;
+        }
+        .learn-status { font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; line-height: 1.6; }
+        .learn-status.active { color: var(--c-ipv6); }
+        .learn-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+        /* WARP tab 内的按钮覆盖（避免被 Status Page 的 .btn 样式覆盖） */
+        #tab-warp .btn {
+            flex: initial; padding: 7px 14px; font-size: 12px; font-weight: 500;
+        }
+        #tab-warp .btn-sm { padding: 4px 10px; font-size: 11px; }
+        #tab-warp .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); }
+        #tab-warp .btn-primary:hover { background: #ff942e; border-color: #ff942e; }
+        #tab-warp .btn-success { background: var(--c-ipv6); border-color: var(--c-ipv6); color: #000; }
+        #tab-warp .btn-danger { background: transparent; border-color: var(--c-ipv6-warp); color: var(--c-ipv6-warp); }
+        #tab-warp .btn-danger:hover { background: rgba(239,68,68,0.15); }
+        #tab-warp .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .domain-list {
+            max-height: 200px; overflow-y: auto; background: var(--bg-secondary);
+            border: 1px solid var(--border); border-radius: 10px; padding: 6px;
+        }
+        .domain-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 7px 10px; border-radius: 6px; font-size: 12px;
+            cursor: pointer; transition: background 0.1s;
+        }
+        .domain-item:hover { background: var(--bg-tertiary); }
+        .domain-item.selected { background: var(--accent-dim); }
+        .domain-name { color: var(--text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .domain-checkbox { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; margin-right: 8px; }
+
+        .rule-item {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 10px; padding: 12px; margin-bottom: 8px;
+        }
+        .rule-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .rule-domain { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+        .rule-actions { display: flex; gap: 6px; align-items: center; }
+        .rule-meta { font-size: 11px; color: var(--text-tertiary); line-height: 1.5; }
+        .rule-ips, .rule-cidrs { margin-top: 4px; word-break: break-all; }
+        .rule-tag {
+            display: inline-block; font-size: 10px; padding: 1px 6px;
+            border-radius: 4px; margin-right: 4px; margin-top: 2px;
+        }
+        .tag-ip { background: rgba(59,130,246,0.2); color: #60a5fa; }
+        .tag-cidr { background: rgba(168,85,247,0.2); color: #c084fc; }
+        .tag-disabled { background: rgba(239,68,68,0.2); color: var(--c-ipv6-warp); }
+        .tag-enabled { background: rgba(34,197,94,0.2); color: var(--c-ipv6); }
+
+        .mode-select {
+            padding: 3px 8px; font-size: 11px; background: var(--bg-tertiary);
+            color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
+        }
+
+        .add-domain-row { display: flex; gap: 8px; margin-bottom: 10px; }
+        .input {
+            flex: 1; padding: 7px 10px; background: var(--bg-secondary);
+            border: 1px solid var(--border); border-radius: 6px;
+            color: var(--text-primary); font-size: 12px; outline: none; transition: border-color 0.15s;
+        }
+        .input:focus { border-color: var(--accent); }
+        .input::placeholder { color: var(--text-tertiary); }
+
+        .warp-ranges {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 10px; padding: 10px; max-height: 150px; overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', monospace; font-size: 11px; line-height: 1.6;
+        }
+        .warp-range-line { color: var(--text-secondary); }
+        .warp-range-line:hover { color: var(--text-primary); }
+
+        .search-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+        .search-count { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
+
+        /* WARP 内部子tab按钮（区别于主tab-btn） */
+        .warp-subtab-btn {
+            padding: 6px 16px; font-size: 12px; font-weight: 500;
+            background: transparent; border: none; border-bottom: 2px solid transparent;
+            color: var(--text-tertiary); cursor: pointer; transition: all 0.15s;
+        }
+        .warp-subtab-btn:hover { color: var(--text-secondary); }
+        .warp-subtab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+        /* Loading Mask */
+        .loading-mask {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+            align-items: center; justify-content: center; z-index: 500; backdrop-filter: blur(2px);
+        }
+        .loading-mask.active { display: flex; }
+        .mask-text { color: var(--text-secondary); font-size: 12px; margin-top: 10px; }
+
+        /* 滚动条 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+
         /* Status Page */
         .status-page {
             flex: 1;
@@ -1011,14 +1122,205 @@
             </div>
         </div>
 
-        <!-- WARP排除 Tab（Task 6 填充）-->
+        <!-- WARP排除 Tab -->
         <div class="tab-content" id="tab-warp">
-            <div class="empty-hint">WARP排除（待实现）</div>
+            <div class="warp-content">
+                <!-- 网络方案 -->
+                <div class="section">
+                    <div class="section-title">网络方案</div>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                        <div style="flex:1; min-width:200px;">
+                            <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                                <label style="font-size:13px; font-weight:500; cursor:pointer; display:flex; align-items:center; gap:8px;">
+                                    <input type="checkbox" id="ipv4Toggle" onchange="WarpTab.toggleIpv4(this.checked)" style="width:16px; height:16px; cursor:pointer;">
+                                    启用 IPv4（校园网直连）
+                                </label>
+                                <span id="ipv4Status" style="font-size:11px; padding:2px 8px; border-radius:4px; background:var(--bg-tertiary); color:var(--text-tertiary);">检测中...</span>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                                <label style="font-size:13px; font-weight:500; cursor:pointer; display:flex; align-items:center; gap:8px;">
+                                    <input type="checkbox" id="autoEnableIpv4Toggle" onchange="WarpTab.toggleAutoEnableIpv4(this.checked)" style="width:16px; height:16px; cursor:pointer;">
+                                    认证后自动启用 IPv4
+                                </label>
+                                <span id="autoEnableIpv4Status" style="font-size:11px; padding:2px 8px; border-radius:4px; background:var(--bg-tertiary); color:var(--text-tertiary);">检测中...</span>
+                            </div>
+                            <div style="font-size:11px; color:var(--text-tertiary); line-height:1.6;">
+                                <strong>启用 IPv4：</strong>白名单域名排除 WARP → 走校园网 IPv4 直连（大陆 IP），非白名单流量仍走 IPv6 → WARP<br>
+                                <strong>禁用 IPv4：</strong>所有流量走 IPv6 → WARP，白名单域名需 DNS fallback + IPv6 CIDR 排除
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 学习模式 -->
+                <div class="section">
+                    <div class="section-title">
+                        学习模式
+                        <span class="badge" id="learnBadge">未启动</span>
+                    </div>
+                    <div class="learn-card">
+                        <div class="learn-status" id="learnStatus">
+                            开启学习模式后，请正常访问需要排除的网站。系统会监控DNS缓存，记录访问的域名，供您选择排除。
+                        </div>
+                        <div class="learn-actions">
+                            <button class="btn btn-primary" id="startLearnBtn" onclick="WarpTab.startLearning()">开始学习</button>
+                            <button class="btn btn-danger" id="stopLearnBtn" onclick="WarpTab.stopLearning()" style="display:none;">停止学习</button>
+                            <button class="btn" id="refreshLearnBtn" onclick="WarpTab.refreshLearnedDomains()" disabled>刷新列表</button>
+                            <button class="btn btn-success" id="addSelectedBtn" onclick="WarpTab.addSelectedDomains()" disabled>添加选中到排除列表</button>
+                        </div>
+                        <div style="margin-top:10px;">
+                            <div class="search-row">
+                                <input type="text" class="search-input" id="domainSearchInput" placeholder="模糊搜索域名（不区分大小写）">
+                                <span class="search-count" id="searchCount"></span>
+                                <button class="btn btn-sm" id="selectAllBtn" onclick="WarpTab.toggleSelectAll()" disabled>全选</button>
+                            </div>
+                            <div class="domain-list" id="learnedList">
+                                <div class="empty-hint">学习到的域名将显示在这里</div>
+                            </div>
+                            <div class="pagination-bar" id="learnedPagination"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 已配置的排除规则 -->
+                <div class="section">
+                    <div class="section-title">
+                        已配置的排除规则
+                        <span class="badge" id="ruleCount">0</span>
+                    </div>
+                    <div class="tab-bar" style="display:flex; gap:0; margin-bottom:12px; border-bottom:1px solid var(--border);">
+                        <button class="warp-subtab-btn active" onclick="WarpTab.switchSubtab('domain')" id="tabDomain">域名排除</button>
+                        <button class="warp-subtab-btn" onclick="WarpTab.switchSubtab('ip')" id="tabIp">IP 排除</button>
+                    </div>
+
+                    <!-- 域名排除子页 -->
+                    <div id="domainTabContent">
+                        <div style="margin-bottom:12px;">
+                            <div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">手动添加域名</div>
+                            <div class="add-domain-row">
+                                <input type="text" class="input" id="domainInput" placeholder="输入域名，如 example.com" onkeydown="if(event.key==='Enter')WarpTab.addDomainManually()" style="flex:2;">
+                                <select id="routeSelect" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text-primary); font-size:13px; cursor:pointer;">
+                                    <option value="ipv6">走 IPv6 校园网</option>
+                                    <option value="ipv4">走 IPv4 校园网</option>
+                                </select>
+                                <button class="btn btn-primary" onclick="WarpTab.addDomainManually()">添加</button>
+                            </div>
+                            <div style="font-size:11px; color:var(--text-tertiary); margin-top:4px; line-height:1.5;">
+                                <strong>走 IPv6 校园网：</strong>域名排除 WARP + DNS fallback + IPv6 CIDR + 防火墙阻止 IPv4，强制走校园 IPv6（适合有 AAAA 记录的域名）<br>
+                                <strong>走 IPv4 校园网：</strong>域名排除 WARP，IPv4/IPv6 都走校园网直连（适合只有 A 记录的域名）
+                            </div>
+                        </div>
+                        <div style="margin-bottom:10px; display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn btn-sm btn-primary" onclick="WarpTab.applyAllToWarp()">同步到WARP</button>
+                            <button class="btn btn-sm" onclick="WarpTab.syncFromWarp()">从WARP同步</button>
+                            <button class="btn btn-sm" onclick="WarpTab.checkIpv6Support()" title="检测所有 IPv6 路由域名是否真的支持 IPv6，不支持则降级为 IPv4">检测 IPv6 支持</button>
+                        </div>
+                        <div class="search-row">
+                            <input type="text" class="search-input" id="rulesSearchInput" placeholder="模糊搜索规则域名（不区分大小写）">
+                            <span class="search-count" id="rulesSearchCount"></span>
+                        </div>
+                        <div id="rulesList">
+                            <div class="empty-hint">暂无排除规则，请通过学习模式或手动添加</div>
+                        </div>
+                        <div class="pagination-bar" id="rulesPagination"></div>
+                    </div>
+
+                    <!-- IP 排除子页 -->
+                    <div id="ipTabContent" style="display:none;">
+                        <div style="margin-bottom:12px;">
+                            <div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">手动添加 IP 范围</div>
+                            <div class="add-domain-row">
+                                <input type="text" class="input" id="ipRangeInput" placeholder="输入 IP 或 CIDR，如 10.0.0.0/8 或 2402:4e00::" onkeydown="if(event.key==='Enter')WarpTab.addIpRangeManually()" style="flex:2;">
+                                <select id="ipPrefixSelect" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text-primary); font-size:13px; cursor:pointer; min-width:90px;" onchange="WarpTab.onPrefixChange()">
+                                    <option value="auto">自动前缀</option>
+                                </select>
+                                <select id="ipRouteSelect" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text-primary); font-size:13px; cursor:pointer;">
+                                    <option value="ipv4">走 IPv4 校园网</option>
+                                    <option value="ipv6">走 IPv6 校园网</option>
+                                </select>
+                                <button class="btn btn-primary" onclick="WarpTab.addIpRangeManually()">添加</button>
+                            </div>
+                            <div style="font-size:11px; color:var(--text-tertiary); margin-top:4px; line-height:1.5;">
+                                <strong>走 IPv4 校园网：</strong>CIDR 排除，流量走校园网 IPv4<br>
+                                <strong>走 IPv6 校园网：</strong>CIDR 排除，流量走校园网 IPv6<br>
+                                <strong>前缀长度：</strong>/32(单IP)、/24(IPv4子网)、/32或/48(IPv6网段)、/64(IPv6子网)
+                            </div>
+                        </div>
+                        <div style="margin-bottom:12px; padding:10px; background:var(--bg-secondary); border-radius:8px; border:1px solid var(--border);">
+                            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                                <div style="font-size:12px; font-weight:600; color:var(--text-secondary);">从当前连接推荐</div>
+                                <button class="btn btn-sm" onclick="WarpTab.loadTrafficForExclude()">刷新连接</button>
+                            </div>
+                            <div style="font-size:11px; color:var(--text-tertiary); margin-bottom:8px; line-height:1.5;">
+                                显示当前未走 WARP 的连接（直连），点击可一键将其 IP 网段加入排除列表。
+                            </div>
+                            <div id="trafficRecommendList" style="max-height:200px; overflow-y:auto;">
+                                <div class="empty-hint" style="padding:8px;">点击"刷新连接"加载</div>
+                            </div>
+                        </div>
+                        <div id="ipRangesList">
+                            <div class="empty-hint">暂无 IP 排除规则</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- WARP当前规则 -->
+                <div class="section">
+                    <div class="section-title">
+                        WARP 当前排除规则
+                        <button class="btn btn-sm" onclick="WarpTab.loadWarpRanges()" style="margin-left:auto;">刷新</button>
+                    </div>
+                    <div id="legacyCleanupRow" style="margin-bottom:10px; display:flex; gap:8px; flex-wrap:wrap; display:none;">
+                        <button class="btn btn-sm btn-danger" onclick="WarpTab.cleanupLegacyRules()">清理旧版IP规则残留</button>
+                    </div>
+                    <div class="warp-ranges" id="warpRanges">
+                        <div class="empty-hint">点击刷新查看</div>
+                    </div>
+                </div>
+
+                <!-- DNS Fallback 域名管理 -->
+                <div class="section">
+                    <div class="section-title">
+                        DNS Fallback 域名（本地解析）
+                        <span class="badge" id="dnsFallbackCount">0</span>
+                        <button class="btn btn-sm" onclick="WarpTab.loadDnsFallbackRules()" style="margin-left:auto;">刷新</button>
+                    </div>
+                    <div style="margin-bottom:10px; padding:8px 10px; background:var(--bg-secondary); border-radius:6px; font-size:12px; color:var(--text-tertiary); line-height:1.5;">
+                        <strong>用途：</strong>让指定域名的 DNS 查询走本地运营商 DNS（而非 WARP DNS），避免 CDN 调度域名返回海外节点导致访问被阻止。<br>
+                        <strong>典型场景：</strong>bytedns3.com、queniuyk.com 等字节系 CDN 调度域名。<br>
+                        <strong>与流量排除的区别：</strong>流量排除（tunnel host）让连接不走 WARP；DNS fallback 让解析走本地 DNS，流量仍可走 WARP。
+                    </div>
+                    <div class="add-domain-row" style="margin-bottom:10px;">
+                        <input type="text" class="input" id="dnsFallbackInput" placeholder="输入域名，如 bytedns3.com" onkeydown="if(event.key==='Enter')WarpTab.addDnsFallbackManually()">
+                        <button class="btn btn-primary" onclick="WarpTab.addDnsFallbackManually()">添加</button>
+                    </div>
+                    <div style="margin-bottom:10px; display:flex; gap:8px; flex-wrap:wrap;">
+                        <button class="btn btn-sm btn-primary" onclick="WarpTab.applyDnsFallbackToWarp()">同步到WARP</button>
+                    </div>
+                    <div id="dnsFallbackList">
+                        <div class="empty-hint">暂无 DNS fallback 域名</div>
+                    </div>
+                    <div style="margin-top:10px; padding-top:8px; border-top:1px solid var(--border);">
+                        <div style="font-size:12px; color:var(--text-tertiary); margin-bottom:6px;">WARP 中当前的 DNS fallback 域名：</div>
+                        <div class="warp-ranges" id="warpDnsFallback">
+                            <div class="empty-hint">点击刷新查看</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- 流量 Tab（Task 7 填充）-->
         <div class="tab-content" id="tab-traffic">
             <div class="empty-hint">流量（待实现）</div>
+        </div>
+    </div>
+
+    <!-- Loading Mask (for WARP operations) -->
+    <div class="loading-mask" id="loadingMask">
+        <div style="text-align:center;">
+            <div class="loading-spinner"></div>
+            <div class="mask-text" id="loadingText">处理中...</div>
         </div>
     </div>
 
@@ -1062,30 +1364,8 @@
         }
 
         // ===== Initialization =====
-        window.addEventListener('pywebviewready', async () => {
-            try {
-                const config = await window.pywebview.api.load_config();
-                document.getElementById('wifiName').value = config.wifi_name || '';
-                document.getElementById('username').value = config.username || '';
-                document.getElementById('password').value = config.password || '';
-                document.getElementById('autoAuth').checked = config.auto_auth || false;
-                document.getElementById('autoRestore').checked = config.auto_restore || false;
-                document.getElementById('warpCliPath').value = config.warp_cli_path || '';
-                document.getElementById('silentStartup').checked = config.silent_startup || false;
-            } catch (e) { console.error('Failed to load config:', e); }
-
-            setTimeout(async () => {
-                try {
-                    const status = await window.pywebview.api.check_network_status();
-                    updateStatusFromCheck(status);
-                } catch (e) { console.error('Failed to check network status:', e); }
-                try {
-                    const startup = await window.pywebview.api.get_startup_status();
-                    document.getElementById('autoStartup').checked = startup.enabled || false;
-                } catch (e) { console.error('Failed to get startup status:', e); }
-                document.getElementById('loadingOverlay').classList.add('hidden');
-            }, 100);
-        });
+        // 初始化逻辑已拆分到 initApp() 中，由 StatusTab/SettingsTab/WarpTab/TrafficTab 各自管理
+        window.addEventListener('pywebviewready', initApp);
 
         // ===== Status Management =====
         function updateStatusFromCheck(status) {
@@ -1515,6 +1795,1037 @@
             } catch (e) {
                 console.error('closeWindow failed:', e);
             }
+        }
+
+        // ===== 等待 pywebview API 就绪 =====
+        function waitForApi(timeout = 15000) {
+            return new Promise((resolve, reject) => {
+                if (window.pywebview && window.pywebview.api) { resolve(); return; }
+                const start = Date.now();
+                const check = setInterval(() => {
+                    if (window.pywebview && window.pywebview.api) {
+                        clearInterval(check);
+                        resolve();
+                    } else if (Date.now() - start > timeout) {
+                        clearInterval(check);
+                        reject(new Error('pywebview API 等待超时'));
+                    }
+                }, 100);
+            });
+        }
+
+        // ===== 共享工具 =====
+        const Utils = {
+            escapeHtml(s) {
+                if (!s) return '';
+                return String(s).replace(/[&<>"']/g, c => ({
+                    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+                }[c]));
+            },
+
+            // 子序列保序匹配：query 的字符按顺序出现在 text 中即可
+            fuzzyMatch(text, query) {
+                if (!query) return true;
+                text = String(text || '').toLowerCase();
+                query = String(query).toLowerCase();
+                let qi = 0;
+                for (let ti = 0; ti < text.length && qi < query.length; ti++) {
+                    if (text[ti] === query[qi]) qi++;
+                }
+                return qi === query.length;
+            },
+
+            showToast(msg, type = 'info') {
+                let toast = document.getElementById('appToast');
+                if (!toast) {
+                    toast = document.createElement('div');
+                    toast.id = 'appToast';
+                    toast.className = 'toast';
+                    document.body.appendChild(toast);
+                }
+                toast.textContent = msg;
+                toast.className = 'toast show ' + type;
+                clearTimeout(toast._timer);
+                toast._timer = setTimeout(() => {
+                    toast.className = 'toast ' + type;
+                }, 3000);
+            },
+
+            showLoading(text = '处理中...') {
+                const mask = document.getElementById('loadingMask');
+                if (!mask) return;
+                const t = document.getElementById('loadingText');
+                if (t) t.textContent = text;
+                mask.classList.add('active');
+            },
+
+            hideLoading() {
+                const mask = document.getElementById('loadingMask');
+                if (mask) mask.classList.remove('active');
+            },
+
+            debounce(fn, delay) {
+                let timer = null;
+                return function(...args) {
+                    clearTimeout(timer);
+                    timer = setTimeout(() => fn.apply(this, args), delay);
+                };
+            },
+
+            paginate(items, page, pageSize) {
+                const start = (page - 1) * pageSize;
+                return items.slice(start, start + pageSize);
+            },
+
+            // 渲染分页栏
+            renderPagination(container, state, onPageChange) {
+                if (!container) return;
+                const totalPages = Math.max(1, Math.ceil(state.total / state.pageSize));
+                if (state.page > totalPages) state.page = totalPages;
+                if (state.page < 1) state.page = 1;
+
+                let html = '';
+                // 左侧：每页大小选择器
+                html += '<div class="page-size-area">';
+                html += '<span>每页</span> ';
+                html += '<select class="page-size-select" onchange="window._onPageSizeChange(' + JSON.stringify(state).replace(/"/g, '&quot;') + ', this.value)">';
+                for (const sz of [10, 20, 50, 100]) {
+                    html += `<option value="${sz}" ${state.pageSize === sz ? 'selected' : ''}>${sz}</option>`;
+                }
+                html += '</select>';
+                html += ` <span>共 ${state.total} 条</span>`;
+                html += '</div>';
+
+                // 右侧：页码导航
+                html += '<div class="page-nav">';
+                html += `<button class="page-btn" ${state.page === 1 ? 'disabled' : ''} onclick="window._goToPage(1)">«</button>`;
+                html += `<button class="page-btn" ${state.page === 1 ? 'disabled' : ''} onclick="window._goToPage(${state.page - 1})">‹</button>`;
+
+                const maxShow = 7;
+                let start = Math.max(1, state.page - 3);
+                let end = Math.min(totalPages, start + maxShow - 1);
+                if (end - start < maxShow - 1) start = Math.max(1, end - maxShow + 1);
+                if (start > 1) {
+                    html += `<button class="page-btn" onclick="window._goToPage(1)">1</button>`;
+                    if (start > 2) html += '<span class="page-ellipsis">...</span>';
+                }
+                for (let i = start; i <= end; i++) {
+                    html += `<button class="page-btn ${i === state.page ? 'active' : ''}" onclick="window._goToPage(${i})">${i}</button>`;
+                }
+                if (end < totalPages) {
+                    if (end < totalPages - 1) html += '<span class="page-ellipsis">...</span>';
+                    html += `<button class="page-btn" onclick="window._goToPage(${totalPages})">${totalPages}</button>`;
+                }
+
+                html += `<button class="page-btn" ${state.page === totalPages ? 'disabled' : ''} onclick="window._goToPage(${state.page + 1})">›</button>`;
+                html += `<button class="page-btn" ${state.page === totalPages ? 'disabled' : ''} onclick="window._goToPage(${totalPages})">»</button>`;
+                html += '</div>';
+
+                container.innerHTML = html;
+
+                window._goToPage = (p) => { state.page = p; onPageChange(state); };
+                window._onPageSizeChange = (s, sz) => {
+                    state.pageSize = parseInt(sz);
+                    state.page = 1;
+                    onPageChange(state);
+                };
+            }
+        };
+
+        // 全局别名（兼容原有全局函数调用）
+        function showToast(msg, type) { return Utils.showToast(msg, type); }
+        function showLoading(text) { return Utils.showLoading(text); }
+        function hideLoading() { return Utils.hideLoading(); }
+
+        // ===== WARP排除tab =====
+        const WarpTab = {
+            allLearnedDomains: [],
+            checkedDomains: new Set(),
+            pageSize: 20,
+            pagination: {
+                learned: { page: 1, pageSize: 20, total: 0, keyword: '' },
+                rules:   { page: 1, pageSize: 20, total: 0, keyword: '' }
+            },
+            _allRules: [],
+            _autoRefreshTimer: null,
+            _trafficForExclude: null,
+            _wasAutoBeforeHide: false,
+
+            async init() {
+                // 初始化搜索框去抖（150ms）
+                const learnedInput = document.getElementById('domainSearchInput');
+                if (learnedInput) {
+                    learnedInput.addEventListener('input', Utils.debounce(() => {
+                        this.pagination.learned.keyword = learnedInput.value.trim();
+                        this.pagination.learned.page = 1;
+                        this.renderLearnedList(this.allLearnedDomains);
+                    }, 150));
+                }
+                const rulesInput = document.getElementById('rulesSearchInput');
+                if (rulesInput) {
+                    rulesInput.addEventListener('input', Utils.debounce(() => {
+                        this.pagination.rules.keyword = rulesInput.value.trim();
+                        this.pagination.rules.page = 1;
+                        this.renderRules(this._allRules || []);
+                    }, 150));
+                }
+                // IP 输入框前缀选项更新
+                const ipInput = document.getElementById('ipRangeInput');
+                if (ipInput) ipInput.addEventListener('input', () => this.updatePrefixOptions());
+
+                // 窗口隐藏时停止学习模式轮询
+                document.addEventListener('visibilitychange', () => {
+                    if (document.hidden) {
+                        this._wasAutoBeforeHide = !!this._autoRefreshTimer;
+                        this.stopAutoRefreshLearned();
+                    } else {
+                        if (this._wasAutoBeforeHide) this.startAutoRefreshLearned();
+                    }
+                });
+
+                // 加载初始数据
+                await this.loadRules();
+                await this.loadIpRanges();
+                await this.loadWarpRanges();
+                await this.loadDnsFallbackRules();
+                await this.loadIpv4Status();
+                await this.loadAutoEnableIpv4();
+            },
+
+            setPageSize(sz) {
+                this.pageSize = sz;
+                this.pagination.learned.pageSize = sz;
+                this.pagination.rules.pageSize = sz;
+                this.pagination.learned.page = 1;
+                this.pagination.rules.page = 1;
+                if (window.pywebview && window.pywebview.api) {
+                    window.pywebview.api.save_ui_prefs({ page_size: sz });
+                }
+            },
+
+            // ===== 学习模式 =====
+            async startLearning() {
+                Utils.showLoading('启动学习模式...');
+                try {
+                    const r = await window.pywebview.api.start_learning();
+                    if (r.success) {
+                        this.checkedDomains.clear();
+                        document.getElementById('startLearnBtn').style.display = 'none';
+                        document.getElementById('stopLearnBtn').style.display = '';
+                        document.getElementById('refreshLearnBtn').disabled = false;
+                        document.getElementById('learnBadge').textContent = '学习中';
+                        document.getElementById('learnStatus').className = 'learn-status active';
+                        document.getElementById('learnStatus').textContent = r.message;
+                        Utils.showToast(r.message, 'success');
+                        this.startAutoRefreshLearned();
+                    } else {
+                        Utils.showToast(r.message, 'error');
+                    }
+                } catch(e) { Utils.showToast('启动失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            async stopLearning() {
+                Utils.showLoading('停止学习...');
+                try {
+                    this.stopAutoRefreshLearned();
+                    const r = await window.pywebview.api.stop_learning();
+                    document.getElementById('startLearnBtn').style.display = '';
+                    document.getElementById('stopLearnBtn').style.display = 'none';
+                    document.getElementById('learnBadge').textContent = '已完成';
+                    document.getElementById('learnStatus').className = 'learn-status';
+                    document.getElementById('learnStatus').textContent = r.message;
+                    await this.refreshLearnedDomains();
+                    Utils.showToast(r.message, 'success');
+                } catch(e) { Utils.showToast('停止失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            startAutoRefreshLearned() {
+                this.stopAutoRefreshLearned();
+                this._autoRefreshTimer = setInterval(() => this.refreshLearnedDomains(), 3000);
+            },
+
+            stopAutoRefreshLearned() {
+                if (this._autoRefreshTimer) { clearInterval(this._autoRefreshTimer); this._autoRefreshTimer = null; }
+            },
+
+            async refreshLearnedDomains() {
+                try {
+                    const domains = await window.pywebview.api.get_learned_domains();
+                    this.allLearnedDomains = domains || [];
+                    this.renderLearnedList(this.allLearnedDomains);
+                } catch(e) { console.error('refreshLearned error:', e); }
+            },
+
+            // 渲染学习域名列表（子序列搜索 + 分页）
+            renderLearnedList(domains) {
+                this.allLearnedDomains = domains;
+                const container = document.getElementById('learnedList');
+                const searchInput = document.getElementById('domainSearchInput');
+                const keyword = (searchInput?.value || '').trim();
+                this.pagination.learned.keyword = keyword;
+
+                // 子序列匹配过滤
+                const filtered = keyword
+                    ? domains.filter(d => Utils.fuzzyMatch(d, keyword))
+                    : domains;
+                this.pagination.learned.total = filtered.length;
+
+                // 更新搜索计数
+                const countEl = document.getElementById('searchCount');
+                if (keyword && domains.length) {
+                    countEl.textContent = `${filtered.length}/${domains.length}`;
+                } else {
+                    countEl.textContent = '';
+                }
+
+                // 全选按钮状态
+                const selectAllBtn = document.getElementById('selectAllBtn');
+                selectAllBtn.disabled = filtered.length === 0;
+
+                if (!domains.length) {
+                    container.innerHTML = '<div class="empty-hint">暂未学习到域名</div>';
+                    document.getElementById('addSelectedBtn').disabled = true;
+                    document.getElementById('learnedPagination').innerHTML = '';
+                    return;
+                }
+                if (!filtered.length) {
+                    container.innerHTML = '<div class="empty-hint">无匹配的域名</div>';
+                    document.getElementById('addSelectedBtn').disabled = true;
+                    document.getElementById('learnedPagination').innerHTML = '';
+                    return;
+                }
+
+                // 分页
+                const pageData = Utils.paginate(filtered, this.pagination.learned.page, this.pagination.learned.pageSize);
+                document.getElementById('addSelectedBtn').disabled = false;
+
+                container.innerHTML = pageData.map(d => {
+                    const isChecked = this.checkedDomains.has(d);
+                    return `<div class="domain-item">
+                        <input type="checkbox" class="domain-checkbox" value="${Utils.escapeHtml(d)}" ${isChecked ? 'checked' : ''} onchange="WarpTab.onDomainCheckChange('${Utils.escapeHtml(d)}', this.checked)">
+                        <span class="domain-name">${Utils.escapeHtml(d)}</span>
+                    </div>`;
+                }).join('');
+
+                // 渲染分页栏
+                Utils.renderPagination(
+                    document.getElementById('learnedPagination'),
+                    this.pagination.learned,
+                    () => this.renderLearnedList(this.allLearnedDomains)
+                );
+
+                this.updateSelectAllBtnText();
+                if (!keyword) {
+                    document.getElementById('learnBadge').textContent = `${domains.length} 个域名`;
+                }
+            },
+
+            onDomainCheckChange(domain, checked) {
+                if (checked) this.checkedDomains.add(domain);
+                else this.checkedDomains.delete(domain);
+                this.updateSelectAllBtnText();
+            },
+
+            // 全选仅作用于当前页可见的 .domain-checkbox
+            toggleSelectAll() {
+                const checkboxes = document.querySelectorAll('.domain-checkbox');
+                if (!checkboxes.length) return;
+                const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+                checkboxes.forEach(cb => {
+                    cb.checked = !allChecked;
+                    const domain = cb.value;
+                    if (cb.checked) this.checkedDomains.add(domain);
+                    else this.checkedDomains.delete(domain);
+                });
+                this.updateSelectAllBtnText();
+            },
+
+            updateSelectAllBtnText() {
+                const btn = document.getElementById('selectAllBtn');
+                const checkboxes = document.querySelectorAll('.domain-checkbox');
+                if (!checkboxes.length) { btn.textContent = '全选'; return; }
+                const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+                btn.textContent = allChecked ? '取消全选' : '全选';
+            },
+
+            async addSelectedDomains() {
+                const checkboxes = document.querySelectorAll('.domain-checkbox:checked');
+                if (!checkboxes.length) { Utils.showToast('请至少选择一个域名', 'error'); return; }
+                const route = document.getElementById('routeSelect').value;
+                Utils.showLoading(`正在添加 ${checkboxes.length} 个域名...`);
+                let okCount = 0, failCount = 0;
+                for (const cb of checkboxes) {
+                    try {
+                        const r = await window.pywebview.api.add_domain(cb.value, route);
+                        if (r.success) okCount++; else failCount++;
+                    } catch(e) { failCount++; }
+                }
+                Utils.hideLoading();
+                Utils.showToast(`添加完成: ${okCount} 成功, ${failCount} 失败`, failCount ? 'error' : 'success');
+                this.checkedDomains.clear();
+                await this.loadRules();
+            },
+
+            // ===== 手动添加域名 =====
+            async addDomainManually() {
+                const input = document.getElementById('domainInput');
+                const routeSelect = document.getElementById('routeSelect');
+                const domain = input.value.trim();
+                const route = routeSelect.value;
+                if (!domain) { Utils.showToast('请输入域名', 'error'); return; }
+                Utils.showLoading('正在添加域名...');
+                try {
+                    const r = await window.pywebview.api.add_domain(domain, route);
+                    if (r.success) {
+                        input.value = '';
+                        Utils.showToast(r.message, 'success');
+                        await this.loadRules();
+                    } else {
+                        Utils.showToast(r.message, 'error');
+                    }
+                } catch(e) { Utils.showToast('添加失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            // ===== 子tab切换（域名/IP） =====
+            switchSubtab(tab) {
+                const domainContent = document.getElementById('domainTabContent');
+                const ipContent = document.getElementById('ipTabContent');
+                const tabDomain = document.getElementById('tabDomain');
+                const tabIp = document.getElementById('tabIp');
+                if (tab === 'domain') {
+                    domainContent.style.display = '';
+                    ipContent.style.display = 'none';
+                    tabDomain.classList.add('active');
+                    tabIp.classList.remove('active');
+                } else {
+                    domainContent.style.display = 'none';
+                    ipContent.style.display = '';
+                    tabDomain.classList.remove('active');
+                    tabIp.classList.add('active');
+                }
+            },
+
+            // ===== IP 范围管理 =====
+            async loadIpRanges() {
+                try {
+                    const cfg = await window.pywebview.api.get_exclusion_config();
+                    this.renderIpRanges(cfg.ip_ranges || []);
+                } catch(e) { console.error('loadIpRanges error:', e); }
+            },
+
+            renderIpRanges(ipRanges) {
+                const container = document.getElementById('ipRangesList');
+                if (!ipRanges.length) {
+                    container.innerHTML = '<div class="empty-hint">暂无 IP 排除规则</div>';
+                    return;
+                }
+                container.innerHTML = ipRanges.map(r => {
+                    const statusTag = r.enabled
+                        ? '<span class="rule-tag tag-enabled">已启用</span>'
+                        : '<span class="rule-tag tag-disabled">已禁用</span>';
+                    const currentRoute = r.route || 'ipv4';
+                    const routeTag = currentRoute === 'ipv4'
+                        ? '<span style="font-size:10px; padding:1px 6px; border-radius:3px; background:rgba(0,122,255,0.12); color:#007aff; margin-left:4px;">IPv4</span>'
+                        : '<span style="font-size:10px; padding:1px 6px; border-radius:3px; background:rgba(52,199,89,0.12); color:#34c759; margin-left:4px;">IPv6</span>';
+                    const switchBtn = currentRoute === 'ipv4'
+                        ? `<button class="btn btn-sm" onclick="WarpTab.setIpRangeRoute('${Utils.escapeHtml(r.cidr)}', 'ipv6')" title="切换为走IPv6校园网">切IPv6</button>`
+                        : `<button class="btn btn-sm" onclick="WarpTab.setIpRangeRoute('${Utils.escapeHtml(r.cidr)}', 'ipv4')" title="切换为走IPv4校园网">切IPv4</button>`;
+                    return `<div class="rule-item">
+                        <div class="rule-header">
+                            <span class="rule-domain">${Utils.escapeHtml(r.cidr)}${routeTag}</span>
+                            <div class="rule-actions">
+                                ${statusTag}
+                                ${switchBtn}
+                                <button class="btn btn-sm ${r.enabled?'':'btn-primary'}" onclick="WarpTab.toggleIpRange('${Utils.escapeHtml(r.cidr)}', ${!r.enabled})">${r.enabled?'禁用':'启用'}</button>
+                                <button class="btn btn-sm btn-danger" onclick="WarpTab.removeIpRange('${Utils.escapeHtml(r.cidr)}')">删除</button>
+                            </div>
+                        </div>
+                        <div class="rule-meta">
+                            路由: ${currentRoute === 'ipv4' ? 'IPv4 校园网直连' : 'IPv6 校园网直连'}
+                        </div>
+                    </div>`;
+                }).join('');
+            },
+
+            updatePrefixOptions() {
+                const input = document.getElementById('ipRangeInput');
+                const select = document.getElementById('ipPrefixSelect');
+                if (!input || !select) return;
+                const value = input.value.trim();
+                const ipPart = value.split('/')[0];
+                const isIpv6 = ipPart.includes(':');
+                const currentVal = select.value;
+                let options = ['<option value="auto">自动前缀</option>'];
+                if (isIpv6) {
+                    [128, 64, 48, 32].forEach(p => options.push(`<option value="${p}">/${p}</option>`));
+                } else if (ipPart && /^\d+\.\d+\.\d+\.\d+$/.test(ipPart)) {
+                    [32, 24, 16, 8].forEach(p => options.push(`<option value="${p}">/${p}</option>`));
+                }
+                select.innerHTML = options.join('');
+                if ([...select.options].some(o => o.value === currentVal)) select.value = currentVal;
+            },
+
+            buildCidr(ipOrCidr, prefixLen) {
+                if (prefixLen === 'auto' || !prefixLen) {
+                    if (ipOrCidr.includes('/')) return ipOrCidr;
+                    return ipOrCidr.includes(':') ? ipOrCidr + '/128' : ipOrCidr + '/32';
+                }
+                const ipPart = ipOrCidr.split('/')[0];
+                return `${ipPart}/${prefixLen}`;
+            },
+
+            onPrefixChange() { /* 仅触发，无特殊处理 */ },
+
+            async addIpRangeManually() {
+                const input = document.getElementById('ipRangeInput');
+                const routeSelect = document.getElementById('ipRouteSelect');
+                const prefixSelect = document.getElementById('ipPrefixSelect');
+                const rawValue = input.value.trim();
+                const route = routeSelect.value;
+                const prefixLen = prefixSelect.value;
+                if (!rawValue) { Utils.showToast('请输入 IP 或 CIDR', 'error'); return; }
+                const cidr = this.buildCidr(rawValue, prefixLen);
+                Utils.showLoading('正在添加 IP 范围...');
+                try {
+                    const r = await window.pywebview.api.add_ip_range(cidr, route);
+                    if (r.success) {
+                        input.value = '';
+                        Utils.showToast(r.message, 'success');
+                        await this.loadIpRanges();
+                    } else {
+                        Utils.showToast(r.message, 'error');
+                    }
+                } catch(e) { Utils.showToast('添加失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            // ===== 从当前连接推荐 =====
+            async loadTrafficForExclude() {
+                const container = document.getElementById('trafficRecommendList');
+                container.innerHTML = '<div class="empty-hint" style="padding:8px;">加载中...</div>';
+                try {
+                    const data = await window.pywebview.api.get_traffic_status();
+                    this._trafficForExclude = data;
+                    this.renderTrafficRecommend(data);
+                } catch(e) {
+                    container.innerHTML = `<div class="empty-hint" style="padding:8px; color:var(--c-ipv6-warp);">加载失败: ${Utils.escapeHtml(String(e))}</div>`;
+                }
+            },
+
+            renderTrafficRecommend(data) {
+                const container = document.getElementById('trafficRecommendList');
+                if (!data || !data.connections || !data.connections.length) {
+                    container.innerHTML = '<div class="empty-hint" style="padding:8px;">暂无连接</div>';
+                    return;
+                }
+                const directConns = data.connections.filter(c => !c.is_warp);
+                if (!directConns.length) {
+                    container.innerHTML = '<div class="empty-hint" style="padding:8px;">暂无直连连接（所有流量都走 WARP）</div>';
+                    return;
+                }
+                const ipMap = new Map();
+                for (const c of directConns) {
+                    if (!ipMap.has(c.remote_ip)) {
+                        ipMap.set(c.remote_ip, { ip: c.remote_ip, process: c.process, hostname: c.hostname || '', route_type: c.route_type });
+                    }
+                }
+                const uniqueConns = Array.from(ipMap.values());
+                let html = '';
+                for (const c of uniqueConns) {
+                    const isIpv6 = c.ip.includes(':');
+                    const recommendedPrefix = isIpv6 ? 32 : 24;
+                    const recommendedCidr = this.buildCidr(c.ip, String(recommendedPrefix));
+                    const hostDisplay = c.hostname ? Utils.escapeHtml(c.hostname) : '(无域名)';
+                    const routeTag = c.route_type === 'ipv6' ? 'IPv6直连' : 'IPv4直连';
+                    html += `<div style="display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; background:var(--bg-tertiary); margin-bottom:4px; font-size:12px;">
+                        <div style="flex:1; min-width:0; overflow:hidden;">
+                            <div style="display:flex; gap:6px; align-items:center;">
+                                <span style="font-weight:500; color:var(--text-primary);">${Utils.escapeHtml(c.process)}</span>
+                                <span style="font-size:10px; padding:1px 6px; border-radius:3px; background:var(--bg-secondary); color:var(--text-tertiary);">${routeTag}</span>
+                            </div>
+                            <div style="font-size:11px; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${hostDisplay}</div>
+                            <div style="font-size:10px; color:var(--text-tertiary); font-family:Consolas,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${Utils.escapeHtml(c.ip)}</div>
+                        </div>
+                        <div style="display:flex; gap:4px; flex-shrink:0;">
+                            <button class="btn btn-sm" style="padding:3px 8px; font-size:11px;" onclick="WarpTab.addRecommendedCidr('${Utils.escapeHtml(recommendedCidr)}', '${isIpv6 ? 'ipv6' : 'ipv4'}')" title="添加 /${recommendedPrefix} 网段">/${recommendedPrefix}</button>
+                            <button class="btn btn-sm" style="padding:3px 8px; font-size:11px;" onclick="WarpTab.addRecommendedCidr('${Utils.escapeHtml(c.ip + (isIpv6 ? '/128' : '/32'))}', '${isIpv6 ? 'ipv6' : 'ipv4'}')" title="添加单 IP">单IP</button>
+                        </div>
+                    </div>`;
+                }
+                container.innerHTML = html;
+            },
+
+            async addRecommendedCidr(cidr, route) {
+                Utils.showLoading('正在添加排除规则...');
+                try {
+                    const r = await window.pywebview.api.add_ip_range(cidr, route);
+                    Utils.showToast(r.message, r.success ? 'success' : 'error');
+                    if (r.success) await this.loadIpRanges();
+                } catch(e) { Utils.showToast('添加失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            async removeIpRange(cidr) {
+                if (!confirm(`确定删除 ${cidr} 的 IP 排除规则？`)) return;
+                Utils.showLoading('删除中...');
+                try {
+                    const r = await window.pywebview.api.remove_ip_range(cidr);
+                    Utils.showToast(r.message, r.success ? 'success' : 'error');
+                    await this.loadIpRanges();
+                } catch(e) { Utils.showToast('删除失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            async toggleIpRange(cidr, enabled) {
+                try {
+                    const r = await window.pywebview.api.toggle_ip_range(cidr, enabled);
+                    Utils.showToast(r.message, r.success ? 'success' : 'error');
+                    await this.loadIpRanges();
+                } catch(e) { Utils.showToast('操作失败: ' + e, 'error'); }
+            },
+
+            async setIpRangeRoute(cidr, route) {
+                Utils.showLoading('切换路由中...');
+                try {
+                    const r = await window.pywebview.api.set_ip_range_route(cidr, route);
+                    Utils.showToast(r.message, r.success ? 'success' : 'error');
+                    await this.loadIpRanges();
+                } catch(e) { Utils.showToast('切换失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            // ===== 排除规则管理 =====
+            async loadRules() {
+                try {
+                    const cfg = await window.pywebview.api.get_exclusion_config();
+                    this._allRules = cfg.domains || [];
+                    this.renderRules(this._allRules);
+                    this.renderIpRanges(cfg.ip_ranges || []);
+                } catch(e) { console.error('loadRules error:', e); }
+            },
+
+            // 渲染规则列表（子序列搜索 + 分页）
+            renderRules(domains) {
+                this._allRules = domains;
+                const container = document.getElementById('rulesList');
+                const searchInput = document.getElementById('rulesSearchInput');
+                const keyword = (searchInput?.value || '').trim();
+                this.pagination.rules.keyword = keyword;
+
+                // 子序列匹配过滤（按 domain 字段）
+                const filtered = keyword
+                    ? domains.filter(d => Utils.fuzzyMatch(d.domain || '', keyword))
+                    : domains;
+                this.pagination.rules.total = filtered.length;
+
+                document.getElementById('ruleCount').textContent = `${domains.length}`;
+                const countEl = document.getElementById('rulesSearchCount');
+                if (keyword && domains.length) {
+                    countEl.textContent = `${filtered.length}/${domains.length}`;
+                } else {
+                    countEl.textContent = '';
+                }
+
+                if (!domains.length) {
+                    container.innerHTML = '<div class="empty-hint">暂无排除规则，请通过学习模式或手动添加</div>';
+                    document.getElementById('rulesPagination').innerHTML = '';
+                    return;
+                }
+                if (!filtered.length) {
+                    container.innerHTML = '<div class="empty-hint">无匹配的规则</div>';
+                    document.getElementById('rulesPagination').innerHTML = '';
+                    return;
+                }
+
+                // 分页
+                const pageData = Utils.paginate(filtered, this.pagination.rules.page, this.pagination.rules.pageSize);
+
+                container.innerHTML = pageData.map(d => {
+                    const statusTag = d.enabled
+                        ? '<span class="rule-tag tag-enabled">已启用</span>'
+                        : '<span class="rule-tag tag-disabled">已禁用</span>';
+                    const currentRoute = d.route || 'ipv6';
+                    const routeTag = currentRoute === 'ipv4'
+                        ? '<span style="font-size:10px; padding:1px 6px; border-radius:3px; background:rgba(0,122,255,0.12); color:#007aff; margin-left:4px;">IPv4</span>'
+                        : '<span style="font-size:10px; padding:1px 6px; border-radius:3px; background:rgba(52,199,89,0.12); color:#34c759; margin-left:4px;">IPv6</span>';
+                    const switchBtn = currentRoute === 'ipv4'
+                        ? `<button class="btn btn-sm" onclick="WarpTab.setDomainRoute('${Utils.escapeHtml(d.domain)}', 'ipv6')" title="切换为走IPv6校园网">切IPv6</button>`
+                        : `<button class="btn btn-sm" onclick="WarpTab.setDomainRoute('${Utils.escapeHtml(d.domain)}', 'ipv4')" title="切换为走IPv4校园网">切IPv4</button>`;
+                    return `<div class="rule-item">
+                        <div class="rule-header">
+                            <span class="rule-domain">${Utils.escapeHtml(d.domain)}${routeTag}</span>
+                            <div class="rule-actions">
+                                ${statusTag}
+                                ${switchBtn}
+                                <button class="btn btn-sm ${d.enabled?'':'btn-primary'}" onclick="WarpTab.toggleDomain('${Utils.escapeHtml(d.domain)}', ${!d.enabled})">${d.enabled?'禁用':'启用'}</button>
+                                <button class="btn btn-sm btn-danger" onclick="WarpTab.removeDomain('${Utils.escapeHtml(d.domain)}')">删除</button>
+                            </div>
+                        </div>
+                        <div class="rule-meta">
+                            添加时间: ${Utils.escapeHtml(d.added_at || '未知')} | 路由: ${currentRoute === 'ipv4' ? 'IPv4 校园网直连' : 'IPv6 校园网直连'}
+                        </div>
+                    </div>`;
+                }).join('');
+
+                // 渲染分页栏
+                Utils.renderPagination(
+                    document.getElementById('rulesPagination'),
+                    this.pagination.rules,
+                    () => this.renderRules(this._allRules)
+                );
+            },
+
+            async setDomainRoute(domain, route) {
+                Utils.showLoading('切换路由中...');
+                try {
+                    const r = await window.pywebview.api.set_domain_route(domain, route);
+                    Utils.showToast(r.message, r.success ? 'success' : 'error');
+                    await this.loadRules();
+                    await this.loadWarpRanges();
+                } catch(e) { Utils.showToast('切换失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            async removeDomain(domain) {
+                if (!confirm(`确定删除 ${domain} 的排除规则？`)) return;
+                Utils.showLoading('删除中...');
+                try {
+                    const r = await window.pywebview.api.remove_domain(domain);
+                    Utils.showToast(r.message, r.success ? 'success' : 'error');
+                    await this.loadRules();
+                    await this.loadWarpRanges();
+                } catch(e) { Utils.showToast('删除失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            async toggleDomain(domain, enabled) {
+                try {
+                    const r = await window.pywebview.api.toggle_domain(domain, enabled);
+                    Utils.showToast(r.message, r.success ? 'success' : 'error');
+                    await this.loadRules();
+                    await this.loadWarpRanges();
+                } catch(e) { Utils.showToast('操作失败: ' + e, 'error'); }
+            },
+
+            async applyAllToWarp() {
+                Utils.showLoading('同步规则到WARP...');
+                try {
+                    const r = await window.pywebview.api.apply_to_warp();
+                    const details = r.details || [];
+                    const okCount = details.filter(d => d.success).length;
+                    const failCount = details.length - okCount;
+                    Utils.showToast(`${r.message} (${okCount}成功/${failCount}失败)`, failCount ? 'error' : 'success');
+                    await this.loadWarpRanges();
+                } catch(e) { Utils.showToast('同步失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            async syncFromWarp() {
+                Utils.showLoading('从WARP同步规则...');
+                try {
+                    const r = await window.pywebview.api.sync_from_warp();
+                    Utils.showToast(r.message, r.success ? 'success' : 'error');
+                    await this.loadRules();
+                    await this.loadDnsFallbackRules();
+                } catch(e) { Utils.showToast('同步失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            async checkIpv6Support() {
+                Utils.showLoading('正在检测 IPv6 支持...');
+                try {
+                    const r = await window.pywebview.api.check_ipv6_support();
+                    if (r.success) {
+                        let detailMsg = r.message;
+                        if (r.details && r.details.length) {
+                            const downgraded = r.details.filter(d => d.action === 'downgraded');
+                            const kept = r.details.filter(d => d.action === 'kept');
+                            if (downgraded.length) {
+                                detailMsg += '\n\n已降级（无 IPv6）:\n' + downgraded.map(d => `  • ${d.domain}`).join('\n');
+                            }
+                            if (kept.length) {
+                                detailMsg += `\n\n支持 IPv6（保持）:\n` + kept.map(d => `  • ${d.domain}`).join('\n');
+                            }
+                        }
+                        Utils.showToast(r.message, 'success');
+                        setTimeout(() => alert(detailMsg), 100);
+                        await this.loadRules();
+                    } else {
+                        Utils.showToast(r.message, 'error');
+                    }
+                } catch(e) { Utils.showToast('检测失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            // ===== IPv4 启用/禁用 =====
+            async loadIpv4Status() {
+                try {
+                    const enabled = await window.pywebview.api.is_ipv4_enabled();
+                    const toggle = document.getElementById('ipv4Toggle');
+                    const status = document.getElementById('ipv4Status');
+                    toggle.checked = enabled;
+                    status.textContent = enabled ? '已启用' : '已禁用';
+                    status.style.background = enabled ? 'rgba(52,199,89,0.15)' : 'var(--bg-tertiary)';
+                    status.style.color = enabled ? '#34c759' : 'var(--text-tertiary)';
+                } catch(e) {
+                    document.getElementById('ipv4Status').textContent = '检测失败';
+                }
+            },
+
+            async toggleIpv4(enabled) {
+                const status = document.getElementById('ipv4Status');
+                status.textContent = enabled ? '启用中...' : '禁用中...';
+                status.style.background = 'var(--bg-tertiary)';
+                status.style.color = 'var(--text-tertiary)';
+                try {
+                    const r = await window.pywebview.api.set_ipv4_enabled(enabled);
+                    if (r.success) {
+                        Utils.showToast(r.message, 'success');
+                    } else {
+                        Utils.showToast(r.message, 'error');
+                        document.getElementById('ipv4Toggle').checked = !enabled;
+                    }
+                } catch(e) {
+                    Utils.showToast('操作失败: ' + e, 'error');
+                    document.getElementById('ipv4Toggle').checked = !enabled;
+                }
+                await this.loadIpv4Status();
+            },
+
+            // ===== 认证后自动启用 IPv4 =====
+            async loadAutoEnableIpv4() {
+                try {
+                    const enabled = await window.pywebview.api.get_auto_enable_ipv4();
+                    const toggle = document.getElementById('autoEnableIpv4Toggle');
+                    const status = document.getElementById('autoEnableIpv4Status');
+                    toggle.checked = enabled;
+                    status.textContent = enabled ? '已开启' : '已关闭';
+                    status.style.background = enabled ? 'rgba(52,199,89,0.15)' : 'var(--bg-tertiary)';
+                    status.style.color = enabled ? '#34c759' : 'var(--text-tertiary)';
+                } catch(e) {
+                    document.getElementById('autoEnableIpv4Status').textContent = '检测失败';
+                }
+            },
+
+            async toggleAutoEnableIpv4(enabled) {
+                const status = document.getElementById('autoEnableIpv4Status');
+                try {
+                    const r = await window.pywebview.api.set_auto_enable_ipv4(enabled);
+                    if (r.success) {
+                        Utils.showToast(enabled ? '已开启认证后自动启用 IPv4' : '已关闭认证后自动启用 IPv4', 'success');
+                    } else {
+                        Utils.showToast(r.message, 'error');
+                        document.getElementById('autoEnableIpv4Toggle').checked = !enabled;
+                    }
+                } catch(e) {
+                    Utils.showToast('操作失败: ' + e, 'error');
+                    document.getElementById('autoEnableIpv4Toggle').checked = !enabled;
+                }
+                await this.loadAutoEnableIpv4();
+            },
+
+            // ===== WARP当前规则 =====
+            async loadWarpRanges() {
+                try {
+                    const ranges = await window.pywebview.api.get_warp_ranges();
+                    const container = document.getElementById('warpRanges');
+                    const legacyRow = document.getElementById('legacyCleanupRow');
+                    let html = '';
+                    if (!ranges || !ranges.length) {
+                        html += '<div class="empty-hint">WARP中暂无域名排除规则</div>';
+                    } else {
+                        html += '<div style="margin-bottom:6px; font-size:12px; color:var(--text-tertiary);">域名排除规则（tunnel host）:</div>';
+                        html += ranges.map(r => `<div class="warp-range-line">${Utils.escapeHtml(r)}</div>`).join('');
+                    }
+                    try {
+                        const ipInfo = await window.pywebview.api.get_cli_ip_ranges();
+                        const activeIpv6 = ipInfo.active_ipv6 || [];
+                        const legacyIps = ipInfo.legacy || [];
+                        if (activeIpv6.length) {
+                            html += `<div style="margin-top:10px; margin-bottom:6px; font-size:12px; color:var(--text-tertiary);">IPv6 白名单使用的 CIDR（${activeIpv6.length}条，正常）:</div>`;
+                            html += activeIpv6.map(r => `<div class="warp-range-line">${Utils.escapeHtml(r)}</div>`).join('');
+                        }
+                        if (legacyIps.length) {
+                            legacyRow.style.display = 'flex';
+                            html += `<div style="margin-top:10px; margin-bottom:6px; font-size:12px; color:var(--c-ipv6-warp);">旧版IP排除规则残留（${legacyIps.length}条，建议清理）:</div>`;
+                            html += legacyIps.map(r => `<div class="warp-range-line" style="color:var(--c-ipv6-warp);">${Utils.escapeHtml(r)}</div>`).join('');
+                        } else {
+                            legacyRow.style.display = 'none';
+                        }
+                    } catch(e) { legacyRow.style.display = 'none'; }
+                    container.innerHTML = html || '<div class="empty-hint">WARP中暂无排除规则</div>';
+                } catch(e) { console.error('loadWarpRanges error:', e); }
+            },
+
+            async cleanupLegacyRules() {
+                if (!confirm('确定清理旧版IP/CIDR排除规则残留？\n\n将执行：\n1. 删除WARP中所有CLI添加的IP排除规则\n2. 清理配置文件中的ips/cidrs/mode等旧字段\n3. 将配置中的域名以域名排除方式重新应用到WARP')) return;
+                Utils.showLoading('清理旧版规则残留中...');
+                try {
+                    const r = await window.pywebview.api.cleanup_legacy_config();
+                    Utils.showToast(r.message, r.success ? 'success' : 'error');
+                    await this.loadRules();
+                    await this.loadWarpRanges();
+                } catch(e) { Utils.showToast('清理失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            // ===== DNS Fallback 域名管理 =====
+            async loadDnsFallbackRules() {
+                try {
+                    const cfg = await window.pywebview.api.get_exclusion_config();
+                    const dnsList = cfg.dns_fallback || [];
+                    const container = document.getElementById('dnsFallbackList');
+                    const countBadge = document.getElementById('dnsFallbackCount');
+                    countBadge.textContent = dnsList.length;
+                    if (!dnsList.length) {
+                        container.innerHTML = '<div class="empty-hint">暂无 DNS fallback 域名</div>';
+                    } else {
+                        container.innerHTML = dnsList.map(d => {
+                            const enabled = d.enabled !== false;
+                            const statusTag = enabled
+                                ? '<span class="rule-tag tag-enabled">已启用</span>'
+                                : '<span class="rule-tag tag-disabled">已禁用</span>';
+                            return `<div class="rule-item">
+                                <div class="rule-header">
+                                    <span class="rule-domain">${Utils.escapeHtml(d.domain)}</span>
+                                    <div class="rule-actions">
+                                        ${statusTag}
+                                        <button class="btn btn-sm ${enabled?'':'btn-primary'}" onclick="WarpTab.toggleDnsFallback('${Utils.escapeHtml(d.domain)}', ${!enabled})">${enabled?'禁用':'启用'}</button>
+                                        <button class="btn btn-sm btn-danger" onclick="WarpTab.removeDnsFallback('${Utils.escapeHtml(d.domain)}')">删除</button>
+                                    </div>
+                                </div>
+                                <div class="rule-meta">
+                                    添加时间: ${Utils.escapeHtml(d.added_at || '未知')}
+                                </div>
+                            </div>`;
+                        }).join('');
+                    }
+                    await this.loadWarpDnsFallback();
+                } catch(e) { console.error('loadDnsFallbackRules error:', e); }
+            },
+
+            async loadWarpDnsFallback() {
+                try {
+                    const list = await window.pywebview.api.get_dns_fallback_list();
+                    const container = document.getElementById('warpDnsFallback');
+                    if (!list || !list.length) {
+                        container.innerHTML = '<div class="empty-hint">WARP中暂无 DNS fallback 域名</div>';
+                    } else {
+                        container.innerHTML = list.map(d => `<div class="warp-range-line">${Utils.escapeHtml(d)}</div>`).join('');
+                    }
+                } catch(e) { console.error('loadWarpDnsFallback error:', e); }
+            },
+
+            async addDnsFallbackManually() {
+                const input = document.getElementById('dnsFallbackInput');
+                const domain = input.value.trim().toLowerCase();
+                if (!domain) { Utils.showToast('请输入域名', 'error'); return; }
+                if (!domain.includes('.')) { Utils.showToast('域名格式无效', 'error'); return; }
+                Utils.showLoading('添加 DNS fallback 域名中...');
+                try {
+                    const r = await window.pywebview.api.add_dns_fallback(domain);
+                    Utils.showToast(r.message, r.success ? 'success' : 'error');
+                    if (r.success) {
+                        input.value = '';
+                        await this.loadDnsFallbackRules();
+                    }
+                } catch(e) { Utils.showToast('添加失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            async removeDnsFallback(domain) {
+                if (!confirm(`确定从 DNS fallback 移除 ${domain}？`)) return;
+                Utils.showLoading('移除 DNS fallback 域名中...');
+                try {
+                    const r = await window.pywebview.api.remove_dns_fallback(domain);
+                    Utils.showToast(r.message, r.success ? 'success' : 'error');
+                    if (r.success) await this.loadDnsFallbackRules();
+                } catch(e) { Utils.showToast('移除失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            },
+
+            async toggleDnsFallback(domain, enabled) {
+                try {
+                    const r = await window.pywebview.api.toggle_dns_fallback(domain, enabled);
+                    Utils.showToast(r.message, r.success ? 'success' : 'error');
+                    await this.loadDnsFallbackRules();
+                } catch(e) { Utils.showToast('操作失败: ' + e, 'error'); }
+            },
+
+            async applyDnsFallbackToWarp() {
+                Utils.showLoading('同步 DNS fallback 到 WARP 中...');
+                try {
+                    const r = await window.pywebview.api.apply_dns_fallback_to_warp();
+                    Utils.showToast(r.message, r.success ? 'success' : 'error');
+                    await this.loadDnsFallbackRules();
+                } catch(e) { Utils.showToast('同步失败: ' + e, 'error'); }
+                Utils.hideLoading();
+            }
+        };
+
+        // ===== 连接tab（包装原有全局初始化逻辑） =====
+        const StatusTab = {
+            init() {
+                setTimeout(async () => {
+                    try {
+                        const status = await window.pywebview.api.check_network_status();
+                        updateStatusFromCheck(status);
+                    } catch (e) { console.error('Failed to check network status:', e); }
+                    try {
+                        const startup = await window.pywebview.api.get_startup_status();
+                        document.getElementById('autoStartup').checked = startup.enabled || false;
+                    } catch (e) { console.error('Failed to get startup status:', e); }
+                    document.getElementById('loadingOverlay').classList.add('hidden');
+                }, 100);
+            }
+        };
+
+        // ===== 设置tab（包装原有全局初始化逻辑） =====
+        const SettingsTab = {
+            async init() {
+                try {
+                    const config = await window.pywebview.api.load_config();
+                    document.getElementById('wifiName').value = config.wifi_name || '';
+                    document.getElementById('username').value = config.username || '';
+                    document.getElementById('password').value = config.password || '';
+                    document.getElementById('autoAuth').checked = config.auto_auth || false;
+                    document.getElementById('autoRestore').checked = config.auto_restore || false;
+                    document.getElementById('warpCliPath').value = config.warp_cli_path || '';
+                    document.getElementById('silentStartup').checked = config.silent_startup || false;
+                } catch (e) { console.error('Failed to load config:', e); }
+            }
+        };
+
+        // ===== 统一初始化 =====
+        async function initApp() {
+            try {
+                await waitForApi(15000);
+            } catch (e) {
+                Utils.showToast('API 加载超时: ' + e.message);
+                return;
+            }
+            // 加载 UI 偏好
+            try {
+                const prefs = await window.pywebview.api.get_ui_prefs();
+                WarpTab.setPageSize(prefs.page_size || 20);
+                if (typeof TrafficTab !== 'undefined') {
+                    TrafficTab.subview = prefs.traffic_subview || 'list';
+                }
+            } catch(e) {
+                console.warn('get_ui_prefs failed:', e);
+            }
+            // 各tab初始化
+            if (typeof StatusTab !== 'undefined' && StatusTab.init) StatusTab.init();
+            if (typeof SettingsTab !== 'undefined' && SettingsTab.init) await SettingsTab.init();
+            WarpTab.init();
+            if (typeof TrafficTab !== 'undefined') {
+                TrafficTab.init();
+            }
+            // 默认显示连接tab
+            switchTab('status');
         }
     </script>
 </body>

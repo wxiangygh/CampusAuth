@@ -175,28 +175,31 @@ def has_public_ipv6():
     return False, ''
 
 
-def _wait_for_ipv6_ready(max_retries=8):
-    logger.info("Waiting for IPv6 to be ready...")
-    ipv6_test_targets = [
-        ('2606:4700:d0::a29f:c001', 443),
-        ('2606:4700:4700::1111', 443),
-        ('2606:4700:103::1', 443),
-    ]
+def _wait_for_ipv6_ready(max_retries=20):
+    """等待本机获取到 2001 开头的公网 IPv6 地址。
+
+    每次检测调用 has_public_ipv6()，成功立即返回。
+    重试间隔 3 秒，默认 20 次约 60 秒。
+
+    Args:
+        max_retries: 最大重试次数，默认 20
+
+    Returns:
+        bool: 是否在重试次数内获取到公网 IPv6 地址
+    """
+    logger.info(f"Waiting for public IPv6 (2001 prefix), max {max_retries} retries...")
     for i in range(max_retries):
         if _check_cancel(): return False
-        for addr, port in ipv6_test_targets:
-            try:
-                import socket
-                sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-                sock.settimeout(3)
-                sock.connect((addr, port))
-                sock.close()
-                logger.info(f"IPv6 ready via {addr} ({i+1}/{max_retries})")
-                return True
-            except Exception as e:
-                logger.debug(f"IPv6 not ready via {addr} ({i+1}/{max_retries}): {e}")
-        if not _interruptible_sleep(2): return False
-    logger.warning(f"IPv6 not ready after {max_retries} retries")
+        found, addr = has_public_ipv6()
+        if found:
+            logger.info(f"Public IPv6 ready: {addr} (retry {i+1}/{max_retries})")
+            return True
+        if i == 0:
+            logger.info("No public IPv6 yet, waiting for assignment...")
+        elif (i + 1) % 5 == 0:
+            logger.info(f"Still waiting for public IPv6 ({i+1}/{max_retries} retries)")
+        if not _interruptible_sleep(3): return False
+    logger.warning(f"No public IPv6 address after {max_retries} retries")
     return False
 
 

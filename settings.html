@@ -1723,7 +1723,14 @@
                 document.querySelector(`.tab-btn[onclick*="${name}"]`)?.classList.add('active');
             }
 
-            // 流量tab特殊处理（TrafficTab 在 Task 7 中创建，此处用 typeof 保护）
+            // 主页tab：切回时刷新网络详情
+            if (name === 'home') {
+                if (typeof HomeTab !== 'undefined' && HomeTab.refreshDetail) {
+                    HomeTab.refreshDetail();
+                }
+            }
+
+            // 流量tab特殊处理
             if (name === 'traffic') {
                 if (typeof TrafficTab !== 'undefined') {
                     TrafficTab.showSubview(TrafficTab.subview);
@@ -1851,6 +1858,11 @@
                     document.getElementById('restoreBtn').disabled = false;
                 });
             }, 1500);
+
+            // 认证/恢复完成后刷新网络详情卡（WARP/IPv4 状态可能变化）
+            if (typeof HomeTab !== 'undefined' && HomeTab.refreshDetail) {
+                setTimeout(() => HomeTab.refreshDetail(), 1800);
+            }
         }
 
         function onAuthProgress(data) {
@@ -2315,7 +2327,7 @@
         const HomeTab = {
             _detailCollapsed: false,
 
-            // 状态区初始化（原 StatusTab.init 逻辑）
+            // 状态区初始化（原 StatusTab 初始化逻辑）
             initStatus() {
                 setTimeout(async () => {
                     try {
@@ -2331,7 +2343,7 @@
                 }, 100);
             },
 
-            // 设置区初始化（原 SettingsTab.init 逻辑）
+            // 设置区初始化（原 SettingsTab 初始化逻辑）
             async initSettings() {
                 try {
                     const config = await window.pywebview.api.load_config();
@@ -4158,18 +4170,21 @@
                 if (typeof TrafficTab !== 'undefined') {
                     TrafficTab.subview = prefs.traffic_subview || 'list';
                 }
+                // 主页详情卡折叠状态
+                if (typeof HomeTab !== 'undefined' && HomeTab.setDetailCollapsed) {
+                    HomeTab.setDetailCollapsed(prefs.network_detail_collapsed || false);
+                }
             } catch(e) {
                 console.warn('get_ui_prefs failed:', e);
             }
             // 各tab初始化
-            if (typeof StatusTab !== 'undefined' && StatusTab.init) StatusTab.init();
-            if (typeof SettingsTab !== 'undefined' && SettingsTab.init) await SettingsTab.init();
+            if (typeof HomeTab !== 'undefined' && HomeTab.init) await HomeTab.init();
             WarpTab.init();
             if (typeof TrafficTab !== 'undefined') {
                 TrafficTab.init();
             }
-            // 默认显示连接tab
-            switchTab('status');
+            // 默认显示主页tab
+            switchTab('home');
         }
     </script>
 </body>

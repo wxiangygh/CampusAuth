@@ -2311,6 +2311,107 @@
         function showLoading(text) { return Utils.showLoading(text); }
         function hideLoading() { return Utils.hideLoading(); }
 
+        // ===== 主页tab（合并原 StatusTab + SettingsTab + 网络详情）=====
+        const HomeTab = {
+            _detailCollapsed: false,
+
+            // 状态区初始化（原 StatusTab.init 逻辑）
+            initStatus() {
+                setTimeout(async () => {
+                    try {
+                        const status = await window.pywebview.api.check_network_status();
+                        updateStatusFromCheck(status);
+                    } catch (e) { console.error('Failed to check network status:', e); }
+                    try {
+                        const startup = await window.pywebview.api.get_startup_status();
+                        document.getElementById('autoStartup').checked = startup.enabled || false;
+                    } catch (e) { console.error('Failed to get startup status:', e); }
+                    const overlay = document.getElementById('loadingOverlay');
+                    if (overlay) overlay.classList.add('hidden');
+                }, 100);
+            },
+
+            // 设置区初始化（原 SettingsTab.init 逻辑）
+            async initSettings() {
+                try {
+                    const config = await window.pywebview.api.load_config();
+                    document.getElementById('wifiName').value = config.wifi_name || '';
+                    document.getElementById('username').value = config.username || '';
+                    document.getElementById('password').value = config.password || '';
+                    document.getElementById('autoAuth').checked = config.auto_auth || false;
+                    document.getElementById('autoRestore').checked = config.auto_restore || false;
+                    document.getElementById('warpCliPath').value = config.warp_cli_path || '';
+                    document.getElementById('silentStartup').checked = config.silent_startup || false;
+                } catch (e) { console.error('Failed to load config:', e); }
+            },
+
+            // 网络详情区：拉取数据并渲染
+            async refreshDetail() {
+                if (!window.pywebview?.api) return;
+                try {
+                    const data = await window.pywebview.api.get_network_detail();
+                    this.renderDetailGrid(data);
+                } catch (e) {
+                    console.error('HomeTab.refreshDetail failed:', e);
+                    Utils.showToast('网络详情获取失败', 'error');
+                }
+            },
+
+            // 渲染 6 项到详情网格
+            renderDetailGrid(data) {
+                const items = [
+                    { label: 'IPv4', value: data.ipv4 || '—', class: data.ipv4 ? '' : 'empty' },
+                    { label: 'IPv6', value: data.ipv6 || '无公网IPv6', class: data.ipv6 ? 'success' : 'warning' },
+                    { label: 'MAC', value: data.mac || '—', class: data.mac ? '' : 'empty' },
+                    { label: 'WiFi', value: data.wifi_ssid || '未连接', class: data.wifi_ssid ? '' : 'warning' },
+                    { label: '接口', value: data.interface || '未知', class: data.interface ? '' : 'empty' },
+                    { label: 'WARP', value: data.warp_connected ? '已连接' : '未连接', class: data.warp_connected ? 'success' : 'warning' },
+                ];
+                const grid = document.getElementById('networkDetailGrid');
+                if (!grid) return;
+                grid.innerHTML = items.map(it => `
+                    <div class="network-detail-item">
+                        <div class="network-detail-label">${it.label}</div>
+                        <div class="network-detail-value ${it.class}">${Utils.escapeHtml(it.value)}</div>
+                    </div>
+                `).join('');
+            },
+
+            // 切换详情卡折叠/展开
+            toggleDetail() {
+                this._detailCollapsed = !this._detailCollapsed;
+                this._applyCollapsed();
+                // 持久化
+                try {
+                    window.pywebview.api.save_ui_prefs({ network_detail_collapsed: this._detailCollapsed });
+                } catch (e) { console.warn('save_ui_prefs failed:', e); }
+            },
+
+            // 初始化时设置折叠状态（不触发持久化）
+            setDetailCollapsed(collapsed) {
+                this._detailCollapsed = !!collapsed;
+                this._applyCollapsed();
+            },
+
+            // 应用折叠样式
+            _applyCollapsed() {
+                const el = document.getElementById('networkDetail');
+                if (!el) return;
+                if (this._detailCollapsed) {
+                    el.classList.add('collapsed');
+                } else {
+                    el.classList.remove('collapsed');
+                }
+            },
+
+            // 统一初始化入口
+            async init() {
+                await this.initSettings();   // 先加载设置表单
+                this.initStatus();           // 再检查网络状态（异步，不阻塞）
+                await this.refreshDetail();  // 最后加载网络详情
+            }
+        };
+
         // ===== WARP排除tab =====
         const WarpTab = {
             allLearnedDomains: [],
@@ -4039,39 +4140,6 @@
                     this._refreshTimer = null;
                     this.refreshFast();
                 }, delay);
-            }
-        };
-
-        // ===== 连接tab（包装原有全局初始化逻辑） =====
-        const StatusTab = {
-            init() {
-                setTimeout(async () => {
-                    try {
-                        const status = await window.pywebview.api.check_network_status();
-                        updateStatusFromCheck(status);
-                    } catch (e) { console.error('Failed to check network status:', e); }
-                    try {
-                        const startup = await window.pywebview.api.get_startup_status();
-                        document.getElementById('autoStartup').checked = startup.enabled || false;
-                    } catch (e) { console.error('Failed to get startup status:', e); }
-                    document.getElementById('loadingOverlay').classList.add('hidden');
-                }, 100);
-            }
-        };
-
-        // ===== 设置tab（包装原有全局初始化逻辑） =====
-        const SettingsTab = {
-            async init() {
-                try {
-                    const config = await window.pywebview.api.load_config();
-                    document.getElementById('wifiName').value = config.wifi_name || '';
-                    document.getElementById('username').value = config.username || '';
-                    document.getElementById('password').value = config.password || '';
-                    document.getElementById('autoAuth').checked = config.auto_auth || false;
-                    document.getElementById('autoRestore').checked = config.auto_restore || false;
-                    document.getElementById('warpCliPath').value = config.warp_cli_path || '';
-                    document.getElementById('silentStartup').checked = config.silent_startup || false;
-                } catch (e) { console.error('Failed to load config:', e); }
             }
         };
 

@@ -871,7 +871,7 @@ def on_exit(icon, item):
     cleanup_wifi_event()
     icon.stop()
     if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
-        core.state._tray_app_instance.save_window_position()
+        core.state._tray_app_instance.save_window_geometry()
     if core.state.TRAY_MUTEX:
         kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
         kernel32.CloseHandle(core.state.TRAY_MUTEX)
@@ -899,8 +899,9 @@ def on_setup_admin(icon, item):
         icon.notify('设置开机自启动失败', '校园网助手')
 
 class TrayApp:
-    WIN_W = 400
-    WIN_H = 560
+    # 首次启动默认尺寸（屏幕85%），实际从配置读取
+    MIN_W = 800
+    MIN_H = 600
 
     def __init__(self, silent=False):
         self.icon = None
@@ -914,6 +915,65 @@ class TrayApp:
         self._webview_started = False
         self._webview_start_event = threading.Event()
         self._init_done = False
+
+    def calc_initial_window_geometry(self):
+        """计算初始窗口几何。优先从配置读取，否则按屏幕85%居中。
+        Returns: (width, height, x, y)
+        """
+        user32 = ctypes.windll.user32
+        screen_w = user32.GetSystemMetrics(0)
+        screen_h = user32.GetSystemMetrics(1)
+        cfg = load_config()
+        saved = cfg.get('window')
+        if saved and isinstance(saved, dict):
+            w = int(saved.get('width', screen_w * 85 // 100))
+            h = int(saved.get('height', screen_h * 85 // 100))
+            x = int(saved.get('x', (screen_w - w) // 2))
+            y = int(saved.get('y', (screen_h - h) // 2))
+            # 校正越界（外接显示器拔出场景）
+            if w > screen_w:
+                w = screen_w * 85 // 100
+            if h > screen_h:
+                h = screen_h * 85 // 100
+            x = max(0, min(x, screen_w - w))
+            y = max(0, min(y, screen_h - h))
+            logger.info(f"[window_geometry] From config: {w}x{h} at ({x},{y})")
+            return w, h, x, y
+        # 首次启动：屏幕85%居中
+        w = screen_w * 85 // 100
+        h = screen_h * 85 // 100
+        x = (screen_w - w) // 2
+        y = (screen_h - h) // 2
+        logger.info(f"[window_geometry] Default 85%: {w}x{h} at ({x},{y})")
+        return w, h, x, y
+
+    def save_window_geometry(self):
+        """保存当前窗口尺寸和位置到配置。"""
+        try:
+            if not self.settings_window:
+                return
+            hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
+            if hwnd:
+                rect = ctypes.wintypes.RECT()
+                ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                x, y = rect.left, rect.top
+                w = rect.right - rect.left
+                h = rect.bottom - rect.top
+            else:
+                x = self.settings_window.x
+                y = self.settings_window.y
+                w = self.settings_window.width
+                h = self.settings_window.height
+            # 忽略异常值
+            if w > 100 and h > 100 and x > -1000 and y > -1000:
+                cfg = load_config()
+                cfg['window'] = {'width': w, 'height': h, 'x': x, 'y': y}
+                save_config_to_file(cfg)
+                logger.info(f"[save_window_geometry] Saved: {w}x{h} at ({x},{y})")
+            else:
+                logger.warning(f"[save_window_geometry] Ignored abnormal: {w}x{h} at ({x},{y})")
+        except Exception as e:
+            logger.error(f"[save_window_geometry] FAILED: {e}")
 
     def create_tray(self):
         self.icon = pystray.Icon('wifi_auto_auth')
@@ -1173,32 +1233,6 @@ class TrayApp:
         else:
             logger.error("[show_settings] settings_window is None, cannot show!")
 
-    def save_window_position(self):
-        try:
-            if self.settings_window:
-                # 使用 Win32 API 获取实际窗口位置（更可靠）
-                hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
-                if hwnd:
-                    rect = ctypes.wintypes.RECT()
-                    ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
-                    x, y = rect.left, rect.top
-                    logger.debug(f"save_window_position: Win32 API got ({x}, {y})")
-                else:
-                    x = self.settings_window.x
-                    y = self.settings_window.y
-                    logger.debug(f"save_window_position: pywebview got ({x}, {y})")
-                # 忽略 (0,0) 和负值（可能是隐藏后的位置）
-                if x is not None and y is not None and x > 0 and y > 0:
-                    cfg = load_config()
-                    cfg['window_x'] = x
-                    cfg['window_y'] = y
-                    save_config_to_file(cfg)
-                    logger.info(f"Window position saved: ({x}, {y})")
-                else:
-                    logger.warning(f"Window position ({x}, {y}) ignored (too close to edge)")
-        except Exception as e:
-            logger.error(f"save_window_position exception: {e}")
-
     def run(self):
         core.state._tray_app_instance = self
         cfg = load_config()
@@ -1251,22 +1285,9 @@ class TrayApp:
 
         html_file = get_resource_path('settings.html')
         logger.debug(f"run: html_file={html_file}")
-        
-        if cfg.get('window_x') is not None and cfg.get('window_y') is not None:
-            import ctypes as _ct
-            user32 = _ct.windll.user32
-            screen_w = user32.GetSystemMetrics(0)
-            screen_h = user32.GetSystemMetrics(1)
-            wx, wy = cfg['window_x'], cfg['window_y']
-            if wx < 0 or wy < 0 or wx > screen_w - 100 or wy > screen_h - 100:
-                logger.info(f"Window position ({wx},{wy}) out of screen ({screen_w}x{screen_h}), centering")
-                wx = (screen_w - TrayApp.WIN_W) // 2
-                wy = (screen_h - TrayApp.WIN_H) // 2
-        else:
-            import ctypes as _ct
-            user32 = _ct.windll.user32
-            wx = (user32.GetSystemMetrics(0) - TrayApp.WIN_W) // 2
-            wy = (user32.GetSystemMetrics(1) - TrayApp.WIN_H) // 2
+
+        # 从配置读取窗口几何，否则按屏幕85%居中
+        win_w, win_h, wx, wy = self.calc_initial_window_geometry()
 
         try:
             html_url = f'file:///{html_file.replace(chr(92), "/")}'
@@ -1274,24 +1295,28 @@ class TrayApp:
                 'CampusAuth',
                 url=html_url,
                 js_api=self.api,
-                width=TrayApp.WIN_W,
-                height=TrayApp.WIN_H,
+                width=win_w,
+                height=win_h,
                 x=wx,
                 y=wy,
-                resizable=False,
+                resizable=True,
+                minsize=(self.MIN_W, self.MIN_H),
                 background_color='#0D0D0D',
                 easy_drag=True,
                 frameless=True,
                 hidden=self._silent
             )
-            logger.info(f"Window created at ({wx}, {wy}), url={html_url}")
+            logger.info(f"Window created at ({wx}, {wy}), size={win_w}x{win_h}, url={html_url}")
         except Exception as e:
             logger.error(f"run: create_window failed: {e}\n{traceback.format_exc()}")
             return
-        
+
         def on_closing():
             logger.info("[on_closing] Window closing event triggered")
-            self.save_window_position()
+            try:
+                self.save_window_geometry()
+            except Exception as e:
+                logger.error(f"[on_closing] save_window_geometry failed: {e}")
             if self._should_exit:
                 logger.info("[on_closing] Real exit requested, allowing close")
                 return None

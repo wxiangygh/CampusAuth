@@ -1234,7 +1234,7 @@ class TrayApp:
                 resizable=True,
                 min_size=(self.MIN_W, self.MIN_H),
                 background_color='#0D0D0D',
-                easy_drag=True,
+                easy_drag=False,  # 关闭全局拖动，改用 pywebview-drag-region 类精确控制可拖动区域
                 frameless=True,
                 hidden=self._silent
             )

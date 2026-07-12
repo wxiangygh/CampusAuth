@@ -148,6 +148,7 @@
         /* Tab Content */
         .tab-content {
             flex: 1;
+            min-height: 0;  /* 允许flex子项收缩，使 #tab-home 的 overflow-y:auto 生效 */
             display: none;
             flex-direction: column;
             overflow: hidden;  /* 由各tab内部管理滚动，避免双层滚动冲突 */
@@ -277,7 +278,7 @@
         /* 折叠动画：展开时无高度限制，折叠时 max-height:0 */
         .network-detail-body {
             transition: max-height 0.3s ease, padding 0.3s ease;
-            padding: 0 14px 12px;
+            padding: 4px 14px 16px;  /* 顶部4px与header分隔，底部16px防止网格被截断 */
             overflow: visible;
         }
         .network-detail.collapsed .network-detail-body {
@@ -1245,7 +1246,7 @@
 
     <div class="container">
         <!-- 标题栏 -->
-        <div class="app-title-bar">
+        <div class="app-title-bar pywebview-drag-region">
             <span class="app-title-text">CampusAuth</span>
             <div class="app-title-btns">
                 <button class="app-title-btn" onclick="minimizeWindow()" title="最小化">
@@ -1258,7 +1259,7 @@
         </div>
 
         <!-- Tab Bar -->
-        <div class="tab-bar">
+        <div class="tab-bar pywebview-drag-region">
             <button class="tab-btn active" onclick="switchTab('home', event)">主页</button>
             <button class="tab-btn" onclick="switchTab('warp', event)">WARP排除</button>
             <button class="tab-btn" onclick="switchTab('traffic', event)">流量</button>

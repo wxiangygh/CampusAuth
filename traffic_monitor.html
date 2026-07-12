@@ -245,6 +245,8 @@
         let lastData = null;
         let autoRefreshTimer = null;
         let _initStarted = false;
+        let _loadingFast = false;  // fast 请求加载标志，防止自动刷新堆积
+        let _loadingSlow = false;  // slow 请求加载标志，独立于 fast
 
         // 6 种分类配置
         // 标签格式：WARP[v4]→v4 表示 WARP 底层为 IPv4，内部传输 IPv4
@@ -284,6 +286,57 @@
 
         function closeWindow() {
             if (api && api.close_traffic_window) api.close_traffic_window();
+        }
+
+        async function refreshFast() {
+            if (!api || _loadingFast) return;
+            _loadingFast = true;
+            const btn = document.getElementById('refreshBtn');
+            const bar = document.getElementById('loadingBar');
+            if (btn) btn.disabled = true;
+            if (bar) bar.classList.add('active');
+            try {
+                const data = await api.get_traffic_status_fast();
+                lastData = data;
+                renderStats(data.stats);
+                renderWarpInfo(data.warp_underlay);
+                renderConnections();
+            } catch (e) {
+                showToast('获取失败: ' + e);
+                const container = document.getElementById('connList');
+                if (container && (!lastData || !lastData.connections)) {
+                    container.innerHTML = '<div class="empty-hint">获取数据失败，请点击刷新重试</div>';
+                }
+            } finally {
+                _loadingFast = false;
+                if (btn) btn.disabled = false;
+                if (bar) bar.classList.remove('active');
+            }
+        }
+
+        async function refreshSlow() {
+            if (!api || _loadingSlow) return;
+            _loadingSlow = true;
+            try {
+                const missingIps = [];
+                for (const c of (lastData?.connections || [])) {
+                    if (!c.hostname && c.remote_ip) missingIps.push(c.remote_ip);
+                }
+                if (missingIps.length === 0) return;
+                const ipToHost = await api.get_traffic_status_slow(missingIps);
+                let updated = false;
+                for (const c of (lastData?.connections || [])) {
+                    if (!c.hostname && ipToHost[c.remote_ip]) {
+                        c.hostname = ipToHost[c.remote_ip];
+                        updated = true;
+                    }
+                }
+                if (updated) renderConnections();
+            } catch (e) {
+                console.warn('refreshSlow failed:', e);
+            } finally {
+                _loadingSlow = false;
+            }
         }
 
         async function refresh() {
@@ -387,7 +440,7 @@
 
         function startAutoRefresh() {
             stopAutoRefresh();
-            autoRefreshTimer = setInterval(refresh, 3000);
+            autoRefreshTimer = setInterval(refreshFast, 3000);
         }
 
         function stopAutoRefresh() {
@@ -405,8 +458,9 @@
                 showToast('API 加载超时: ' + e.message);
                 return;
             }
-            await refresh();
-            startAutoRefresh();
+            await refreshFast();        // 先拿 fast 数据，立即渲染
+            refreshSlow();              // 后台异步，拿到域名后增量更新
+            startAutoRefresh();         // 自动刷新改为 fast-only
         }
 
         window.addEventListener('pywebviewready', init);

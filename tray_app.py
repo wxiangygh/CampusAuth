@@ -449,7 +449,7 @@ class ApiBridge:
         return {'success': True, 'message': '无需更新'}
 
     # ------------------------------------------------------------------
-    # WARP 排除管理 API（供 warp_exclusion.html 前端调用）
+    # WARP 排除管理 API（供 settings.html WARP排除tab 调用）
     # ------------------------------------------------------------------
     def _get_mgr(self):
         """获取 ExclusionManager 单例"""
@@ -644,7 +644,7 @@ class ApiBridge:
         return {'success': True, 'message': '已更新'}
 
     # ------------------------------------------------------------------
-    # 流量监控 API（供 traffic_monitor.html 前端调用）
+    # 流量监控 API（供 settings.html 流量tab 调用）
     # ------------------------------------------------------------------
     def get_traffic_status(self):
         """获取当前网络流量走向统计和连接详情"""

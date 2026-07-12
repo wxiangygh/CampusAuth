@@ -476,96 +476,64 @@ def get_traffic_status_fast():
     }
 
 
+def get_traffic_status_slow(missing_ips=None):
+    """获取 IP→域名映射，供前端增量更新域名显示。
+
+    先查询系统 DNS 缓存（快），对未命中的 IP 再做反向 DNS 后备查询（慢）。
+
+    Args:
+        missing_ips: 需要查询的 IP 列表。None 时仅返回 DNS 缓存映射，
+                     不触发反向 DNS。传空列表时同样不触发。
+
+    Returns:
+        dict[str, str]: {ip: hostname}（仅包含查询成功的）
+    """
+    # 第一步：获取 DNS 缓存
+    dns_map = _get_dns_cache_only()
+    if not missing_ips:
+        logger.debug(f'get_traffic_status_slow: dns_cache_only={len(dns_map)} entries')
+        return dns_map
+
+    # 第二步：过滤出 DNS 缓存未命中的 IP
+    ips_to_reverse = [ip for ip in missing_ips if ip not in dns_map]
+    if not ips_to_reverse:
+        logger.debug(f'get_traffic_status_slow: all {len(missing_ips)} IPs hit DNS cache')
+        return dns_map
+
+    # 第三步：反向 DNS 后备查询
+    logger.debug(f'get_traffic_status_slow: reverse DNS for {len(ips_to_reverse)}/{len(missing_ips)} IPs')
+    rdns_map = _batch_reverse_dns(ips_to_reverse, timeout=1.0, max_workers=10)
+
+    # 合并结果
+    result = dict(dns_map)
+    result.update(rdns_map)
+    logger.debug(f'get_traffic_status_slow: total resolved={len(result)}/{len(missing_ips)}')
+    return result
+
+
 def get_traffic_status():
-    """获取当前流量走向统计和连接详情。
+    """获取当前流量走向统计和连接详情（含域名）。
+
+    内部调用 get_traffic_status_fast + get_traffic_status_slow 串行执行。
+    保留此接口用于向后兼容；前端应优先使用 fast/slow 分离接口。
+
     返回 {
         'stats': {route_type: N, ...},  # 6 种分类的计数
-        'connections': [{process, remote_ip, remote_port, route_type, is_warp, is_ipv6, warp_underlay}],
+        'connections': [{process, remote_ip, remote_port, hostname, route_type, is_warp, is_ipv6, warp_underlay}],
         'warp_ifindex': N,
         'warp_underlay': 'ipv4' | 'ipv6',
         'total': N
     }
     """
-    snapshot = _get_network_snapshot()
-    warp_ifindex = snapshot.get('WarpIfIndex', -1)
-    warp_underlay = snapshot.get('WarpUnderlay', 'ipv4')  # WARP 底层连接类型
-    connections = snapshot.get('Connections', [])
-    routes = snapshot.get('Routes', [])
-    dns_map = snapshot.get('DnsMap', {})  # IP→域名 反向映射（来自系统 DNS 缓存）
+    # 快速获取连接列表（无域名）
+    result = get_traffic_status_fast()
 
-    # 获取自身进程名，过滤自身连接
-    import os
-    my_pid = os.getpid()
-
-    # 初始化 6 种分类的计数
-    stats = {k: 0 for k in ROUTE_TYPES}
-    conn_details = []
-
-    for conn in connections:
-        # 过滤自身进程的连接
-        if conn.get('ProcessId') == my_pid:
-            continue
-        remote_ip = conn.get('RemoteAddress', '')
-        # 过滤本地/回环地址
-        if not remote_ip or remote_ip in _LOCAL_ADDRS:
-            continue
-
-        is_ipv6 = ':' in remote_ip
-
-        # 判断是否走 WARP：优先用连接的 InterfaceIndex，无则用路由表匹配
-        conn_ifindex = conn.get('InterfaceIndex', -1)
-        if conn_ifindex and conn_ifindex > 0 and warp_ifindex > 0:
-            is_warp = (conn_ifindex == warp_ifindex)
-        else:
-            matched_ifindex = _match_route_ifindex(remote_ip, routes)
-            is_warp = (matched_ifindex == warp_ifindex and warp_ifindex > 0)
-
-        # 6 种分类逻辑：
-        # 不走 WARP：ipv4 / ipv6（按内部流量类型）
-        # 走 WARP：{underlay}_warp{_inner}（underlay=WARP底层类型, inner=内部流量类型）
-        if not is_warp:
-            route_type = 'ipv6' if is_ipv6 else 'ipv4'
-        else:
-            # WARP 底层连接类型 + 内部流量类型
-            if warp_underlay == 'ipv6':
-                route_type = 'ipv6_warp_ipv4' if not is_ipv6 else 'ipv6_warp'
-            else:  # warp_underlay == 'ipv4'
-                route_type = 'ipv4_warp' if not is_ipv6 else 'ipv4_warp_ipv6'
-
-        stats[route_type] = stats.get(route_type, 0) + 1
-
-        # 从 DNS 缓存反查域名（可能为空）
-        hostname = dns_map.get(remote_ip, '')
-
-        conn_details.append({
-            'process': conn.get('ProcessName', 'unknown'),
-            'remote_ip': remote_ip,
-            'remote_port': conn.get('RemotePort', 0),
-            'hostname': hostname,
-            'route_type': route_type,
-            'is_warp': is_warp,
-            'is_ipv6': is_ipv6,
-            'warp_underlay': warp_underlay,
-        })
-
-    # 对 DNS 缓存未命中的 IP，做并发反向 DNS 后备查询（带超时保护）
-    # 只查询未命中域名的唯一 IP，避免重复查询
-    missing_ips = list({c['remote_ip'] for c in conn_details if not c['hostname']})
+    # 慢速获取域名映射
+    missing_ips = list({c['remote_ip'] for c in result['connections'] if not c['hostname']})
     if missing_ips:
-        logger.debug(f'Reverse DNS fallback for {len(missing_ips)} IPs')
-        rdns_map = _batch_reverse_dns(missing_ips, timeout=1.0, max_workers=10)
-        for c in conn_details:
-            if not c['hostname'] and c['remote_ip'] in rdns_map:
-                c['hostname'] = rdns_map[c['remote_ip']]
+        dns_map = get_traffic_status_slow(missing_ips)
+        for c in result['connections']:
+            if not c['hostname'] and c['remote_ip'] in dns_map:
+                c['hostname'] = dns_map[c['remote_ip']]
 
-    # 按进程名排序，同进程按域名/IP 排序
-    conn_details.sort(key=lambda x: (x['process'].lower(), x.get('hostname', '') or x['remote_ip']))
-
-    return {
-        'stats': stats,
-        'connections': conn_details,
-        'warp_ifindex': warp_ifindex,
-        'warp_underlay': warp_underlay,
-        'total': len(conn_details),
-        'route_types': ROUTE_TYPES,
-    }
+    return result

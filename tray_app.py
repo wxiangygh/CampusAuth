@@ -86,7 +86,9 @@ def load_config():
         'warp_cli_path': '',
         'silent_startup': False,
         'window_x': None,
-        'window_y': None
+        'window_y': None,
+        'window': None,  # {'width': int, 'height': int, 'x': int, 'y': int} 或 None
+        'ui_prefs': None  # {'page_size': int, 'traffic_subview': 'list'|'canvas'} 或 None
     }
     logger.info(f"Loading config from: {CONFIG_FILE}")
     if CONFIG_FILE.exists():
@@ -706,6 +708,48 @@ class ApiBridge:
             except Exception as e:
                 logger.debug(f'close_flow_window destroy: {e}')
             core.state._tray_app_instance._flow_window = None
+
+    def save_ui_prefs(self, prefs):
+        """保存 UI 偏好（page_size, traffic_subview）。
+        Args:
+            prefs: dict，如 {'page_size': 50} 或 {'traffic_subview': 'canvas'}
+        Returns:
+            dict: {'success': bool}
+        """
+        try:
+            cfg = load_config()
+            current = cfg.get('ui_prefs') or {}
+            current.update(prefs)
+            cfg['ui_prefs'] = current
+            save_config_to_file(cfg)
+            logger.info(f"[save_ui_prefs] Saved: {prefs}, merged: {current}")
+            return {'success': True}
+        except Exception as e:
+            logger.error(f"[save_ui_prefs] FAILED: {e}\n{traceback.format_exc()}")
+            return {'success': False}
+
+    def get_ui_prefs(self):
+        """读取 UI 偏好，供前端初始化。
+        Returns:
+            dict: {'page_size': int, 'traffic_subview': str}
+        """
+        try:
+            cfg = load_config()
+            prefs = cfg.get('ui_prefs') or {}
+            result = {
+                'page_size': int(prefs.get('page_size', 20)),
+                'traffic_subview': prefs.get('traffic_subview', 'list')
+            }
+            # 校验 page_size 取值范围
+            if result['page_size'] not in (10, 20, 50, 100):
+                result['page_size'] = 20
+            if result['traffic_subview'] not in ('list', 'canvas'):
+                result['traffic_subview'] = 'list'
+            logger.info(f"[get_ui_prefs] Returning: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"[get_ui_prefs] FAILED: {e}\n{traceback.format_exc()}")
+            return {'page_size': 20, 'traffic_subview': 'list'}
 
 icon_instance = None
 

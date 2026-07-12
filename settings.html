@@ -62,7 +62,10 @@
             overflow: hidden;
             width: 100vw;
             height: 100vh;
+            user-select: text;  /* 全局允许文字选中 */
         }
+        /* 按钮和拖动区域不允许选中文字 */
+        button, .app-title-bar, .tab-bar, .network-detail-header { user-select: none; }
 
         /* Loading Overlay */
         .loading-overlay {
@@ -148,11 +151,12 @@
         /* Tab Content */
         .tab-content {
             flex: 1;
-            min-height: 0;  /* 允许flex子项收缩，使 #tab-home 的 overflow-y:auto 生效 */
+            min-height: 0;  /* 允许flex子项收缩，使 overflow-y:auto 生效 */
             display: none;
             flex-direction: column;
-            overflow: hidden;  /* 由各tab内部管理滚动，避免双层滚动冲突 */
+            overflow-y: auto;  /* 各tab内容可滚动 */
             -webkit-app-region: no-drag;  /* tab内容区域不可拖动 */
+            user-select: text;  /* 允许文字选中 */
         }
 
         .tab-content.active {
@@ -278,8 +282,7 @@
         /* 折叠动画：展开时无高度限制，折叠时 max-height:0 */
         .network-detail-body {
             transition: max-height 0.3s ease, padding 0.3s ease;
-            padding: 4px 14px 16px;  /* 顶部4px与header分隔，底部16px防止网格被截断 */
-            overflow: visible;
+            padding: 8px 14px 16px;  /* 顶部8px与header分隔，底部16px防止网格被截断 */
         }
         .network-detail.collapsed .network-detail-body {
             max-height: 0 !important;
@@ -627,11 +630,9 @@
             position: relative;
         }
 
-        /* 主页tab容器（仅设置 flex-direction，display 由 .tab-content.active 控制）*/
+        /* 主页tab容器（就是 .tab-content，已通过 .tab-content 的 overflow-y:auto 实现滚动）*/
         #tab-home {
-            flex: 1;
             flex-direction: column;
-            overflow-y: auto;  /* 内容超出时上下滚动 */
         }
 
         /* Status Indicator - Hexagon Shape */

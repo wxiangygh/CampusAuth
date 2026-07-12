@@ -156,12 +156,13 @@ def has_public_ipv6():
     for line in output.split('\n'):
         line_stripped = line.strip()
         # 匹配 IPv6 地址行（中文/英文系统）
-        if 'IPv6' not in line_stripped and 'IPv6 地址' not in line_stripped:
+        if 'IPv6' not in line_stripped:
             continue
-        if ':' not in line_stripped:
+        # 使用 ': '（冒号+空格）分割标签和地址，避免误切 IPv6 地址内部的冒号
+        parts = line_stripped.split(': ', 1)
+        if len(parts) < 2:
             continue
-        # 提取地址部分（最后一个冒号之后）
-        addr = line_stripped.rsplit(':', 1)[1].strip()
+        addr = parts[1].strip()
         # 跳过临时地址标记和空值
         if not addr or addr.startswith('('):
             continue

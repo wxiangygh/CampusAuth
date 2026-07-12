@@ -1169,7 +1169,7 @@ class TrayApp:
                 x=wx,
                 y=wy,
                 resizable=True,
-                minsize=(self.MIN_W, self.MIN_H),
+                min_size=(self.MIN_W, self.MIN_H),
                 background_color='#0D0D0D',
                 easy_drag=True,
                 frameless=True,

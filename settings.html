@@ -150,7 +150,8 @@
             flex: 1;
             display: none;
             flex-direction: column;
-            overflow-y: auto;
+            overflow: hidden;  /* 由各tab内部管理滚动，避免双层滚动冲突 */
+            -webkit-app-region: no-drag;  /* tab内容区域不可拖动 */
         }
 
         .tab-content.active {
@@ -273,15 +274,14 @@
         }
         .network-detail.collapsed .network-detail-arrow { transform: rotate(-90deg); }
 
-        /* 折叠动画：用 max-height 过渡，展开时不限制高度（设足够大值）*/
+        /* 折叠动画：展开时无高度限制，折叠时 max-height:0 */
         .network-detail-body {
-            max-height: 2000px;
             transition: max-height 0.3s ease, padding 0.3s ease;
             padding: 0 14px 12px;
-            overflow: visible;  /* 允许内容自然撑开，不被截断 */
+            overflow: visible;
         }
         .network-detail.collapsed .network-detail-body {
-            max-height: 0;
+            max-height: 0 !important;
             padding: 0 14px 0;
             overflow: hidden;
         }
@@ -506,7 +506,7 @@
         #traffic-canvas-view .conn-row .conn-badge { font-size: 9px; padding: 1px 6px; border-radius: 3px; font-weight: 600; white-space: nowrap; }
 
         /* ===== WARP排除tab ===== */
-        .warp-content { padding: 16px; }
+        .warp-content { padding: 16px; overflow-y: auto; flex: 1; }
         .section { margin-bottom: 20px; }
         .section-title {
             font-size: 13px; font-weight: 600; color: var(--text-secondary);

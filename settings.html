@@ -239,6 +239,81 @@
         .traffic-subview { display: none; flex: 1; overflow: hidden; flex-direction: column; }
         .traffic-subview.active { display: flex; }
 
+        /* ===== 网络详情卡（主页tab）===== */
+        .network-detail {
+            margin: 0 20px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .network-detail-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s;
+        }
+        .network-detail-header:hover { background: var(--bg-tertiary); }
+        .network-detail-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+        .network-detail-arrow {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            transition: transform 0.2s;
+        }
+        .network-detail.collapsed .network-detail-arrow { transform: rotate(-90deg); }
+
+        /* 折叠动画：max-height 过渡 */
+        .network-detail-body {
+            max-height: 200px;
+            transition: max-height 0.25s ease, padding 0.25s ease;
+            padding: 0 14px 12px;
+            overflow: hidden;
+        }
+        .network-detail.collapsed .network-detail-body {
+            max-height: 0;
+            padding: 0 14px 0;
+        }
+
+        /* 6 项网格布局 */
+        .network-detail-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        .network-detail-item {
+            padding: 8px 10px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+        }
+        .network-detail-label {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            margin-bottom: 2px;
+        }
+        .network-detail-value {
+            font-size: 12px;
+            color: var(--text-primary);
+            word-break: break-all;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+        .network-detail-value.empty { color: var(--text-tertiary); }
+        .network-detail-value.success { color: var(--success); }
+        .network-detail-value.warning { color: var(--warning); }
+
+        /* 响应式适配（窄窗口）*/
+        @media (max-width: 600px) {
+            .network-detail-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
         /* ===== 流量tab ===== */
         /* 统计卡片 - 6 个（列表视图）*/
         #tab-traffic .stats-grid {
@@ -1216,8 +1291,18 @@
                 </div>
             </div>
 
-            <!-- 网络详情卡（中，可折叠）- Task 4 填充 -->
-            <!-- NETWORK_DETAIL_PLACEHOLDER -->
+            <!-- 网络详情卡（中，可折叠）-->
+            <div class="network-detail" id="networkDetail">
+                <div class="network-detail-header" onclick="HomeTab.toggleDetail()">
+                    <span class="network-detail-title">网络详情</span>
+                    <span class="network-detail-arrow" id="networkDetailArrow">▼</span>
+                </div>
+                <div class="network-detail-body" id="networkDetailBody">
+                    <div class="network-detail-grid" id="networkDetailGrid">
+                        <!-- JS 动态填充 6 项 -->
+                    </div>
+                </div>
+            </div>
 
             <!-- 设置区（下）-->
             <div class="settings-page">

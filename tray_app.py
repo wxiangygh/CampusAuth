@@ -643,15 +643,6 @@ class ApiBridge:
         save_exclusion_config(cfg)
         return {'success': True, 'message': '已更新'}
 
-    def close_exclusion_window(self):
-        """关闭 WARP 排除管理窗口（销毁 WebView2 进程，释放资源）"""
-        if core.state._tray_app_instance and core.state._tray_app_instance._exclusion_window:
-            try:
-                core.state._tray_app_instance._exclusion_window.destroy()
-            except Exception as e:
-                logger.debug(f'close_exclusion_window destroy: {e}')
-            core.state._tray_app_instance._exclusion_window = None
-
     # ------------------------------------------------------------------
     # 流量监控 API（供 traffic_monitor.html 前端调用）
     # ------------------------------------------------------------------
@@ -690,24 +681,6 @@ class ApiBridge:
         except Exception as e:
             logger.error(f"[get_traffic_status_slow] FAILED: {e}\n{traceback.format_exc()}")
             raise
-
-    def close_traffic_window(self):
-        """关闭流量监控窗口（销毁 WebView2 进程，释放资源）"""
-        if core.state._tray_app_instance and core.state._tray_app_instance._traffic_window:
-            try:
-                core.state._tray_app_instance._traffic_window.destroy()
-            except Exception as e:
-                logger.debug(f'close_traffic_window destroy: {e}')
-            core.state._tray_app_instance._traffic_window = None
-
-    def close_flow_window(self):
-        """关闭流量可视化窗口（销毁 WebView2 进程，释放资源）"""
-        if core.state._tray_app_instance and core.state._tray_app_instance._flow_window:
-            try:
-                core.state._tray_app_instance._flow_window.destroy()
-            except Exception as e:
-                logger.debug(f'close_flow_window destroy: {e}')
-            core.state._tray_app_instance._flow_window = None
 
     def save_ui_prefs(self, prefs):
         """保存 UI 偏好（page_size, traffic_subview）。
@@ -860,7 +833,7 @@ def on_exit(icon, item):
         if not core.state._tray_app_instance._webview_started:
             core.state._tray_app_instance._webview_start_event.set()
         # 销毁所有 webview 窗口，让 webview.start() 退出
-        for win_attr in ('settings_window', '_exclusion_window', '_traffic_window', '_flow_window'):
+        for win_attr in ('settings_window',):
             win = getattr(core.state._tray_app_instance, win_attr, None)
             if win:
                 try:
@@ -907,9 +880,6 @@ class TrayApp:
         self.icon = None
         self.api = ApiBridge()
         self.settings_window = None
-        self._exclusion_window = None
-        self._traffic_window = None
-        self._flow_window = None
         self._should_exit = False
         self._silent = silent
         self._webview_started = False
@@ -987,10 +957,9 @@ class TrayApp:
             pystray.MenuItem('注销并重新认证', on_reauth),
             pystray.MenuItem('恢复正常模式', on_restore),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem('WARP排除管理', lambda i, item: self.show_exclusion()),
-            pystray.MenuItem('流量监控', lambda i, item: self.show_traffic_monitor()),
-            pystray.MenuItem('流量可视化', lambda i, item: self.show_flow_monitor()),
-            pystray.MenuItem('打开设置', lambda i, item: self.show_settings()),
+            pystray.MenuItem('WARP排除', lambda i, item: self.show_main_window('warp')),
+            pystray.MenuItem('流量', lambda i, item: self.show_main_window('traffic')),
+            pystray.MenuItem('打开设置', lambda i, item: self.show_main_window('settings')),
             pystray.Menu.SEPARATOR,
         ]
         if not is_admin():
@@ -1066,10 +1035,9 @@ class TrayApp:
                 pystray.MenuItem('注销并重新认证', on_reauth),
                 pystray.MenuItem('恢复正常模式', on_restore),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem('WARP排除管理', lambda i, item: self.show_exclusion()),
-                pystray.MenuItem('流量监控', lambda i, item: self.show_traffic_monitor()),
-                pystray.MenuItem('流量可视化', lambda i, item: self.show_flow_monitor()),
-                pystray.MenuItem('打开设置', lambda i, item: self.show_settings('settings')),
+                pystray.MenuItem('WARP排除', lambda i, item: self.show_main_window('warp')),
+                pystray.MenuItem('流量', lambda i, item: self.show_main_window('traffic')),
+                pystray.MenuItem('打开设置', lambda i, item: self.show_main_window('settings')),
                 pystray.Menu.SEPARATOR,
             ]
             if not is_admin():
@@ -1085,118 +1053,19 @@ class TrayApp:
         except Exception as e:
             logger.error(f"_refresh_tray_menu failed: {e}")
 
-    def show_exclusion(self):
-        """显示 WARP 排除管理窗口"""
-        logger.info("[show_exclusion] Called")
-        if self._exclusion_window:
+    def show_main_window(self, tab=None):
+        """打开主窗口并切换到指定tab。
+        Args:
+            tab: 'status' | 'settings' | 'warp' | 'traffic' | None（保持上次）
+        """
+        logger.info(f"[show_main_window] Called, tab={tab}")
+        self.show_settings()
+        if tab and self.settings_window:
             try:
-                self._exclusion_window.show()
-                self._exclusion_window.restore()
-                bring_window_to_top('WARP排除管理')
-                logger.info("[show_exclusion] Existing window shown")
-                return
+                self.settings_window.evaluate_js(f"switchTab('{tab}')")
+                logger.info(f"[show_main_window] Switched to tab: {tab}")
             except Exception as e:
-                logger.error(f"[show_exclusion] Show existing window failed: {e}")
-                self._exclusion_window = None
-
-        # 创建新的排除管理窗口
-        html_file = get_resource_path('warp_exclusion.html')
-        html_url = f'file:///{html_file.replace(chr(92), "/")}'
-        # 计算窗口居中位置
-        user32 = ctypes.windll.user32
-        screen_w = user32.GetSystemMetrics(0)
-        screen_h = user32.GetSystemMetrics(1)
-        ex_w, ex_h = 520, 700
-        ex_x = (screen_w - ex_w) // 2
-        ex_y = (screen_h - ex_h) // 2
-        # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
-        # 返回 None 允许窗口正常关闭，pywebview 会自动销毁 WebView2 进程
-        def _on_exclusion_closing():
-            logger.info("[exclusion] Window closing, clearing reference")
-            self._exclusion_window = None
-            return None
-        self._exclusion_window = create_webview_window(
-            self.api, 'WARP排除管理', html_url, ex_w, ex_h,
-            on_closing_callback=_on_exclusion_closing,
-            background_color='#0D0D0D', easy_drag=False,
-            x=ex_x, y=ex_y,
-        )
-        if self._exclusion_window:
-            logger.info(f"[show_exclusion] Window created, url={html_url}")
-
-    def show_traffic_monitor(self):
-        """显示流量监控窗口"""
-        logger.info("[show_traffic_monitor] Called")
-        if self._traffic_window:
-            try:
-                self._traffic_window.show()
-                self._traffic_window.restore()
-                bring_window_to_top('流量监控')
-                logger.info("[show_traffic_monitor] Existing window shown")
-                return
-            except Exception as e:
-                logger.error(f"[show_traffic_monitor] Show existing window failed: {e}")
-                self._traffic_window = None
-
-        html_file = get_resource_path('traffic_monitor.html')
-        html_url = f'file:///{html_file.replace(chr(92), "/")}'
-        # 计算窗口居中位置
-        user32 = ctypes.windll.user32
-        screen_w = user32.GetSystemMetrics(0)
-        screen_h = user32.GetSystemMetrics(1)
-        mon_w, mon_h = 640, 760
-        mon_x = (screen_w - mon_w) // 2
-        mon_y = (screen_h - mon_h) // 2
-        # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
-        def _on_traffic_closing():
-            logger.info("[traffic] Window closing, clearing reference")
-            self._traffic_window = None
-            return None
-        self._traffic_window = create_webview_window(
-            self.api, '流量监控', html_url, mon_w, mon_h,
-            on_closing_callback=_on_traffic_closing,
-            background_color='#0D0D0D', easy_drag=False,
-            x=mon_x, y=mon_y,
-        )
-        if self._traffic_window:
-            logger.info(f"[show_traffic_monitor] Window created, url={html_url}")
-
-    def show_flow_monitor(self):
-        """显示流量可视化窗口（数据流动画）"""
-        logger.info("[show_flow_monitor] Called")
-        if self._flow_window:
-            try:
-                self._flow_window.show()
-                self._flow_window.restore()
-                bring_window_to_top('流量可视化')
-                logger.info("[show_flow_monitor] Existing window shown")
-                return
-            except Exception as e:
-                logger.error(f"[show_flow_monitor] Show existing window failed: {e}")
-                self._flow_window = None
-
-        html_file = get_resource_path('traffic_flow.html')
-        html_url = f'file:///{html_file.replace(chr(92), "/")}'
-        # 计算窗口居中位置
-        user32 = ctypes.windll.user32
-        screen_w = user32.GetSystemMetrics(0)
-        screen_h = user32.GetSystemMetrics(1)
-        flow_w, flow_h = 960, 820
-        flow_x = (screen_w - flow_w) // 2
-        flow_y = (screen_h - flow_h) // 2
-        # 关闭时清理引用（不调用 destroy，避免 closing 事件递归导致堆栈溢出）
-        def _on_flow_closing():
-            logger.info("[flow] Window closing, clearing reference")
-            self._flow_window = None
-            return None
-        self._flow_window = create_webview_window(
-            self.api, '流量可视化', html_url, flow_w, flow_h,
-            on_closing_callback=_on_flow_closing,
-            background_color='#0D0D0D', easy_drag=False,
-            x=flow_x, y=flow_y,
-        )
-        if self._flow_window:
-            logger.info(f"[show_flow_monitor] Window created, url={html_url}")
+                logger.warning(f"[show_main_window] evaluate_js failed: {e}")
 
     def show_settings(self, tab=None):
         """显示应用窗口。tab参数保留但不再使用，窗口保持上次的状态。"""

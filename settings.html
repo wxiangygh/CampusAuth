@@ -534,8 +534,16 @@
             flex-direction: column;
             align-items: center;
             justify-content: flex-start;
-            padding: 32px 24px 32px;
+            padding: 20px 24px 16px;
             position: relative;
+        }
+
+        /* 主页tab容器 */
+        #tab-home {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
         }
 
         /* Status Indicator - Hexagon Shape */
@@ -805,7 +813,6 @@
 
         /* Settings Page */
         .settings-page {
-            flex: 1;
             display: flex;
             flex-direction: column;
             padding: 16px 20px;
@@ -1165,14 +1172,14 @@
 
         <!-- Tab Bar -->
         <div class="tab-bar">
-            <button class="tab-btn active" onclick="switchTab('status', event)">连接</button>
-            <button class="tab-btn" onclick="switchTab('settings', event)">设置</button>
+            <button class="tab-btn active" onclick="switchTab('home', event)">主页</button>
             <button class="tab-btn" onclick="switchTab('warp', event)">WARP排除</button>
             <button class="tab-btn" onclick="switchTab('traffic', event)">流量</button>
         </div>
 
-        <!-- Status Tab -->
-        <div class="tab-content active" id="tab-status">
+        <!-- Home Tab -->
+        <div class="tab-content active" id="tab-home">
+            <!-- 状态区（上）-->
             <div class="status-page">
                 <canvas class="particle-canvas" id="particleCanvas" width="300" height="300"></canvas>
 
@@ -1208,10 +1215,11 @@
                     <button class="btn btn-danger" id="cancelBtn" onclick="cancelOperation()" style="display:none;">取消</button>
                 </div>
             </div>
-        </div>
 
-        <!-- Settings Tab -->
-        <div class="tab-content" id="tab-settings">
+            <!-- 网络详情卡（中，可折叠）- Task 4 填充 -->
+            <!-- NETWORK_DETAIL_PLACEHOLDER -->
+
+            <!-- 设置区（下）-->
             <div class="settings-page">
                 <div class="form-group">
                     <label>WiFi 网络</label>

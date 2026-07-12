@@ -60,16 +60,16 @@ def get_local_ip():
         found_wifi = False
         for line in lines:
             line_stripped = line.strip()
-            if wifi_name in line_stripped or '无线' in line_stripped or 'Wireless' in line_stripped:
-                found_wifi = True
+            # 遇到新的适配器标题时才重置 found_wifi（不在空行时重置，
+            # 因为适配器标题行后常紧跟空行，会导致 WLAN 部分的 IPv4 被跳过）
+            if 'adapter' in line_stripped.lower() or '适配器' in line_stripped:
+                found_wifi = (wifi_name in line_stripped or '无线' in line_stripped or 'Wireless' in line_stripped)
                 continue
             if found_wifi and ('IPv4' in line_stripped or 'IPv4 地址' in line_stripped) and ':' in line_stripped:
                 ip = line_stripped.split(':', 1)[1].strip()
                 if ip and not ip.startswith('172.16.'):
                     return ip
                 continue
-            if found_wifi and line_stripped == '':
-                found_wifi = False
     import socket
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

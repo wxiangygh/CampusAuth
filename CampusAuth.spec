@@ -5,7 +5,7 @@ a = Analysis(
     ['tray_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('settings.html', '.'), ('warp_exclusion.html', '.'), ('traffic_monitor.html', '.'), ('traffic_flow.html', '.'), ('app.ico', '.')],
+    datas=[('settings.html', '.'), ('app.ico', '.')],
     hiddenimports=[
         'warp_exclusion', 'traffic_monitor',
         'dns', 'dns.resolver', 'dns.exception', 'dns.rdatatype', 'dns.rdataclass', 'dns.rcode',

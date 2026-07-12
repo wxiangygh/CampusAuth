@@ -1022,7 +1022,7 @@ class TrayApp:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('WARP排除', lambda i, item: self.show_main_window('warp')),
             pystray.MenuItem('流量', lambda i, item: self.show_main_window('traffic')),
-            pystray.MenuItem('打开设置', lambda i, item: self.show_main_window('settings')),
+            pystray.MenuItem('打开主页', lambda i, item: self.show_main_window('home')),
             pystray.Menu.SEPARATOR,
         ]
         if not is_admin():
@@ -1100,7 +1100,7 @@ class TrayApp:
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem('WARP排除', lambda i, item: self.show_main_window('warp')),
                 pystray.MenuItem('流量', lambda i, item: self.show_main_window('traffic')),
-                pystray.MenuItem('打开设置', lambda i, item: self.show_main_window('settings')),
+                pystray.MenuItem('打开主页', lambda i, item: self.show_main_window('home')),
                 pystray.Menu.SEPARATOR,
             ]
             if not is_admin():

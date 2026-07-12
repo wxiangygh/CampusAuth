@@ -129,6 +129,52 @@ def wait_for_network_ready(portal_ip, portal_port='801', max_retries=5):
     return False
 
 
+def has_public_ipv6():
+    """检测本机是否获取到 2001 开头的公网 IPv6 地址。
+
+    通过解析 ipconfig 输出查找 IPv6 地址，过滤掉链路本地、ULA、
+    环回、文档保留和 ORCHIDv1 地址，仅保留 2001 开头的实际公网地址。
+
+    Returns:
+        tuple[bool, str]: (是否找到, 第一个匹配的地址)。
+                          未找到时地址为空字符串。
+    """
+    code, output, _ = run_command('ipconfig')
+    if code != 0:
+        logger.warning("has_public_ipv6: ipconfig failed")
+        return False, ''
+    # 排除的地址前缀（非公网或保留段）
+    excluded_prefixes = (
+        'fe80:',      # 链路本地
+        'fc',         # ULA 本地唯一（fc00::/7）
+        'fd',         # ULA 本地唯一（fc00::/7 的下半段）
+        '::1',        # 环回
+        '2001:db8:',  # 文档保留
+        '2001:0000:', # ORCHIDv1（2001::/32）
+        '2001:0:',    # ORCHIDv1 简写形式
+    )
+    for line in output.split('\n'):
+        line_stripped = line.strip()
+        # 匹配 IPv6 地址行（中文/英文系统）
+        if 'IPv6' not in line_stripped and 'IPv6 地址' not in line_stripped:
+            continue
+        if ':' not in line_stripped:
+            continue
+        # 提取地址部分（最后一个冒号之后）
+        addr = line_stripped.rsplit(':', 1)[1].strip()
+        # 跳过临时地址标记和空值
+        if not addr or addr.startswith('('):
+            continue
+        # 去除可能的百分号后缀（如 fe80::1%12）
+        addr = addr.split('%')[0].lower()
+        # 必须以 2001 开头且不在排除列表中
+        if addr.startswith('2001') and not addr.startswith(excluded_prefixes):
+            logger.info(f"has_public_ipv6: found public IPv6: {addr}")
+            return True, addr
+    logger.debug("has_public_ipv6: no public IPv6 address found")
+    return False, ''
+
+
 def _wait_for_ipv6_ready(max_retries=8):
     logger.info("Waiting for IPv6 to be ready...")
     ipv6_test_targets = [

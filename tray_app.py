@@ -16,7 +16,7 @@ import pystray
 from PIL import Image, ImageDraw
 import webview
 from warp_exclusion import get_exclusion_manager, DnsMonitor
-from traffic_monitor import get_traffic_status
+from traffic_monitor import get_traffic_status, get_traffic_status_fast, get_traffic_status_slow
 import core.state
 from core.state import _auth_lock, _auth_cancelled
 from core.command import run_command
@@ -663,6 +663,30 @@ class ApiBridge:
             return result
         except Exception as e:
             logger.error(f"[get_traffic_status] FAILED: {e}\n{traceback.format_exc()}")
+            raise
+
+    def get_traffic_status_fast(self):
+        """快速获取流量统计（不含域名），供前端首屏展示。"""
+        _t0 = time.time()
+        try:
+            result = get_traffic_status_fast()
+            _elapsed = time.time() - _t0
+            logger.info(f"[get_traffic_status_fast] OK, elapsed={_elapsed:.2f}s, total={result.get('total', 0)}")
+            return result
+        except Exception as e:
+            logger.error(f"[get_traffic_status_fast] FAILED: {e}\n{traceback.format_exc()}")
+            raise
+
+    def get_traffic_status_slow(self, missing_ips):
+        """获取 IP→域名映射，供前端增量更新域名显示。"""
+        _t0 = time.time()
+        try:
+            result = get_traffic_status_slow(missing_ips)
+            _elapsed = time.time() - _t0
+            logger.info(f"[get_traffic_status_slow] OK, elapsed={_elapsed:.2f}s, resolved={len(result)}")
+            return result
+        except Exception as e:
+            logger.error(f"[get_traffic_status_slow] FAILED: {e}\n{traceback.format_exc()}")
             raise
 
     def close_traffic_window(self):

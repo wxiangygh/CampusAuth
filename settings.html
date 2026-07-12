@@ -2808,6 +2808,7 @@
 
         // ===== Tab Switching =====
         let _userSwitchedTab = false;  // 标记用户是否手动切换过tab
+        let _statusCheckTimer = null;  // 主页定期状态检查定时器
         function switchTab(name, event) {
             if (event) _userSwitchedTab = true;  // 用户手动点击切换
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -2820,11 +2821,31 @@
                 document.querySelector(`.tab-btn[onclick*="${name}"]`)?.classList.add('active');
             }
 
-            // 主页tab：切回时刷新网络详情
+            // 主页tab：切回时刷新网络状态和详情
             if (name === 'home') {
                 if (typeof HomeTab !== 'undefined' && HomeTab.refreshDetail) {
                     HomeTab.refreshDetail();
                 }
+                // 重新检查网络状态，确保状态指示器与实际一致
+                if (window.pywebview && window.pywebview.api && !_authRunning) {
+                    window.pywebview.api.check_network_status().then(function (s) {
+                        if (!_authRunning) updateStatusFromCheck(s);
+                    }).catch(function (e) {
+                        console.error('Tab switch status check failed:', e);
+                    });
+                }
+                // 启动定期状态检查（每30秒）
+                if (_statusCheckTimer) clearInterval(_statusCheckTimer);
+                _statusCheckTimer = setInterval(function () {
+                    if (!_authRunning && window.pywebview && window.pywebview.api) {
+                        window.pywebview.api.check_network_status().then(function (s) {
+                            if (!_authRunning) updateStatusFromCheck(s);
+                        }).catch(function () {});
+                    }
+                }, 30000);
+            } else {
+                // 离开主页时停止定期状态检查
+                if (_statusCheckTimer) { clearInterval(_statusCheckTimer); _statusCheckTimer = null; }
             }
 
             // 流量tab特殊处理

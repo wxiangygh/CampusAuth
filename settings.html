@@ -18,9 +18,36 @@
             --text-secondary: #A3A3A3;
             --text-tertiary: #737373;
             --border: rgba(255,255,255,0.08);
+            /* 兼容旧样式：保留 --success/--error 别名 */
             --success: #22C55E;
             --error: #EF4444;
+            /* 流量页6类颜色 */
+            --c-ipv4: #3b82f6;
+            --c-ipv6: #22C55E;
+            --c-ipv4-warp: #F59E0B;
+            --c-ipv4-warp-ipv6: #EAB308;
+            --c-ipv6-warp: #EF4444;
+            --c-ipv6-warp-ipv4: #A855F7;
         }
+
+        /* ===== 标题栏 + tab栏 ===== */
+        .app-title-bar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 6px 12px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            -webkit-app-region: drag;
+        }
+        .app-title-text { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+        .app-title-btns { display: flex; gap: 6px; -webkit-app-region: no-drag; }
+        .app-title-btn {
+            width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+            border: none; background: transparent; border-radius: 4px; cursor: pointer;
+            color: var(--text-tertiary); transition: all 0.15s; padding: 0;
+        }
+        .app-title-btn:hover { background: var(--bg-tertiary); color: var(--text-secondary); }
+        .app-title-btn.close:hover { background: rgba(239,68,68,0.2); color: var(--c-ipv6-warp); }
+        .app-title-btn svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 
         * {
             margin: 0;
@@ -88,41 +115,28 @@
         /* Tab Bar */
         .tab-bar {
             display: flex;
+            background: var(--bg-secondary);
             border-bottom: 1px solid var(--border);
-            background: var(--bg-primary);
-            padding: 0 20px;
+            padding: 0 8px;
         }
 
         .tab-btn {
-            padding: 14px 0;
-            margin-right: 24px;
-            text-align: center;
-            font-size: 13px;
-            font-weight: 600;
+            padding: 10px 16px;
+            font-size: 12px;
             color: var(--text-tertiary);
+            background: transparent;
             border: none;
-            background: none;
             cursor: pointer;
             position: relative;
-            transition: color 0.15s;
-            outline: none;
-            letter-spacing: 0.3px;
+            transition: color 0.2s;
         }
 
-        .tab-btn:last-child {
-            margin-right: 0;
-        }
-
-        .tab-btn.active {
-            color: var(--text-primary);
-        }
-
+        .tab-btn:hover { color: var(--text-secondary); }
+        .tab-btn.active { color: var(--text-primary); }
         .tab-btn.active::after {
             content: '';
             position: absolute;
-            bottom: -1px;
-            left: 0;
-            right: 0;
+            bottom: 0; left: 8px; right: 8px;
             height: 2px;
             background: var(--accent);
             border-radius: 1px;
@@ -139,6 +153,91 @@
         .tab-content.active {
             display: flex;
         }
+
+        /* ===== 共享组件 ===== */
+        .btn {
+            padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
+            background: var(--bg-tertiary); color: var(--text-primary); font-size: 12px;
+            cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 4px;
+        }
+        .btn:hover { background: var(--bg-secondary); border-color: var(--accent); }
+        .btn-sm { padding: 4px 10px; font-size: 11px; }
+        .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); }
+        .btn-danger { color: var(--c-ipv6-warp); border-color: rgba(239,68,68,0.3); }
+        .btn-danger:hover { background: rgba(239,68,68,0.1); }
+
+        .search-input {
+            flex: 1; min-width: 120px; padding: 6px 10px;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 6px; color: var(--text-primary); font-size: 12px; outline: none;
+        }
+        .search-input:focus { border-color: var(--accent); }
+        .search-input::placeholder { color: var(--text-tertiary); }
+
+        .empty-hint {
+            text-align: center; color: var(--text-tertiary);
+            padding: 24px 12px; font-size: 12px;
+        }
+
+        .loading-spinner {
+            width: 32px; height: 32px;
+            border: 3px solid var(--bg-tertiary);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Toast 提示 */
+        .toast {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            padding: 8px 16px; border-radius: 6px; font-size: 12px; z-index: 9999;
+            background: var(--bg-tertiary); color: var(--text-primary);
+            border: 1px solid var(--border); box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .toast.show { opacity: 1; }
+        .toast.error { border-color: var(--c-ipv6-warp); }
+        .toast.success { border-color: var(--c-ipv6); }
+
+        /* 分页栏 */
+        .pagination-bar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 12px; background: var(--bg-secondary);
+            border-top: 1px solid var(--border); font-size: 11px; color: var(--text-tertiary);
+        }
+        .pagination-bar .page-size-select {
+            background: var(--bg-tertiary); color: var(--text-primary);
+            border: 1px solid var(--border); border-radius: 4px;
+            padding: 2px 6px; font-size: 11px;
+        }
+        .pagination-bar .page-nav { display: flex; gap: 4px; align-items: center; }
+        .pagination-bar .page-btn {
+            min-width: 24px; height: 24px; padding: 0 6px;
+            background: var(--bg-tertiary); border: 1px solid var(--border);
+            border-radius: 4px; color: var(--text-secondary); cursor: pointer;
+            font-size: 11px; display: flex; align-items: center; justify-content: center;
+        }
+        .pagination-bar .page-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        .pagination-bar .page-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+        .pagination-bar .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .pagination-bar .page-ellipsis { color: var(--text-tertiary); padding: 0 4px; }
+
+        /* 流量子视图切换 */
+        .traffic-subview-bar {
+            display: flex; gap: 4px; padding: 8px 12px;
+            background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+        }
+        .subview-btn {
+            padding: 6px 12px; font-size: 12px;
+            background: transparent; border: 1px solid var(--border);
+            border-radius: 6px; color: var(--text-secondary); cursor: pointer;
+            transition: all 0.15s;
+        }
+        .subview-btn:hover { color: var(--text-primary); }
+        .subview-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+        .traffic-subview { display: none; flex: 1; overflow: hidden; flex-direction: column; }
+        .traffic-subview.active { display: flex; }
 
         /* Status Page */
         .status-page {
@@ -259,15 +358,6 @@
             fill: none;
             stroke-linecap: round;
             stroke-linejoin: round;
-        }
-
-        .status-indicator.running .status-icon svg {
-            animation: iconSpin 2s linear infinite;
-        }
-
-        @keyframes iconSpin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
         }
 
         /* Status Text */
@@ -765,19 +855,6 @@
     </style>
 </head>
 <body>
-    <!-- Title Bar -->
-    <div class="title-bar">
-        <div class="title-bar-text">CampusAuth</div>
-        <div class="title-bar-btns">
-            <button class="title-bar-btn" onclick="minimizeWindow()" title="最小化">
-                <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            </button>
-            <button class="title-bar-btn close" onclick="closeWindow()" title="关闭">
-                <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-        </div>
-    </div>
-
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay">
         <div class="loading-spinner"></div>
@@ -785,10 +862,25 @@
     </div>
 
     <div class="container">
+        <!-- 标题栏 -->
+        <div class="app-title-bar">
+            <span class="app-title-text">CampusAuth</span>
+            <div class="app-title-btns">
+                <button class="app-title-btn" onclick="minimizeWindow()" title="最小化">
+                    <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+                <button class="app-title-btn close" onclick="closeWindow()" title="关闭">
+                    <svg viewBox="0 0 24 24"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+                </button>
+            </div>
+        </div>
+
         <!-- Tab Bar -->
         <div class="tab-bar">
-            <button class="tab-btn active" onclick="switchTab('status')">连接</button>
-            <button class="tab-btn" onclick="switchTab('settings')">设置</button>
+            <button class="tab-btn active" onclick="switchTab('status', event)">连接</button>
+            <button class="tab-btn" onclick="switchTab('settings', event)">设置</button>
+            <button class="tab-btn" onclick="switchTab('warp', event)">WARP排除</button>
+            <button class="tab-btn" onclick="switchTab('traffic', event)">流量</button>
         </div>
 
         <!-- Status Tab -->
@@ -918,6 +1010,16 @@
                 </div>
             </div>
         </div>
+
+        <!-- WARP排除 Tab（Task 6 填充）-->
+        <div class="tab-content" id="tab-warp">
+            <div class="empty-hint">WARP排除（待实现）</div>
+        </div>
+
+        <!-- 流量 Tab（Task 7 填充）-->
+        <div class="tab-content" id="tab-traffic">
+            <div class="empty-hint">流量（待实现）</div>
+        </div>
     </div>
 
     <!-- Alert -->
@@ -934,19 +1036,29 @@
 
     <script>
         // ===== Tab Switching =====
-        function switchTab(name) {
+        function switchTab(name, event) {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             document.getElementById('tab-' + name).classList.add('active');
-            event.target.classList.add('active');
-        }
+            if (event && event.target) {
+                event.target.classList.add('active');
+            } else {
+                // 通过 evaluate_js 调用时无 event，按 name 激活按钮
+                document.querySelector(`.tab-btn[onclick*="${name}"]`)?.classList.add('active');
+            }
 
-        function switchToTab(name) {
-            const tabs = document.querySelectorAll('.tab-btn');
-            const contents = document.querySelectorAll('.tab-content');
-            const idx = name === 'settings' ? 1 : 0;
-            tabs.forEach((b, i) => b.classList.toggle('active', i === idx));
-            contents.forEach((c, i) => c.classList.toggle('active', i === idx));
+            // 流量tab特殊处理（TrafficTab 在 Task 7 中创建，此处用 typeof 保护）
+            if (name === 'traffic') {
+                if (typeof TrafficTab !== 'undefined') {
+                    TrafficTab.showSubview(TrafficTab.subview);
+                    TrafficTab.startAutoRefresh();
+                }
+            } else {
+                if (typeof TrafficTab !== 'undefined') {
+                    TrafficTab.stopAutoRefresh();
+                    TrafficTab.pauseCanvas();
+                }
+            }
         }
 
         // ===== Initialization =====

@@ -12,6 +12,7 @@ warp_exclusion_config.json
 
 # 临时文件
 *.log
+*.log.*
 p.txt
 test_register_result.txt
 
@@ -54,6 +55,7 @@ WiFiAutoAuth.spec
 .trae/
 .vscode/
 .idea/
+.workbuddy/
 
 # 系统文件
 Thumbs.db

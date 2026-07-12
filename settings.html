@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,11 +14,11 @@
             --bg-secondary: #1A1A1A;
             --bg-tertiary: #262626;
             --accent: #F68320;
-            --accent-dim: rgba(246,131,32,0.15);
+            --accent-dim: rgba(246, 131, 32, 0.15);
             --text-primary: #FFFFFF;
             --text-secondary: #A3A3A3;
             --text-tertiary: #737373;
-            --border: rgba(255,255,255,0.08);
+            --border: rgba(255, 255, 255, 0.08);
             /* 兼容旧样式：保留 --success/--error 别名 */
             --success: #22C55E;
             --error: #EF4444;
@@ -32,22 +33,61 @@
 
         /* ===== 标题栏 + tab栏 ===== */
         .app-title-bar {
-            display: flex; align-items: center; justify-content: space-between;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             padding: 6px 12px;
             background: var(--bg-secondary);
             border-bottom: 1px solid var(--border);
             -webkit-app-region: drag;
         }
-        .app-title-text { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
-        .app-title-btns { display: flex; gap: 6px; -webkit-app-region: no-drag; }
-        .app-title-btn {
-            width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
-            border: none; background: transparent; border-radius: 4px; cursor: pointer;
-            color: var(--text-tertiary); transition: all 0.15s; padding: 0;
+
+        .app-title-text {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
         }
-        .app-title-btn:hover { background: var(--bg-tertiary); color: var(--text-secondary); }
-        .app-title-btn.close:hover { background: rgba(239,68,68,0.2); color: var(--c-ipv6-warp); }
-        .app-title-btn svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
+        .app-title-btns {
+            display: flex;
+            gap: 6px;
+            -webkit-app-region: no-drag;
+        }
+
+        .app-title-btn {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: transparent;
+            border-radius: 4px;
+            cursor: pointer;
+            color: var(--text-tertiary);
+            transition: all 0.15s;
+            padding: 0;
+        }
+
+        .app-title-btn:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .app-title-btn.close:hover {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--c-ipv6-warp);
+        }
+
+        .app-title-btn svg {
+            width: 14px;
+            height: 14px;
+            stroke: currentColor;
+            stroke-width: 2;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
 
         * {
             margin: 0;
@@ -62,10 +102,17 @@
             overflow: hidden;
             width: 100vw;
             height: 100vh;
-            user-select: text;  /* 全局允许文字选中 */
+            user-select: text;
+            /* 全局允许文字选中 */
         }
+
         /* 按钮和拖动区域不允许选中文字 */
-        button, .app-title-bar, .tab-bar, .network-detail-header { user-select: none; }
+        button,
+        .app-title-bar,
+        .tab-bar,
+        .network-detail-header {
+            user-select: none;
+        }
 
         /* Loading Overlay */
         .loading-overlay {
@@ -104,8 +151,24 @@
         }
 
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
+
+        /* ===== 窗口边缘调整大小手柄（frameless 窗口）===== */
+        .resize-handle {
+            position: fixed;
+            z-index: 9998;
+        }
+        .resize-handle.top    { top: 0; left: 6px; right: 6px; height: 4px; cursor: ns-resize; }
+        .resize-handle.bottom { bottom: 0; left: 6px; right: 6px; height: 4px; cursor: ns-resize; }
+        .resize-handle.left   { left: 0; top: 6px; bottom: 6px; width: 4px; cursor: ew-resize; }
+        .resize-handle.right  { right: 0; top: 6px; bottom: 6px; width: 4px; cursor: ew-resize; }
+        .resize-handle.tl { top: 0; left: 0; width: 8px; height: 8px; cursor: nwse-resize; }
+        .resize-handle.tr { top: 0; right: 0; width: 8px; height: 8px; cursor: nesw-resize; }
+        .resize-handle.bl { bottom: 0; left: 0; width: 8px; height: 8px; cursor: nesw-resize; }
+        .resize-handle.br { bottom: 0; right: 0; width: 8px; height: 8px; cursor: nwse-resize; }
 
         /* Container */
         .container {
@@ -121,7 +184,8 @@
             background: var(--bg-secondary);
             border-bottom: 1px solid var(--border);
             padding: 0 8px;
-            -webkit-app-region: drag;  /* tab栏可拖动 */
+            -webkit-app-region: drag;
+            /* tab栏可拖动 */
             user-select: none;
         }
 
@@ -133,16 +197,25 @@
             border: none;
             cursor: pointer;
             position: relative;
-            -webkit-app-region: no-drag;  /* tab按钮本身不可拖动 */
+            -webkit-app-region: no-drag;
+            /* tab按钮本身不可拖动 */
             transition: color 0.2s;
         }
 
-        .tab-btn:hover { color: var(--text-secondary); }
-        .tab-btn.active { color: var(--text-primary); }
+        .tab-btn:hover {
+            color: var(--text-secondary);
+        }
+
+        .tab-btn.active {
+            color: var(--text-primary);
+        }
+
         .tab-btn.active::after {
             content: '';
             position: absolute;
-            bottom: 0; left: 8px; right: 8px;
+            bottom: 0;
+            left: 8px;
+            right: 8px;
             height: 2px;
             background: var(--accent);
             border-radius: 1px;
@@ -151,12 +224,16 @@
         /* Tab Content */
         .tab-content {
             flex: 1;
-            min-height: 0;  /* 允许flex子项收缩，使 overflow-y:auto 生效 */
+            min-height: 0;
+            /* 允许flex子项收缩，使 overflow-y:auto 生效 */
             display: none;
             flex-direction: column;
-            overflow-y: auto;  /* 各tab内容可滚动 */
-            -webkit-app-region: no-drag;  /* tab内容区域不可拖动 */
-            user-select: text;  /* 允许文字选中 */
+            overflow-y: auto;
+            /* 各tab内容可滚动 */
+            -webkit-app-region: no-drag;
+            /* tab内容区域不可拖动 */
+            user-select: text;
+            /* 允许文字选中 */
         }
 
         .tab-content.active {
@@ -165,88 +242,219 @@
 
         /* ===== 共享组件 ===== */
         .btn {
-            padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
-            background: var(--bg-tertiary); color: var(--text-primary); font-size: 12px;
-            cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 4px;
+            padding: 6px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
         }
-        .btn:hover { background: var(--bg-secondary); border-color: var(--accent); }
-        .btn-sm { padding: 4px 10px; font-size: 11px; }
-        .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); }
-        .btn-danger { color: var(--c-ipv6-warp); border-color: rgba(239,68,68,0.3); }
-        .btn-danger:hover { background: rgba(239,68,68,0.1); }
+
+        .btn:hover {
+            background: var(--bg-secondary);
+            border-color: var(--accent);
+        }
+
+        .btn-sm {
+            padding: 4px 10px;
+            font-size: 11px;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #000;
+            border-color: var(--accent);
+        }
+
+        .btn-danger {
+            color: var(--c-ipv6-warp);
+            border-color: rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-danger:hover {
+            background: rgba(239, 68, 68, 0.1);
+        }
 
         .search-input {
-            flex: 1; min-width: 120px; padding: 6px 10px;
-            background: var(--bg-secondary); border: 1px solid var(--border);
-            border-radius: 6px; color: var(--text-primary); font-size: 12px; outline: none;
+            flex: 1;
+            min-width: 120px;
+            padding: 6px 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 12px;
+            outline: none;
         }
-        .search-input:focus { border-color: var(--accent); }
-        .search-input::placeholder { color: var(--text-tertiary); }
+
+        .search-input:focus {
+            border-color: var(--accent);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-tertiary);
+        }
 
         .empty-hint {
-            text-align: center; color: var(--text-tertiary);
-            padding: 24px 12px; font-size: 12px;
+            text-align: center;
+            color: var(--text-tertiary);
+            padding: 24px 12px;
+            font-size: 12px;
         }
 
         .loading-spinner {
-            width: 32px; height: 32px;
+            width: 32px;
+            height: 32px;
             border: 3px solid var(--bg-tertiary);
             border-top-color: var(--accent);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
 
         /* Toast 提示 */
         .toast {
-            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-            padding: 8px 16px; border-radius: 6px; font-size: 12px; z-index: 9999;
-            background: var(--bg-tertiary); color: var(--text-primary);
-            border: 1px solid var(--border); box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            opacity: 0; transition: opacity 0.3s;
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            z-index: 9999;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            opacity: 0;
+            transition: opacity 0.3s;
         }
-        .toast.show { opacity: 1; }
-        .toast.error { border-color: var(--c-ipv6-warp); }
-        .toast.success { border-color: var(--c-ipv6); }
+
+        .toast.show {
+            opacity: 1;
+        }
+
+        .toast.error {
+            border-color: var(--c-ipv6-warp);
+        }
+
+        .toast.success {
+            border-color: var(--c-ipv6);
+        }
 
         /* 分页栏 */
         .pagination-bar {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 8px 12px; background: var(--bg-secondary);
-            border-top: 1px solid var(--border); font-size: 11px; color: var(--text-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+            font-size: 11px;
+            color: var(--text-tertiary);
         }
+
         .pagination-bar .page-size-select {
-            background: var(--bg-tertiary); color: var(--text-primary);
-            border: 1px solid var(--border); border-radius: 4px;
-            padding: 2px 6px; font-size: 11px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 11px;
         }
-        .pagination-bar .page-nav { display: flex; gap: 4px; align-items: center; }
+
+        .pagination-bar .page-nav {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+
         .pagination-bar .page-btn {
-            min-width: 24px; height: 24px; padding: 0 6px;
-            background: var(--bg-tertiary); border: 1px solid var(--border);
-            border-radius: 4px; color: var(--text-secondary); cursor: pointer;
-            font-size: 11px; display: flex; align-items: center; justify-content: center;
+            min-width: 24px;
+            height: 24px;
+            padding: 0 6px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-        .pagination-bar .page-btn:hover { border-color: var(--accent); color: var(--text-primary); }
-        .pagination-bar .page-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
-        .pagination-bar .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-        .pagination-bar .page-ellipsis { color: var(--text-tertiary); padding: 0 4px; }
+
+        .pagination-bar .page-btn:hover {
+            border-color: var(--accent);
+            color: var(--text-primary);
+        }
+
+        .pagination-bar .page-btn.active {
+            background: var(--accent);
+            color: #000;
+            border-color: var(--accent);
+        }
+
+        .pagination-bar .page-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .pagination-bar .page-ellipsis {
+            color: var(--text-tertiary);
+            padding: 0 4px;
+        }
 
         /* 流量子视图切换 */
         .traffic-subview-bar {
-            display: flex; gap: 4px; padding: 8px 12px;
-            background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: 4px;
+            padding: 8px 12px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
         }
+
         .subview-btn {
-            padding: 6px 12px; font-size: 12px;
-            background: transparent; border: 1px solid var(--border);
-            border-radius: 6px; color: var(--text-secondary); cursor: pointer;
+            padding: 6px 12px;
+            font-size: 12px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            cursor: pointer;
             transition: all 0.15s;
         }
-        .subview-btn:hover { color: var(--text-primary); }
-        .subview-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
-        .traffic-subview { display: none; flex: 1; overflow: hidden; flex-direction: column; }
-        .traffic-subview.active { display: flex; }
+
+        .subview-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .subview-btn.active {
+            background: var(--accent);
+            color: #000;
+            border-color: var(--accent);
+        }
+
+        .traffic-subview {
+            display: none;
+            flex: 1;
+            overflow: hidden;
+            flex-direction: column;
+        }
+
+        .traffic-subview.active {
+            display: flex;
+        }
 
         /* ===== 网络详情卡（主页tab）===== */
         .network-detail {
@@ -255,7 +463,9 @@
             border: 1px solid var(--border);
             border-radius: 10px;
             overflow: hidden;
+            flex-shrink: 0;
         }
+
         .network-detail-header {
             display: flex;
             align-items: center;
@@ -265,25 +475,38 @@
             user-select: none;
             transition: background 0.15s;
         }
-        .network-detail-header:hover { background: var(--bg-tertiary); }
+
+        .network-detail-header:hover {
+            background: var(--bg-tertiary);
+        }
+
         .network-detail-title {
             font-size: 12px;
             font-weight: 600;
             color: var(--text-secondary);
             text-transform: uppercase;
         }
+
         .network-detail-arrow {
             font-size: 10px;
             color: var(--text-tertiary);
             transition: transform 0.2s;
         }
-        .network-detail.collapsed .network-detail-arrow { transform: rotate(-90deg); }
 
-        /* 折叠动画：展开时无高度限制，折叠时 max-height:0 */
+        .network-detail.collapsed .network-detail-arrow {
+            transform: rotate(-90deg);
+        }
+
+        /* 折叠动画：展开时 max-height 设为足够大的具体值（而非 none），
+           确保 max-height 过渡可在两个长度值之间正常插值，
+           避免动态填入 grid 内容后下方被遮蔽 */
         .network-detail-body {
             transition: max-height 0.3s ease, padding 0.3s ease;
-            padding: 8px 14px 16px;  /* 顶部8px与header分隔，底部16px防止网格被截断 */
+            padding: 8px 14px 16px;
+            max-height: 500px;
+            /* 顶部8px与header分隔，底部16px防止网格被截断 */
         }
+
         .network-detail.collapsed .network-detail-body {
             max-height: 0 !important;
             padding: 0 14px 0;
@@ -298,26 +521,39 @@
             /* 网格项高度自适应内容，不被父容器截断 */
             align-content: start;
         }
+
         .network-detail-item {
             padding: 8px 10px;
             background: var(--bg-tertiary);
             border-radius: 6px;
         }
+
         .network-detail-label {
             font-size: 10px;
             color: var(--text-tertiary);
             text-transform: uppercase;
             margin-bottom: 2px;
         }
+
         .network-detail-value {
             font-size: 12px;
             color: var(--text-primary);
             word-break: break-all;
             font-family: 'Consolas', 'Monaco', monospace;
         }
-        .network-detail-value.empty { color: var(--text-tertiary); }
-        .network-detail-value.success { color: var(--success); }
-        .network-detail-value.warning { color: var(--warning); }
+
+        .network-detail-value.empty {
+            color: var(--text-tertiary);
+        }
+
+        .network-detail-value.success {
+            color: var(--success);
+        }
+
+        .network-detail-value.warning {
+            color: var(--warning);
+        }
+
         /* 加载中提示 */
         .network-detail-loading {
             text-align: center;
@@ -329,296 +565,994 @@
 
         /* 响应式适配（窄窗口）*/
         @media (max-width: 600px) {
-            .network-detail-grid { grid-template-columns: repeat(2, 1fr); }
+            .network-detail-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
 
         /* ===== 流量tab ===== */
         /* 统计卡片 - 6 个（列表视图）*/
         #tab-traffic .stats-grid {
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 10px;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            padding: 10px;
         }
+
         #tab-traffic .stat-card {
-            background: var(--bg-secondary); border: 1px solid var(--border);
-            border-radius: 8px; padding: 8px 6px; text-align: center;
-            transition: border-color 0.2s; position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 6px;
+            text-align: center;
+            transition: border-color 0.2s;
+            position: relative;
         }
-        #tab-traffic .stat-card:hover { border-color: var(--accent); }
-        #tab-traffic .stat-card .stat-count { font-size: 20px; font-weight: 700; line-height: 1.2; }
-        #tab-traffic .stat-card .stat-label { font-size: 9px; color: var(--text-tertiary); margin-top: 2px; }
-        #tab-traffic .stat-card .stat-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 3px; vertical-align: middle; }
-        #tab-traffic .stat-card.c-ipv4 .stat-count { color: var(--c-ipv4); }
-        #tab-traffic .stat-card.c-ipv4 .stat-dot { background: var(--c-ipv4); }
-        #tab-traffic .stat-card.c-ipv6 .stat-count { color: var(--c-ipv6); }
-        #tab-traffic .stat-card.c-ipv6 .stat-dot { background: var(--c-ipv6); }
-        #tab-traffic .stat-card.c-ipv4-warp .stat-count { color: var(--c-ipv4-warp); }
-        #tab-traffic .stat-card.c-ipv4-warp .stat-dot { background: var(--c-ipv4-warp); }
-        #tab-traffic .stat-card.c-ipv4-warp-ipv6 .stat-count { color: var(--c-ipv4-warp-ipv6); }
-        #tab-traffic .stat-card.c-ipv4-warp-ipv6 .stat-dot { background: var(--c-ipv4-warp-ipv6); }
-        #tab-traffic .stat-card.c-ipv6-warp .stat-count { color: var(--c-ipv6-warp); }
-        #tab-traffic .stat-card.c-ipv6-warp .stat-dot { background: var(--c-ipv6-warp); }
-        #tab-traffic .stat-card.c-ipv6-warp-ipv4 .stat-count { color: var(--c-ipv6-warp-ipv4); }
-        #tab-traffic .stat-card.c-ipv6-warp-ipv4 .stat-dot { background: var(--c-ipv6-warp-ipv4); }
+
+        #tab-traffic .stat-card:hover {
+            border-color: var(--accent);
+        }
+
+        #tab-traffic .stat-card .stat-count {
+            font-size: 20px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        #tab-traffic .stat-card .stat-label {
+            font-size: 9px;
+            color: var(--text-tertiary);
+            margin-top: 2px;
+        }
+
+        #tab-traffic .stat-card .stat-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 3px;
+            vertical-align: middle;
+        }
+
+        #tab-traffic .stat-card.c-ipv4 .stat-count {
+            color: var(--c-ipv4);
+        }
+
+        #tab-traffic .stat-card.c-ipv4 .stat-dot {
+            background: var(--c-ipv4);
+        }
+
+        #tab-traffic .stat-card.c-ipv6 .stat-count {
+            color: var(--c-ipv6);
+        }
+
+        #tab-traffic .stat-card.c-ipv6 .stat-dot {
+            background: var(--c-ipv6);
+        }
+
+        #tab-traffic .stat-card.c-ipv4-warp .stat-count {
+            color: var(--c-ipv4-warp);
+        }
+
+        #tab-traffic .stat-card.c-ipv4-warp .stat-dot {
+            background: var(--c-ipv4-warp);
+        }
+
+        #tab-traffic .stat-card.c-ipv4-warp-ipv6 .stat-count {
+            color: var(--c-ipv4-warp-ipv6);
+        }
+
+        #tab-traffic .stat-card.c-ipv4-warp-ipv6 .stat-dot {
+            background: var(--c-ipv4-warp-ipv6);
+        }
+
+        #tab-traffic .stat-card.c-ipv6-warp .stat-count {
+            color: var(--c-ipv6-warp);
+        }
+
+        #tab-traffic .stat-card.c-ipv6-warp .stat-dot {
+            background: var(--c-ipv6-warp);
+        }
+
+        #tab-traffic .stat-card.c-ipv6-warp-ipv4 .stat-count {
+            color: var(--c-ipv6-warp-ipv4);
+        }
+
+        #tab-traffic .stat-card.c-ipv6-warp-ipv4 .stat-dot {
+            background: var(--c-ipv6-warp-ipv4);
+        }
 
         /* 加载条（列表视图）*/
-        #tab-traffic .loading-bar { height: 2px; background: var(--bg-tertiary); overflow: hidden; display: none; }
-        #tab-traffic .loading-bar.active { display: block; }
+        #tab-traffic .loading-bar {
+            height: 2px;
+            background: var(--bg-tertiary);
+            overflow: hidden;
+            display: none;
+        }
+
+        #tab-traffic .loading-bar.active {
+            display: block;
+        }
+
         #tab-traffic .loading-bar::after {
-            content: ''; display: block; width: 30%; height: 100%; background: var(--accent);
+            content: '';
+            display: block;
+            width: 30%;
+            height: 100%;
+            background: var(--accent);
             animation: loading-slide 1s ease-in-out infinite;
         }
-        @keyframes loading-slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+
+        @keyframes loading-slide {
+            0% {
+                margin-left: -30%;
+            }
+
+            100% {
+                margin-left: 100%;
+            }
+        }
 
         /* 工具栏 + 开关（列表视图）*/
-        #tab-traffic .toolbar { display: flex; align-items: center; gap: 8px; padding: 0 12px 8px; flex-wrap: wrap; }
-        #tab-traffic .auto-refresh-label { font-size: 11px; color: var(--text-tertiary); display: flex; align-items: center; gap: 4px; }
-        #tab-traffic .toggle-switch { position: relative; width: 32px; height: 18px; cursor: pointer; }
-        #tab-traffic .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        #tab-traffic .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 12px 8px;
+            flex-wrap: wrap;
+        }
+
+        #tab-traffic .auto-refresh-label {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            margin-left: auto;
+            flex: 0 0 110px;
+            height: 30px;
+        }
+
+        /* 搜索框：限制最大宽度，固定高度与刷新按钮一致 */
+        #tab-traffic .toolbar .search-input {
+            max-width: 450px;
+            height: 30px;
+        }
+
+        /* 刷新按钮：与自动刷新标签大小、字体一致，内容水平居中对齐 */
+        #tab-traffic .toolbar .btn-sm {
+            flex: 0 0 110px;
+            height: 30px;
+            padding: 0;
+            font-size: 11px;
+            font-weight: normal;
+            letter-spacing: 0;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #tab-traffic .toggle-switch {
+            position: relative;
+            width: 32px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        #tab-traffic .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
         #tab-traffic .toggle-slider {
-            position: absolute; inset: 0; background: var(--bg-tertiary);
-            border-radius: 9px; transition: 0.2s;
+            position: absolute;
+            inset: 0;
+            background: var(--bg-tertiary);
+            border-radius: 9px;
+            transition: 0.2s;
         }
+
         #tab-traffic .toggle-slider::before {
-            content: ''; position: absolute; width: 14px; height: 14px;
-            left: 2px; top: 2px; background: var(--text-tertiary);
-            border-radius: 50%; transition: 0.2s;
+            content: '';
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            left: 2px;
+            top: 2px;
+            background: var(--text-tertiary);
+            border-radius: 50%;
+            transition: 0.2s;
         }
-        #tab-traffic .toggle-switch input:checked + .toggle-slider { background: var(--accent); }
-        #tab-traffic .toggle-switch input:checked + .toggle-slider::before { transform: translateX(14px); background: #000; }
+
+        #tab-traffic .toggle-switch input:checked+.toggle-slider {
+            background: var(--accent);
+        }
+
+        #tab-traffic .toggle-switch input:checked+.toggle-slider::before {
+            transform: translateX(14px);
+            background: #000;
+        }
 
         /* badge 颜色（两子视图共用）*/
-        #tab-traffic .badge-ipv4 { background: rgba(59,130,246,0.15); color: var(--c-ipv4); }
-        #tab-traffic .badge-ipv6 { background: rgba(34,197,94,0.15); color: var(--c-ipv6); }
-        #tab-traffic .badge-ipv4-warp { background: rgba(245,158,11,0.15); color: var(--c-ipv4-warp); }
-        #tab-traffic .badge-ipv4-warp-ipv6 { background: rgba(234,179,8,0.15); color: var(--c-ipv4-warp-ipv6); }
-        #tab-traffic .badge-ipv6-warp { background: rgba(239,68,68,0.15); color: var(--c-ipv6-warp); }
-        #tab-traffic .badge-ipv6-warp-ipv4 { background: rgba(168,85,247,0.15); color: var(--c-ipv6-warp-ipv4); }
+        #tab-traffic .badge-ipv4 {
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--c-ipv4);
+        }
+
+        #tab-traffic .badge-ipv6 {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--c-ipv6);
+        }
+
+        #tab-traffic .badge-ipv4-warp {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--c-ipv4-warp);
+        }
+
+        #tab-traffic .badge-ipv4-warp-ipv6 {
+            background: rgba(234, 179, 8, 0.15);
+            color: var(--c-ipv4-warp-ipv6);
+        }
+
+        #tab-traffic .badge-ipv6-warp {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--c-ipv6-warp);
+        }
+
+        #tab-traffic .badge-ipv6-warp-ipv4 {
+            background: rgba(168, 85, 247, 0.15);
+            color: var(--c-ipv6-warp-ipv4);
+        }
 
         /* 连接列表 - 列表视图 */
-        #traffic-list-view .conn-list { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
-        #traffic-list-view .conn-group { margin-bottom: 8px; }
+        #traffic-list-view .conn-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 12px 12px;
+        }
+
+        #traffic-list-view .conn-group {
+            margin-bottom: 8px;
+        }
+
         #traffic-list-view .conn-group-header {
-            font-size: 11px; font-weight: 600; color: var(--text-secondary);
-            padding: 4px 8px; background: var(--bg-secondary); border-radius: 6px;
-            margin-bottom: 4px; display: flex; align-items: center; gap: 6px;
-            position: sticky; top: 0; z-index: 10;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            padding: 4px 8px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
         }
-        #traffic-list-view .conn-group-count { font-size: 10px; color: var(--text-tertiary); }
+
+        #traffic-list-view .conn-group-count {
+            font-size: 10px;
+            color: var(--text-tertiary);
+        }
+
         #traffic-list-view .conn-item {
-            display: flex; align-items: center; gap: 8px;
-            padding: 6px 10px; border-radius: 6px; font-size: 12px; transition: background 0.1s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            transition: background 0.1s;
         }
-        #traffic-list-view .conn-item:hover { background: var(--bg-secondary); }
+
+        #traffic-list-view .conn-item:hover {
+            background: var(--bg-secondary);
+        }
+
         #traffic-list-view .conn-process {
-            min-width: 80px; max-width: 120px; font-weight: 500;
-            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            min-width: 80px;
+            max-width: 120px;
+            font-weight: 500;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
-        #traffic-list-view .conn-host { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-        #traffic-list-view .conn-hostname { font-size: 12px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        #traffic-list-view .conn-ip { font-size: 10px; color: var(--text-tertiary); font-family: 'Consolas', 'Monaco', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        #traffic-list-view .conn-badge { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; white-space: nowrap; }
-        #tab-traffic .warp-info-text { font-size: 10px; color: var(--text-tertiary); margin-left: 8px; }
+
+        #traffic-list-view .conn-host {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            min-width: 0;
+        }
+
+        #traffic-list-view .conn-hostname {
+            font-size: 12px;
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        #traffic-list-view .conn-ip {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            font-family: 'Consolas', 'Monaco', monospace;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        #traffic-list-view .conn-badge {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        #tab-traffic .warp-info-text {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            margin-left: 8px;
+        }
 
         /* 画布动画视图 */
-        #traffic-canvas-view .canvas-wrap { flex: 1; position: relative; overflow: hidden; min-height: 0; }
-        #traffic-canvas-view .flow-canvas { display: block; width: 100%; height: 100%; }
+        #traffic-canvas-view .canvas-wrap {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        #traffic-canvas-view .flow-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
         #traffic-canvas-view .top-stats {
-            position: absolute; top: 10px; left: 10px; right: 10px;
-            display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; pointer-events: none;
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            display: flex;
+            gap: 6px;
+            justify-content: center;
+            flex-wrap: wrap;
+            pointer-events: none;
         }
+
         #traffic-canvas-view .stat-pill {
-            display: flex; align-items: center; gap: 5px;
-            padding: 4px 10px; border-radius: 16px;
-            background: rgba(26,26,26,0.85); backdrop-filter: blur(8px);
-            border: 1px solid var(--border); font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            border-radius: 16px;
+            background: rgba(26, 26, 26, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--border);
+            font-size: 11px;
         }
-        #traffic-canvas-view .stat-pill .stat-dot { width: 7px; height: 7px; border-radius: 50%; }
-        #traffic-canvas-view .stat-pill .stat-num { font-weight: 700; font-size: 13px; }
-        #traffic-canvas-view .stat-pill .stat-label { color: var(--text-tertiary); font-size: 9px; }
+
+        #traffic-canvas-view .stat-pill .stat-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+        }
+
+        #traffic-canvas-view .stat-pill .stat-num {
+            font-weight: 700;
+            font-size: 13px;
+        }
+
+        #traffic-canvas-view .stat-pill .stat-label {
+            color: var(--text-tertiary);
+            font-size: 9px;
+        }
 
         /* 画布视图底部面板 */
         #traffic-canvas-view .bottom-panel {
-            height: 300px; background: var(--bg-secondary);
-            border-top: 1px solid var(--border); display: flex; flex-direction: column;
+            height: 300px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
         }
+
         #traffic-canvas-view .panel-header {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 6px 12px; border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 12px;
+            border-bottom: 1px solid var(--border);
         }
-        #traffic-canvas-view .panel-header-left { display: flex; align-items: center; gap: 8px; }
-        #traffic-canvas-view .panel-title { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
-        #traffic-canvas-view .panel-controls { display: flex; align-items: center; gap: 8px; }
+
+        #traffic-canvas-view .panel-header-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #traffic-canvas-view .panel-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        #traffic-canvas-view .panel-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
         #traffic-canvas-view .search-box {
-            width: 130px; padding: 3px 8px; font-size: 11px;
-            background: var(--bg-tertiary); border: 1px solid var(--border);
-            border-radius: 4px; color: var(--text-primary); outline: none;
+            width: 130px;
+            padding: 3px 8px;
+            font-size: 11px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            outline: none;
         }
-        #traffic-canvas-view .search-box:focus { border-color: var(--accent); }
-        #traffic-canvas-view .search-box::placeholder { color: var(--text-tertiary); }
-        #traffic-canvas-view .auto-toggle { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-tertiary); }
+
+        #traffic-canvas-view .search-box:focus {
+            border-color: var(--accent);
+        }
+
+        #traffic-canvas-view .search-box::placeholder {
+            color: var(--text-tertiary);
+        }
+
+        #traffic-canvas-view .auto-toggle {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            color: var(--text-tertiary);
+        }
+
         /* 画布视图的 toggle-switch 比列表视图小 */
-        #traffic-canvas-view .toggle-switch { width: 28px; height: 16px; }
-        #traffic-canvas-view .toggle-slider { border-radius: 8px; }
-        #traffic-canvas-view .toggle-slider::before { width: 12px; height: 12px; }
-        #traffic-canvas-view .toggle-switch input:checked + .toggle-slider::before { transform: translateX(12px); }
+        #traffic-canvas-view .toggle-switch {
+            width: 28px;
+            height: 16px;
+        }
+
+        #traffic-canvas-view .toggle-slider {
+            border-radius: 8px;
+        }
+
+        #traffic-canvas-view .toggle-slider::before {
+            width: 12px;
+            height: 12px;
+        }
+
+        #traffic-canvas-view .toggle-switch input:checked+.toggle-slider::before {
+            transform: translateX(12px);
+        }
 
         /* 操作栏（选中连接时显示）*/
         #traffic-canvas-view .action-bar {
-            display: none; align-items: center; gap: 6px;
-            padding: 5px 12px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border);
+            display: none;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
         }
-        #traffic-canvas-view .action-bar.show { display: flex; }
-        #traffic-canvas-view .action-bar .selected-count { font-size: 11px; color: var(--text-secondary); margin-right: 4px; }
+
+        #traffic-canvas-view .action-bar.show {
+            display: flex;
+        }
+
+        #traffic-canvas-view .action-bar .selected-count {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-right: 4px;
+        }
+
         #traffic-canvas-view .btn-action {
-            padding: 3px 10px; font-size: 10px; font-weight: 500;
-            border: 1px solid var(--border); border-radius: 4px;
-            background: var(--bg-secondary); color: var(--text-primary);
-            cursor: pointer; transition: all 0.15s;
+            padding: 3px 10px;
+            font-size: 10px;
+            font-weight: 500;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.15s;
         }
-        #traffic-canvas-view .btn-action:hover { border-color: var(--accent); color: var(--accent); }
-        #traffic-canvas-view .btn-action.warp { border-color: rgba(168,85,247,0.4); }
-        #traffic-canvas-view .btn-action.warp:hover { color: #c084fc; border-color: #c084fc; }
-        #traffic-canvas-view .btn-action.cancel { border-color: rgba(239,68,68,0.4); color: var(--text-tertiary); }
-        #traffic-canvas-view .btn-action.cancel:hover { color: var(--c-ipv6-warp); border-color: var(--c-ipv6-warp); }
-        #traffic-canvas-view .conn-check { width: 13px; height: 13px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+
+        #traffic-canvas-view .btn-action:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        #traffic-canvas-view .btn-action.warp {
+            border-color: rgba(168, 85, 247, 0.4);
+        }
+
+        #traffic-canvas-view .btn-action.warp:hover {
+            color: #c084fc;
+            border-color: #c084fc;
+        }
+
+        #traffic-canvas-view .btn-action.cancel {
+            border-color: rgba(239, 68, 68, 0.4);
+            color: var(--text-tertiary);
+        }
+
+        #traffic-canvas-view .btn-action.cancel:hover {
+            color: var(--c-ipv6-warp);
+            border-color: var(--c-ipv6-warp);
+        }
+
+        #traffic-canvas-view .conn-check {
+            width: 13px;
+            height: 13px;
+            accent-color: var(--accent);
+            cursor: pointer;
+            flex-shrink: 0;
+        }
 
         /* 进程分组 + 连接列表（画布视图）*/
-        #traffic-canvas-view .proc-group { margin-bottom: 2px; }
+        #traffic-canvas-view .proc-group {
+            margin-bottom: 2px;
+        }
+
         #traffic-canvas-view .proc-group-header {
-            display: flex; align-items: center; gap: 6px;
-            padding: 4px 8px; background: rgba(38,38,38,0.6);
-            border-radius: 4px; cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            background: rgba(38, 38, 38, 0.6);
+            border-radius: 4px;
+            cursor: pointer;
         }
-        #traffic-canvas-view .proc-group-header:hover { background: var(--bg-tertiary); }
+
+        #traffic-canvas-view .proc-group-header:hover {
+            background: var(--bg-tertiary);
+        }
+
         #traffic-canvas-view .proc-group-header .collapse-icon {
-            width: 10px; height: 10px; color: var(--text-tertiary);
-            transition: transform 0.2s; flex-shrink: 0;
+            width: 10px;
+            height: 10px;
+            color: var(--text-tertiary);
+            transition: transform 0.2s;
+            flex-shrink: 0;
         }
-        #traffic-canvas-view .proc-group.collapsed .collapse-icon { transform: rotate(-90deg); }
-        #traffic-canvas-view .proc-group.collapsed .proc-group-body { display: none; }
-        #traffic-canvas-view .proc-name { font-weight: 600; font-size: 11px; color: var(--text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        #traffic-canvas-view .proc-count { font-size: 9px; color: var(--text-tertiary); background: var(--bg-primary); padding: 1px 6px; border-radius: 8px; }
-        #traffic-canvas-view .conn-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+
+        #traffic-canvas-view .proc-group.collapsed .collapse-icon {
+            transform: rotate(-90deg);
+        }
+
+        #traffic-canvas-view .proc-group.collapsed .proc-group-body {
+            display: none;
+        }
+
+        #traffic-canvas-view .proc-name {
+            font-weight: 600;
+            font-size: 11px;
+            color: var(--text-primary);
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        #traffic-canvas-view .proc-count {
+            font-size: 9px;
+            color: var(--text-tertiary);
+            background: var(--bg-primary);
+            padding: 1px 6px;
+            border-radius: 8px;
+        }
+
+        #traffic-canvas-view .conn-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px 8px;
+        }
+
         #traffic-canvas-view .conn-row {
-            display: flex; align-items: center; gap: 8px;
-            padding: 3px 8px 3px 28px; border-radius: 4px; font-size: 11px; transition: background 0.1s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 3px 8px 3px 28px;
+            border-radius: 4px;
+            font-size: 11px;
+            transition: background 0.1s;
         }
-        #traffic-canvas-view .conn-row:hover { background: var(--bg-tertiary); }
-        #traffic-canvas-view .conn-row.selected { background: rgba(246,131,32,0.1); }
-        #traffic-canvas-view .conn-row .conn-host { flex: 1; overflow: hidden; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-        #traffic-canvas-view .conn-row .conn-hostname { font-size: 11px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        #traffic-canvas-view .conn-row .conn-ip { color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'Consolas','Monaco',monospace; font-size: 9px; }
-        #traffic-canvas-view .conn-row .conn-badge { font-size: 9px; padding: 1px 6px; border-radius: 3px; font-weight: 600; white-space: nowrap; }
+
+        #traffic-canvas-view .conn-row:hover {
+            background: var(--bg-tertiary);
+        }
+
+        #traffic-canvas-view .conn-row.selected {
+            background: rgba(246, 131, 32, 0.1);
+        }
+
+        #traffic-canvas-view .conn-row .conn-host {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            min-width: 0;
+        }
+
+        #traffic-canvas-view .conn-row .conn-hostname {
+            font-size: 11px;
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        #traffic-canvas-view .conn-row .conn-ip {
+            color: var(--text-tertiary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 9px;
+        }
+
+        #traffic-canvas-view .conn-row .conn-badge {
+            font-size: 9px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
 
         /* ===== WARP排除tab ===== */
-        .warp-content { padding: 16px; overflow-y: auto; flex: 1; }
-        .section { margin-bottom: 20px; }
+        .warp-content {
+            padding: 16px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .section {
+            margin-bottom: 20px;
+        }
+
         .section-title {
-            font-size: 13px; font-weight: 600; color: var(--text-secondary);
-            margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
+
         .section-title .badge {
-            font-size: 11px; padding: 2px 8px; border-radius: 10px;
-            background: var(--bg-tertiary); color: var(--text-tertiary);
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: var(--bg-tertiary);
+            color: var(--text-tertiary);
         }
+
         .learn-card {
-            background: var(--bg-secondary); border: 1px solid var(--border);
-            border-radius: 10px; padding: 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
         }
-        .learn-status { font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; line-height: 1.6; }
-        .learn-status.active { color: var(--c-ipv6); }
-        .learn-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+        .learn-status {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            line-height: 1.6;
+        }
+
+        .learn-status.active {
+            color: var(--c-ipv6);
+        }
+
+        .learn-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
 
         /* WARP tab 内的按钮覆盖（避免被 Status Page 的 .btn 样式覆盖） */
         #tab-warp .btn {
-            flex: initial; padding: 7px 14px; font-size: 12px; font-weight: 500;
+            flex: initial;
+            padding: 7px 14px;
+            font-size: 12px;
+            font-weight: 500;
         }
-        #tab-warp .btn-sm { padding: 4px 10px; font-size: 11px; }
-        #tab-warp .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); }
-        #tab-warp .btn-primary:hover { background: #ff942e; border-color: #ff942e; }
-        #tab-warp .btn-success { background: var(--c-ipv6); border-color: var(--c-ipv6); color: #000; }
-        #tab-warp .btn-danger { background: transparent; border-color: var(--c-ipv6-warp); color: var(--c-ipv6-warp); }
-        #tab-warp .btn-danger:hover { background: rgba(239,68,68,0.15); }
-        #tab-warp .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        #tab-warp .btn-sm {
+            padding: 4px 10px;
+            font-size: 11px;
+        }
+
+        #tab-warp .btn-primary {
+            background: var(--accent);
+            color: #000;
+            border-color: var(--accent);
+        }
+
+        #tab-warp .btn-primary:hover {
+            background: #ff942e;
+            border-color: #ff942e;
+        }
+
+        #tab-warp .btn-success {
+            background: var(--c-ipv6);
+            border-color: var(--c-ipv6);
+            color: #000;
+        }
+
+        #tab-warp .btn-danger {
+            background: transparent;
+            border-color: var(--c-ipv6-warp);
+            color: var(--c-ipv6-warp);
+        }
+
+        #tab-warp .btn-danger:hover {
+            background: rgba(239, 68, 68, 0.15);
+        }
+
+        #tab-warp .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
 
         .domain-list {
-            max-height: 200px; overflow-y: auto; background: var(--bg-secondary);
-            border: 1px solid var(--border); border-radius: 10px; padding: 6px;
+            max-height: 200px;
+            overflow-y: auto;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 6px;
         }
+
         .domain-item {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 7px 10px; border-radius: 6px; font-size: 12px;
-            cursor: pointer; transition: background 0.1s;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 7px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.1s;
         }
-        .domain-item:hover { background: var(--bg-tertiary); }
-        .domain-item.selected { background: var(--accent-dim); }
-        .domain-name { color: var(--text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .domain-checkbox { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; margin-right: 8px; }
+
+        .domain-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .domain-item.selected {
+            background: var(--accent-dim);
+        }
+
+        .domain-name {
+            color: var(--text-primary);
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .domain-checkbox {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--accent);
+            cursor: pointer;
+            margin-right: 8px;
+        }
 
         .rule-item {
-            background: var(--bg-secondary); border: 1px solid var(--border);
-            border-radius: 10px; padding: 12px; margin-bottom: 8px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 8px;
         }
-        .rule-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-        .rule-domain { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-        .rule-actions { display: flex; gap: 6px; align-items: center; }
-        .rule-meta { font-size: 11px; color: var(--text-tertiary); line-height: 1.5; }
-        .rule-ips, .rule-cidrs { margin-top: 4px; word-break: break-all; }
+
+        .rule-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .rule-domain {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .rule-actions {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .rule-meta {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            line-height: 1.5;
+        }
+
+        .rule-ips,
+        .rule-cidrs {
+            margin-top: 4px;
+            word-break: break-all;
+        }
+
         .rule-tag {
-            display: inline-block; font-size: 10px; padding: 1px 6px;
-            border-radius: 4px; margin-right: 4px; margin-top: 2px;
+            display: inline-block;
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 4px;
+            margin-right: 4px;
+            margin-top: 2px;
         }
-        .tag-ip { background: rgba(59,130,246,0.2); color: #60a5fa; }
-        .tag-cidr { background: rgba(168,85,247,0.2); color: #c084fc; }
-        .tag-disabled { background: rgba(239,68,68,0.2); color: var(--c-ipv6-warp); }
-        .tag-enabled { background: rgba(34,197,94,0.2); color: var(--c-ipv6); }
+
+        .tag-ip {
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+        }
+
+        .tag-cidr {
+            background: rgba(168, 85, 247, 0.2);
+            color: #c084fc;
+        }
+
+        .tag-disabled {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--c-ipv6-warp);
+        }
+
+        .tag-enabled {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--c-ipv6);
+        }
 
         .mode-select {
-            padding: 3px 8px; font-size: 11px; background: var(--bg-tertiary);
-            color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
+            padding: 3px 8px;
+            font-size: 11px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            cursor: pointer;
         }
 
-        .add-domain-row { display: flex; gap: 8px; margin-bottom: 10px; }
-        .input {
-            flex: 1; padding: 7px 10px; background: var(--bg-secondary);
-            border: 1px solid var(--border); border-radius: 6px;
-            color: var(--text-primary); font-size: 12px; outline: none; transition: border-color 0.15s;
+        .add-domain-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
         }
-        .input:focus { border-color: var(--accent); }
-        .input::placeholder { color: var(--text-tertiary); }
+
+        .input {
+            flex: 1;
+            padding: 7px 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 12px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .input:focus {
+            border-color: var(--accent);
+        }
+
+        .input::placeholder {
+            color: var(--text-tertiary);
+        }
 
         .warp-ranges {
-            background: var(--bg-secondary); border: 1px solid var(--border);
-            border-radius: 10px; padding: 10px; max-height: 150px; overflow-y: auto;
-            font-family: 'Consolas', 'Monaco', monospace; font-size: 11px; line-height: 1.6;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px;
+            max-height: 150px;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 11px;
+            line-height: 1.6;
         }
-        .warp-range-line { color: var(--text-secondary); }
-        .warp-range-line:hover { color: var(--text-primary); }
 
-        .search-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
-        .search-count { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
+        .warp-range-line {
+            color: var(--text-secondary);
+        }
+
+        .warp-range-line:hover {
+            color: var(--text-primary);
+        }
+
+        .search-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+
+        .search-count {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            white-space: nowrap;
+        }
 
         /* WARP 内部子tab按钮（区别于主tab-btn） */
         .warp-subtab-btn {
-            padding: 6px 16px; font-size: 12px; font-weight: 500;
-            background: transparent; border: none; border-bottom: 2px solid transparent;
-            color: var(--text-tertiary); cursor: pointer; transition: all 0.15s;
+            padding: 6px 16px;
+            font-size: 12px;
+            font-weight: 500;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--text-tertiary);
+            cursor: pointer;
+            transition: all 0.15s;
         }
-        .warp-subtab-btn:hover { color: var(--text-secondary); }
-        .warp-subtab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+        .warp-subtab-btn:hover {
+            color: var(--text-secondary);
+        }
+
+        .warp-subtab-btn.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
 
         /* Loading Mask */
         .loading-mask {
-            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
-            align-items: center; justify-content: center; z-index: 500; backdrop-filter: blur(2px);
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            align-items: center;
+            justify-content: center;
+            z-index: 500;
+            backdrop-filter: blur(2px);
         }
-        .loading-mask.active { display: flex; }
-        .mask-text { color: var(--text-secondary); font-size: 12px; margin-top: 10px; }
+
+        .loading-mask.active {
+            display: flex;
+        }
+
+        .mask-text {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-top: 10px;
+        }
 
         /* 滚动条 */
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--bg-tertiary);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-tertiary);
+        }
 
         /* Status Page */
         .status-page {
@@ -628,6 +1562,7 @@
             justify-content: flex-start;
             padding: 20px 24px 16px;
             position: relative;
+            flex-shrink: 0;
         }
 
         /* 主页tab容器（就是 .tab-content，已通过 .tab-content 的 overflow-y:auto 实现滚动）*/
@@ -689,8 +1624,15 @@
         }
 
         @keyframes hexPulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.05); }
+
+            0%,
+            100% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.05);
+            }
         }
 
         .hexagon-rotate {
@@ -718,8 +1660,13 @@
         }
 
         @keyframes hexRotate {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
         }
 
         .status-icon {
@@ -809,12 +1756,17 @@
             top: 0;
             bottom: 0;
             width: 20px;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3));
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3));
             border-radius: 2px;
         }
 
-        .progress-fill.success { background: var(--accent); }
-        .progress-fill.error { background: var(--error); }
+        .progress-fill.success {
+            background: var(--accent);
+        }
+
+        .progress-fill.error {
+            background: var(--error);
+        }
 
         .progress-info {
             display: flex;
@@ -856,6 +1808,10 @@
             transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
             outline: none;
             letter-spacing: 0.2px;
+            justify-content: center;
+            /* 水平居中 */
+            align-items: center;
+            /* 垂直居中 */
         }
 
         .btn:active {
@@ -906,6 +1862,7 @@
             flex-direction: column;
             padding: 16px 20px;
             overflow: hidden;
+            flex-shrink: 0;
         }
 
         .form-group {
@@ -1045,12 +2002,12 @@
             border-radius: 50%;
         }
 
-        input:checked + .toggle-slider {
+        input:checked+.toggle-slider {
             background-color: var(--accent);
             border-color: var(--accent);
         }
 
-        input:checked + .toggle-slider:before {
+        input:checked+.toggle-slider:before {
             transform: translateX(20px);
             background-color: white;
         }
@@ -1238,7 +2195,18 @@
         }
     </style>
 </head>
+
 <body>
+    <!-- 窗口边缘调整大小手柄 -->
+    <div class="resize-handle top" data-dir="top"></div>
+    <div class="resize-handle bottom" data-dir="bottom"></div>
+    <div class="resize-handle left" data-dir="left"></div>
+    <div class="resize-handle right" data-dir="right"></div>
+    <div class="resize-handle tl" data-dir="tl"></div>
+    <div class="resize-handle tr" data-dir="tr"></div>
+    <div class="resize-handle bl" data-dir="bl"></div>
+    <div class="resize-handle br" data-dir="br"></div>
+
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay">
         <div class="loading-spinner"></div>
@@ -1251,10 +2219,15 @@
             <span class="app-title-text">CampusAuth</span>
             <div class="app-title-btns">
                 <button class="app-title-btn" onclick="minimizeWindow()" title="最小化">
-                    <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    <svg viewBox="0 0 24 24">
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
                 </button>
                 <button class="app-title-btn close" onclick="closeWindow()" title="关闭">
-                    <svg viewBox="0 0 24 24"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+                    <svg viewBox="0 0 24 24">
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                    </svg>
                 </button>
             </div>
         </div>
@@ -1274,13 +2247,21 @@
 
                 <div class="status-indicator idle" id="statusIndicator">
                     <svg class="hexagon-svg" viewBox="0 0 140 140">
-                        <polygon class="hexagon-shape" points="70,5 125,35 125,105 70,135 15,105 15,35"/>
+                        <polygon class="hexagon-shape" points="70,5 125,35 125,105 70,135 15,105 15,35" />
                     </svg>
                     <svg class="hexagon-rotate" viewBox="0 0 156 156">
-                        <polygon class="hexagon-rotate-line" points="78,5 141,39 141,117 78,151 15,117 15,39"/>
+                        <polygon class="hexagon-rotate-line" points="78,5 141,39 141,117 78,151 15,117 15,39" />
                     </svg>
                     <div class="status-icon" id="statusIcon">
-                        <svg viewBox="0 0 24 24"><path d="M1 1l22 22"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>
+                        <svg viewBox="0 0 24 24">
+                            <path d="M1 1l22 22" />
+                            <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
+                            <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39" />
+                            <path d="M10.71 5.05A16 16 0 0 1 22.56 9" />
+                            <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88" />
+                            <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+                            <circle cx="12" cy="20" r="1" />
+                        </svg>
                     </div>
                 </div>
 
@@ -1301,7 +2282,8 @@
                 <div class="status-actions">
                     <button class="btn btn-primary" id="authBtn" onclick="startAuth()">开始认证</button>
                     <button class="btn btn-secondary" id="restoreBtn" onclick="startRestore()">恢复网络</button>
-                    <button class="btn btn-danger" id="cancelBtn" onclick="cancelOperation()" style="display:none;">取消</button>
+                    <button class="btn btn-danger" id="cancelBtn" onclick="cancelOperation()"
+                        style="display:none;">取消</button>
                 </div>
             </div>
 
@@ -1399,7 +2381,11 @@
                     <div class="input-row">
                         <input type="text" id="warpCliPath" placeholder="留空则自动检测" />
                         <button class="btn-icon" id="browseWarpBtn" onclick="browseWarpPath()">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <polyline points="14 2 14 8 20 8" />
+                            </svg>
                         </button>
                     </div>
                 </div>
@@ -1412,21 +2398,29 @@
                 <!-- 网络方案 -->
                 <div class="section">
                     <div class="section-title">网络方案</div>
-                    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                    <div
+                        style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
                         <div style="flex:1; min-width:200px;">
                             <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
-                                <label style="font-size:13px; font-weight:500; cursor:pointer; display:flex; align-items:center; gap:8px;">
-                                    <input type="checkbox" id="ipv4Toggle" onchange="WarpTab.toggleIpv4(this.checked)" style="width:16px; height:16px; cursor:pointer;">
+                                <label
+                                    style="font-size:13px; font-weight:500; cursor:pointer; display:flex; align-items:center; gap:8px;">
+                                    <input type="checkbox" id="ipv4Toggle" onchange="WarpTab.toggleIpv4(this.checked)"
+                                        style="width:16px; height:16px; cursor:pointer;">
                                     启用 IPv4（校园网直连）
                                 </label>
-                                <span id="ipv4Status" style="font-size:11px; padding:2px 8px; border-radius:4px; background:var(--bg-tertiary); color:var(--text-tertiary);">检测中...</span>
+                                <span id="ipv4Status"
+                                    style="font-size:11px; padding:2px 8px; border-radius:4px; background:var(--bg-tertiary); color:var(--text-tertiary);">检测中...</span>
                             </div>
                             <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
-                                <label style="font-size:13px; font-weight:500; cursor:pointer; display:flex; align-items:center; gap:8px;">
-                                    <input type="checkbox" id="autoEnableIpv4Toggle" onchange="WarpTab.toggleAutoEnableIpv4(this.checked)" style="width:16px; height:16px; cursor:pointer;">
+                                <label
+                                    style="font-size:13px; font-weight:500; cursor:pointer; display:flex; align-items:center; gap:8px;">
+                                    <input type="checkbox" id="autoEnableIpv4Toggle"
+                                        onchange="WarpTab.toggleAutoEnableIpv4(this.checked)"
+                                        style="width:16px; height:16px; cursor:pointer;">
                                     认证后自动启用 IPv4
                                 </label>
-                                <span id="autoEnableIpv4Status" style="font-size:11px; padding:2px 8px; border-radius:4px; background:var(--bg-tertiary); color:var(--text-tertiary);">检测中...</span>
+                                <span id="autoEnableIpv4Status"
+                                    style="font-size:11px; padding:2px 8px; border-radius:4px; background:var(--bg-tertiary); color:var(--text-tertiary);">检测中...</span>
                             </div>
                             <div style="font-size:11px; color:var(--text-tertiary); line-height:1.6;">
                                 <strong>启用 IPv4：</strong>白名单域名排除 WARP → 走校园网 IPv4 直连（大陆 IP），非白名单流量仍走 IPv6 → WARP<br>
@@ -1447,16 +2441,22 @@
                             开启学习模式后，请正常访问需要排除的网站。系统会监控DNS缓存，记录访问的域名，供您选择排除。
                         </div>
                         <div class="learn-actions">
-                            <button class="btn btn-primary" id="startLearnBtn" onclick="WarpTab.startLearning()">开始学习</button>
-                            <button class="btn btn-danger" id="stopLearnBtn" onclick="WarpTab.stopLearning()" style="display:none;">停止学习</button>
-                            <button class="btn" id="refreshLearnBtn" onclick="WarpTab.refreshLearnedDomains()" disabled>刷新列表</button>
-                            <button class="btn btn-success" id="addSelectedBtn" onclick="WarpTab.addSelectedDomains()" disabled>添加选中到排除列表</button>
+                            <button class="btn btn-primary" id="startLearnBtn"
+                                onclick="WarpTab.startLearning()">开始学习</button>
+                            <button class="btn btn-danger" id="stopLearnBtn" onclick="WarpTab.stopLearning()"
+                                style="display:none;">停止学习</button>
+                            <button class="btn" id="refreshLearnBtn" onclick="WarpTab.refreshLearnedDomains()"
+                                disabled>刷新列表</button>
+                            <button class="btn btn-success" id="addSelectedBtn" onclick="WarpTab.addSelectedDomains()"
+                                disabled>添加选中到排除列表</button>
                         </div>
                         <div style="margin-top:10px;">
                             <div class="search-row">
-                                <input type="text" class="search-input" id="domainSearchInput" placeholder="模糊搜索域名（不区分大小写）">
+                                <input type="text" class="search-input" id="domainSearchInput"
+                                    placeholder="模糊搜索域名（不区分大小写）">
                                 <span class="search-count" id="searchCount"></span>
-                                <button class="btn btn-sm" id="selectAllBtn" onclick="WarpTab.toggleSelectAll()" disabled>全选</button>
+                                <button class="btn btn-sm" id="selectAllBtn" onclick="WarpTab.toggleSelectAll()"
+                                    disabled>全选</button>
                             </div>
                             <div class="domain-list" id="learnedList">
                                 <div class="empty-hint">学习到的域名将显示在这里</div>
@@ -1472,35 +2472,44 @@
                         已配置的排除规则
                         <span class="badge" id="ruleCount">0</span>
                     </div>
-                    <div class="tab-bar" style="display:flex; gap:0; margin-bottom:12px; border-bottom:1px solid var(--border);">
-                        <button class="warp-subtab-btn active" onclick="WarpTab.switchSubtab('domain')" id="tabDomain">域名排除</button>
+                    <div class="tab-bar"
+                        style="display:flex; gap:0; margin-bottom:12px; border-bottom:1px solid var(--border);">
+                        <button class="warp-subtab-btn active" onclick="WarpTab.switchSubtab('domain')"
+                            id="tabDomain">域名排除</button>
                         <button class="warp-subtab-btn" onclick="WarpTab.switchSubtab('ip')" id="tabIp">IP 排除</button>
                     </div>
 
                     <!-- 域名排除子页 -->
                     <div id="domainTabContent">
                         <div style="margin-bottom:12px;">
-                            <div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">手动添加域名</div>
+                            <div
+                                style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">
+                                手动添加域名</div>
                             <div class="add-domain-row">
-                                <input type="text" class="input" id="domainInput" placeholder="输入域名，如 example.com" onkeydown="if(event.key==='Enter')WarpTab.addDomainManually()" style="flex:2;">
-                                <select id="routeSelect" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text-primary); font-size:13px; cursor:pointer;">
+                                <input type="text" class="input" id="domainInput" placeholder="输入域名，如 example.com"
+                                    onkeydown="if(event.key==='Enter')WarpTab.addDomainManually()" style="flex:2;">
+                                <select id="routeSelect"
+                                    style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text-primary); font-size:13px; cursor:pointer;">
                                     <option value="ipv6">走 IPv6 校园网</option>
                                     <option value="ipv4">走 IPv4 校园网</option>
                                 </select>
                                 <button class="btn btn-primary" onclick="WarpTab.addDomainManually()">添加</button>
                             </div>
                             <div style="font-size:11px; color:var(--text-tertiary); margin-top:4px; line-height:1.5;">
-                                <strong>走 IPv6 校园网：</strong>域名排除 WARP + DNS fallback + IPv6 CIDR + 防火墙阻止 IPv4，强制走校园 IPv6（适合有 AAAA 记录的域名）<br>
+                                <strong>走 IPv6 校园网：</strong>域名排除 WARP + DNS fallback + IPv6 CIDR + 防火墙阻止 IPv4，强制走校园
+                                IPv6（适合有 AAAA 记录的域名）<br>
                                 <strong>走 IPv4 校园网：</strong>域名排除 WARP，IPv4/IPv6 都走校园网直连（适合只有 A 记录的域名）
                             </div>
                         </div>
                         <div style="margin-bottom:10px; display:flex; gap:8px; flex-wrap:wrap;">
                             <button class="btn btn-sm btn-primary" onclick="WarpTab.applyAllToWarp()">同步到WARP</button>
                             <button class="btn btn-sm" onclick="WarpTab.syncFromWarp()">从WARP同步</button>
-                            <button class="btn btn-sm" onclick="WarpTab.checkIpv6Support()" title="检测所有 IPv6 路由域名是否真的支持 IPv6，不支持则降级为 IPv4">检测 IPv6 支持</button>
+                            <button class="btn btn-sm" onclick="WarpTab.checkIpv6Support()"
+                                title="检测所有 IPv6 路由域名是否真的支持 IPv6，不支持则降级为 IPv4">检测 IPv6 支持</button>
                         </div>
                         <div class="search-row">
-                            <input type="text" class="search-input" id="rulesSearchInput" placeholder="模糊搜索规则域名（不区分大小写）">
+                            <input type="text" class="search-input" id="rulesSearchInput"
+                                placeholder="模糊搜索规则域名（不区分大小写）">
                             <span class="search-count" id="rulesSearchCount"></span>
                         </div>
                         <div id="rulesList">
@@ -1512,13 +2521,20 @@
                     <!-- IP 排除子页 -->
                     <div id="ipTabContent" style="display:none;">
                         <div style="margin-bottom:12px;">
-                            <div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">手动添加 IP 范围</div>
+                            <div
+                                style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">
+                                手动添加 IP 范围</div>
                             <div class="add-domain-row">
-                                <input type="text" class="input" id="ipRangeInput" placeholder="输入 IP 或 CIDR，如 10.0.0.0/8 或 2402:4e00::" onkeydown="if(event.key==='Enter')WarpTab.addIpRangeManually()" style="flex:2;">
-                                <select id="ipPrefixSelect" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text-primary); font-size:13px; cursor:pointer; min-width:90px;" onchange="WarpTab.onPrefixChange()">
+                                <input type="text" class="input" id="ipRangeInput"
+                                    placeholder="输入 IP 或 CIDR，如 10.0.0.0/8 或 2402:4e00::"
+                                    onkeydown="if(event.key==='Enter')WarpTab.addIpRangeManually()" style="flex:2;">
+                                <select id="ipPrefixSelect"
+                                    style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text-primary); font-size:13px; cursor:pointer; min-width:90px;"
+                                    onchange="WarpTab.onPrefixChange()">
                                     <option value="auto">自动前缀</option>
                                 </select>
-                                <select id="ipRouteSelect" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text-primary); font-size:13px; cursor:pointer;">
+                                <select id="ipRouteSelect"
+                                    style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text-primary); font-size:13px; cursor:pointer;">
                                     <option value="ipv4">走 IPv4 校园网</option>
                                     <option value="ipv6">走 IPv6 校园网</option>
                                 </select>
@@ -1530,12 +2546,15 @@
                                 <strong>前缀长度：</strong>/32(单IP)、/24(IPv4子网)、/32或/48(IPv6网段)、/64(IPv6子网)
                             </div>
                         </div>
-                        <div style="margin-bottom:12px; padding:10px; background:var(--bg-secondary); border-radius:8px; border:1px solid var(--border);">
-                            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                        <div
+                            style="margin-bottom:12px; padding:10px; background:var(--bg-secondary); border-radius:8px; border:1px solid var(--border);">
+                            <div
+                                style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
                                 <div style="font-size:12px; font-weight:600; color:var(--text-secondary);">从当前连接推荐</div>
                                 <button class="btn btn-sm" onclick="WarpTab.loadTrafficForExclude()">刷新连接</button>
                             </div>
-                            <div style="font-size:11px; color:var(--text-tertiary); margin-bottom:8px; line-height:1.5;">
+                            <div
+                                style="font-size:11px; color:var(--text-tertiary); margin-bottom:8px; line-height:1.5;">
                                 显示当前未走 WARP 的连接（直连），点击可一键将其 IP 网段加入排除列表。
                             </div>
                             <div id="trafficRecommendList" style="max-height:200px; overflow-y:auto;">
@@ -1552,9 +2571,11 @@
                 <div class="section">
                     <div class="section-title">
                         WARP 当前排除规则
-                        <button class="btn btn-sm" onclick="WarpTab.loadWarpRanges()" style="margin-left:auto;">刷新</button>
+                        <button class="btn btn-sm" onclick="WarpTab.loadWarpRanges()"
+                            style="margin-left:auto;">刷新</button>
                     </div>
-                    <div id="legacyCleanupRow" style="margin-bottom:10px; display:flex; gap:8px; flex-wrap:wrap; display:none;">
+                    <div id="legacyCleanupRow"
+                        style="margin-bottom:10px; display:flex; gap:8px; flex-wrap:wrap; display:none;">
                         <button class="btn btn-sm btn-danger" onclick="WarpTab.cleanupLegacyRules()">清理旧版IP规则残留</button>
                     </div>
                     <div class="warp-ranges" id="warpRanges">
@@ -1567,25 +2588,30 @@
                     <div class="section-title">
                         DNS Fallback 域名（本地解析）
                         <span class="badge" id="dnsFallbackCount">0</span>
-                        <button class="btn btn-sm" onclick="WarpTab.loadDnsFallbackRules()" style="margin-left:auto;">刷新</button>
+                        <button class="btn btn-sm" onclick="WarpTab.loadDnsFallbackRules()"
+                            style="margin-left:auto;">刷新</button>
                     </div>
-                    <div style="margin-bottom:10px; padding:8px 10px; background:var(--bg-secondary); border-radius:6px; font-size:12px; color:var(--text-tertiary); line-height:1.5;">
+                    <div
+                        style="margin-bottom:10px; padding:8px 10px; background:var(--bg-secondary); border-radius:6px; font-size:12px; color:var(--text-tertiary); line-height:1.5;">
                         <strong>用途：</strong>让指定域名的 DNS 查询走本地运营商 DNS（而非 WARP DNS），避免 CDN 调度域名返回海外节点导致访问被阻止。<br>
                         <strong>典型场景：</strong>bytedns3.com、queniuyk.com 等字节系 CDN 调度域名。<br>
                         <strong>与流量排除的区别：</strong>流量排除（tunnel host）让连接不走 WARP；DNS fallback 让解析走本地 DNS，流量仍可走 WARP。
                     </div>
                     <div class="add-domain-row" style="margin-bottom:10px;">
-                        <input type="text" class="input" id="dnsFallbackInput" placeholder="输入域名，如 bytedns3.com" onkeydown="if(event.key==='Enter')WarpTab.addDnsFallbackManually()">
+                        <input type="text" class="input" id="dnsFallbackInput" placeholder="输入域名，如 bytedns3.com"
+                            onkeydown="if(event.key==='Enter')WarpTab.addDnsFallbackManually()">
                         <button class="btn btn-primary" onclick="WarpTab.addDnsFallbackManually()">添加</button>
                     </div>
                     <div style="margin-bottom:10px; display:flex; gap:8px; flex-wrap:wrap;">
-                        <button class="btn btn-sm btn-primary" onclick="WarpTab.applyDnsFallbackToWarp()">同步到WARP</button>
+                        <button class="btn btn-sm btn-primary"
+                            onclick="WarpTab.applyDnsFallbackToWarp()">同步到WARP</button>
                     </div>
                     <div id="dnsFallbackList">
                         <div class="empty-hint">暂无 DNS fallback 域名</div>
                     </div>
                     <div style="margin-top:10px; padding-top:8px; border-top:1px solid var(--border);">
-                        <div style="font-size:12px; color:var(--text-tertiary); margin-bottom:6px;">WARP 中当前的 DNS fallback 域名：</div>
+                        <div style="font-size:12px; color:var(--text-tertiary); margin-bottom:6px;">WARP 中当前的 DNS
+                            fallback 域名：</div>
                         <div class="warp-ranges" id="warpDnsFallback">
                             <div class="empty-hint">点击刷新查看</div>
                         </div>
@@ -1639,10 +2665,12 @@
                 </div>
                 <!-- 工具栏 -->
                 <div class="toolbar">
-                    <input type="text" class="search-input" id="tl-searchInput" placeholder="搜索进程名/域名/IP..." oninput="TrafficTab.renderListConns()">
+                    <input type="text" class="search-input" id="tl-searchInput" placeholder="搜索进程名/域名/IP..."
+                        oninput="TrafficTab.renderListConns()">
                     <label class="auto-refresh-label">
                         <span class="toggle-switch">
-                            <input type="checkbox" id="tl-autoRefreshToggle" checked onchange="TrafficTab.toggleAutoRefresh(this.checked)">
+                            <input type="checkbox" id="tl-autoRefreshToggle" checked
+                                onchange="TrafficTab.toggleAutoRefresh(this.checked)">
                             <span class="toggle-slider"></span>
                         </span>
                         自动刷新
@@ -1667,21 +2695,25 @@
                 <div class="bottom-panel">
                     <div class="panel-header">
                         <div class="panel-header-left">
-                            <input type="checkbox" class="conn-check" id="tc-selectAll" onchange="TrafficTab.toggleSelectAll(this.checked)" title="全选">
+                            <input type="checkbox" class="conn-check" id="tc-selectAll"
+                                onchange="TrafficTab.toggleSelectAll(this.checked)" title="全选">
                             <span class="panel-title">活动连接<span class="warp-info-text" id="tc-warpInfo"></span></span>
                         </div>
                         <div class="panel-controls">
-                            <input type="text" class="search-box" id="tc-searchInput" placeholder="搜索域名/IP/进程..." oninput="TrafficTab.renderCanvasConns()">
+                            <input type="text" class="search-box" id="tc-searchInput" placeholder="搜索域名/IP/进程..."
+                                oninput="TrafficTab.renderCanvasConns()">
                             <label class="auto-toggle">
                                 <span class="toggle-switch">
-                                    <input type="checkbox" id="tc-cumulativeToggle" onchange="TrafficTab.toggleCumulative()">
+                                    <input type="checkbox" id="tc-cumulativeToggle"
+                                        onchange="TrafficTab.toggleCumulative()">
                                     <span class="toggle-slider"></span>
                                 </span>
                                 累计展示
                             </label>
                             <label class="auto-toggle">
                                 <span class="toggle-switch">
-                                    <input type="checkbox" id="tc-autoToggle" checked onchange="TrafficTab.toggleAutoRefresh(this.checked)">
+                                    <input type="checkbox" id="tc-autoToggle" checked
+                                        onchange="TrafficTab.toggleAutoRefresh(this.checked)">
                                     <span class="toggle-slider"></span>
                                 </span>
                                 自动刷新
@@ -1725,8 +2757,59 @@
     </div>
 
     <script>
+        // ===== 窗口边缘调整大小（frameless 窗口，JS mousemove 驱动）=====
+        var MIN_W = 800, MIN_H = 600;
+        var _resizeState = null;
+
+        document.querySelectorAll('.resize-handle').forEach(function (handle) {
+            handle.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var dir = handle.dataset.dir;
+                if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.get_window_rect) return;
+                window.pywebview.api.get_window_rect().then(function (rect) {
+                    _resizeState = {
+                        dir: dir,
+                        startScreenX: e.screenX, startScreenY: e.screenY,
+                        winX: rect.x, winY: rect.y, winW: rect.width, winH: rect.height
+                    };
+                });
+            });
+        });
+
+        document.addEventListener('mousemove', function (e) {
+            if (!_resizeState) return;
+            var s = _resizeState;
+            var dx = e.screenX - s.startScreenX;
+            var dy = e.screenY - s.startScreenY;
+            var newX = s.winX, newY = s.winY, newW = s.winW, newH = s.winH;
+
+            if (s.dir.indexOf('left') !== -1) { newX = s.winX + dx; newW = s.winW - dx; }
+            if (s.dir.indexOf('right') !== -1) { newW = s.winW + dx; }
+            if (s.dir.indexOf('top') !== -1) { newY = s.winY + dy; newH = s.winH - dy; }
+            if (s.dir.indexOf('bottom') !== -1) { newH = s.winH + dy; }
+
+            // 最小尺寸约束
+            if (newW < MIN_W) {
+                if (s.dir.indexOf('left') !== -1) newX = s.winX + (s.winW - MIN_W);
+                newW = MIN_W;
+            }
+            if (newH < MIN_H) {
+                if (s.dir.indexOf('top') !== -1) newY = s.winY + (s.winH - MIN_H);
+                newH = MIN_H;
+            }
+
+            window.pywebview.api.resize_move_window(newW, newH, newX, newY);
+        });
+
+        document.addEventListener('mouseup', function () {
+            _resizeState = null;
+        });
+
         // ===== Tab Switching =====
+        let _userSwitchedTab = false;  // 标记用户是否手动切换过tab
         function switchTab(name, event) {
+            if (event) _userSwitchedTab = true;  // 用户手动点击切换
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             document.getElementById('tab-' + name).classList.add('active');
@@ -1760,7 +2843,13 @@
 
         // ===== Initialization =====
         // 初始化逻辑已拆分到 initApp() 中，由 StatusTab/SettingsTab/WarpTab/TrafficTab 各自管理
-        window.addEventListener('pywebviewready', initApp);
+        let _initStarted = false;
+        // 如果 pywebviewready 事件已经触发过（页面加载快/缓存），直接初始化
+        if (window.pywebview && window.pywebview.api) {
+            initApp();
+        } else {
+            window.addEventListener('pywebviewready', initApp);
+        }
 
         // ===== Status Management =====
         function updateStatusFromCheck(status) {
@@ -1997,7 +3086,9 @@
 
         // ===== Settings =====
         let _autoSaveTimer;
+        let _configLoaded = false;  // 初始配置加载完成前禁止自动保存，防止空表单覆盖已保存的配置
         function _doAutoSave() {
+            if (!_configLoaded) return;  // 配置未加载完成，跳过自动保存
             var config = {
                 wifi_name: document.getElementById('wifiName').value.trim(),
                 username: document.getElementById('username').value.trim(),
@@ -2010,10 +3101,10 @@
             window.pywebview.api.auto_save_form(config);
         }
 
-        ['wifiName', 'username', 'password', 'warpCliPath'].forEach(function(id) {
+        ['wifiName', 'username', 'password', 'warpCliPath'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) {
-                el.addEventListener('input', function() {
+                el.addEventListener('input', function () {
                     clearTimeout(_autoSaveTimer);
                     _autoSaveTimer = setTimeout(_doAutoSave, 500);
                 });
@@ -2022,7 +3113,7 @@
 
         document.getElementById('autoAuth')?.addEventListener('change', () => { clearTimeout(_autoSaveTimer); _doAutoSave(); });
         document.getElementById('autoRestore')?.addEventListener('change', () => { clearTimeout(_autoSaveTimer); _doAutoSave(); });
-        document.getElementById('autoStartup')?.addEventListener('change', async function() {
+        document.getElementById('autoStartup')?.addEventListener('change', async function () {
             const enabled = this.checked;
             try {
                 const result = await window.pywebview.api.set_startup(enabled);
@@ -2035,7 +3126,7 @@
                 showAlert('错误', '设置失败: ' + e.message, 'error');
             }
         });
-        document.getElementById('silentStartup')?.addEventListener('change', async function() {
+        document.getElementById('silentStartup')?.addEventListener('change', async function () {
             clearTimeout(_autoSaveTimer); _doAutoSave();
             try { await window.pywebview.api.refresh_startup_task(); }
             catch (e) { console.error('refresh_startup_task failed:', e); }
@@ -2266,7 +3357,7 @@
 
             debounce(fn, delay) {
                 let timer = null;
-                return function(...args) {
+                return function (...args) {
                     clearTimeout(timer);
                     timer = setTimeout(() => fn.apply(this, args), delay);
                 };
@@ -2368,7 +3459,11 @@
                     document.getElementById('autoRestore').checked = config.auto_restore || false;
                     document.getElementById('warpCliPath').value = config.warp_cli_path || '';
                     document.getElementById('silentStartup').checked = config.silent_startup || false;
-                } catch (e) { console.error('Failed to load config:', e); }
+                } catch (e) {
+                    console.error('Failed to load config:', e);
+                } finally {
+                    _configLoaded = true;  // 无论成功失败，都允许后续自动保存
+                }
             },
 
             // 网络详情区：拉取数据并渲染。
@@ -2462,7 +3557,7 @@
             pageSize: 20,
             pagination: {
                 learned: { page: 1, pageSize: 20, total: 0, keyword: '' },
-                rules:   { page: 1, pageSize: 20, total: 0, keyword: '' }
+                rules: { page: 1, pageSize: 20, total: 0, keyword: '' }
             },
             _allRules: [],
             _autoRefreshTimer: null,
@@ -2539,7 +3634,7 @@
                     } else {
                         Utils.showToast(r.message, 'error');
                     }
-                } catch(e) { Utils.showToast('启动失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('启动失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -2555,7 +3650,7 @@
                     document.getElementById('learnStatus').textContent = r.message;
                     await this.refreshLearnedDomains();
                     Utils.showToast(r.message, 'success');
-                } catch(e) { Utils.showToast('停止失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('停止失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -2573,7 +3668,7 @@
                     const domains = await window.pywebview.api.get_learned_domains();
                     this.allLearnedDomains = domains || [];
                     this.renderLearnedList(this.allLearnedDomains);
-                } catch(e) { console.error('refreshLearned error:', e); }
+                } catch (e) { console.error('refreshLearned error:', e); }
             },
 
             // 渲染学习域名列表（子序列搜索 + 分页）
@@ -2678,7 +3773,7 @@
                     try {
                         const r = await window.pywebview.api.add_domain(cb.value, route);
                         if (r.success) okCount++; else failCount++;
-                    } catch(e) { failCount++; }
+                    } catch (e) { failCount++; }
                 }
                 Utils.hideLoading();
                 Utils.showToast(`添加完成: ${okCount} 成功, ${failCount} 失败`, failCount ? 'error' : 'success');
@@ -2703,7 +3798,7 @@
                     } else {
                         Utils.showToast(r.message, 'error');
                     }
-                } catch(e) { Utils.showToast('添加失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('添加失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -2731,7 +3826,7 @@
                 try {
                     const cfg = await window.pywebview.api.get_exclusion_config();
                     this.renderIpRanges(cfg.ip_ranges || []);
-                } catch(e) { console.error('loadIpRanges error:', e); }
+                } catch (e) { console.error('loadIpRanges error:', e); }
             },
 
             renderIpRanges(ipRanges) {
@@ -2757,7 +3852,7 @@
                             <div class="rule-actions">
                                 ${statusTag}
                                 ${switchBtn}
-                                <button class="btn btn-sm ${r.enabled?'':'btn-primary'}" onclick="WarpTab.toggleIpRange('${Utils.escapeHtml(r.cidr)}', ${!r.enabled})">${r.enabled?'禁用':'启用'}</button>
+                                <button class="btn btn-sm ${r.enabled ? '' : 'btn-primary'}" onclick="WarpTab.toggleIpRange('${Utils.escapeHtml(r.cidr)}', ${!r.enabled})">${r.enabled ? '禁用' : '启用'}</button>
                                 <button class="btn btn-sm btn-danger" onclick="WarpTab.removeIpRange('${Utils.escapeHtml(r.cidr)}')">删除</button>
                             </div>
                         </div>
@@ -2816,7 +3911,7 @@
                     } else {
                         Utils.showToast(r.message, 'error');
                     }
-                } catch(e) { Utils.showToast('添加失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('添加失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -2828,7 +3923,7 @@
                     const data = await window.pywebview.api.get_traffic_status();
                     this._trafficForExclude = data;
                     this.renderTrafficRecommend(data);
-                } catch(e) {
+                } catch (e) {
                     container.innerHTML = `<div class="empty-hint" style="padding:8px; color:var(--c-ipv6-warp);">加载失败: ${Utils.escapeHtml(String(e))}</div>`;
                 }
             },
@@ -2882,7 +3977,7 @@
                     const r = await window.pywebview.api.add_ip_range(cidr, route);
                     Utils.showToast(r.message, r.success ? 'success' : 'error');
                     if (r.success) await this.loadIpRanges();
-                } catch(e) { Utils.showToast('添加失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('添加失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -2893,7 +3988,7 @@
                     const r = await window.pywebview.api.remove_ip_range(cidr);
                     Utils.showToast(r.message, r.success ? 'success' : 'error');
                     await this.loadIpRanges();
-                } catch(e) { Utils.showToast('删除失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('删除失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -2902,7 +3997,7 @@
                     const r = await window.pywebview.api.toggle_ip_range(cidr, enabled);
                     Utils.showToast(r.message, r.success ? 'success' : 'error');
                     await this.loadIpRanges();
-                } catch(e) { Utils.showToast('操作失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('操作失败: ' + e, 'error'); }
             },
 
             async setIpRangeRoute(cidr, route) {
@@ -2911,7 +4006,7 @@
                     const r = await window.pywebview.api.set_ip_range_route(cidr, route);
                     Utils.showToast(r.message, r.success ? 'success' : 'error');
                     await this.loadIpRanges();
-                } catch(e) { Utils.showToast('切换失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('切换失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -2922,7 +4017,7 @@
                     this._allRules = cfg.domains || [];
                     this.renderRules(this._allRules);
                     this.renderIpRanges(cfg.ip_ranges || []);
-                } catch(e) { console.error('loadRules error:', e); }
+                } catch (e) { console.error('loadRules error:', e); }
             },
 
             // 渲染规则列表（子序列搜索 + 分页）
@@ -2978,7 +4073,7 @@
                             <div class="rule-actions">
                                 ${statusTag}
                                 ${switchBtn}
-                                <button class="btn btn-sm ${d.enabled?'':'btn-primary'}" onclick="WarpTab.toggleDomain('${Utils.escapeHtml(d.domain)}', ${!d.enabled})">${d.enabled?'禁用':'启用'}</button>
+                                <button class="btn btn-sm ${d.enabled ? '' : 'btn-primary'}" onclick="WarpTab.toggleDomain('${Utils.escapeHtml(d.domain)}', ${!d.enabled})">${d.enabled ? '禁用' : '启用'}</button>
                                 <button class="btn btn-sm btn-danger" onclick="WarpTab.removeDomain('${Utils.escapeHtml(d.domain)}')">删除</button>
                             </div>
                         </div>
@@ -3003,7 +4098,7 @@
                     Utils.showToast(r.message, r.success ? 'success' : 'error');
                     await this.loadRules();
                     await this.loadWarpRanges();
-                } catch(e) { Utils.showToast('切换失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('切换失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -3015,7 +4110,7 @@
                     Utils.showToast(r.message, r.success ? 'success' : 'error');
                     await this.loadRules();
                     await this.loadWarpRanges();
-                } catch(e) { Utils.showToast('删除失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('删除失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -3025,7 +4120,7 @@
                     Utils.showToast(r.message, r.success ? 'success' : 'error');
                     await this.loadRules();
                     await this.loadWarpRanges();
-                } catch(e) { Utils.showToast('操作失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('操作失败: ' + e, 'error'); }
             },
 
             async applyAllToWarp() {
@@ -3037,7 +4132,7 @@
                     const failCount = details.length - okCount;
                     Utils.showToast(`${r.message} (${okCount}成功/${failCount}失败)`, failCount ? 'error' : 'success');
                     await this.loadWarpRanges();
-                } catch(e) { Utils.showToast('同步失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('同步失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -3048,7 +4143,7 @@
                     Utils.showToast(r.message, r.success ? 'success' : 'error');
                     await this.loadRules();
                     await this.loadDnsFallbackRules();
-                } catch(e) { Utils.showToast('同步失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('同步失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -3074,7 +4169,7 @@
                     } else {
                         Utils.showToast(r.message, 'error');
                     }
-                } catch(e) { Utils.showToast('检测失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('检测失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -3088,7 +4183,7 @@
                     status.textContent = enabled ? '已启用' : '已禁用';
                     status.style.background = enabled ? 'rgba(52,199,89,0.15)' : 'var(--bg-tertiary)';
                     status.style.color = enabled ? '#34c759' : 'var(--text-tertiary)';
-                } catch(e) {
+                } catch (e) {
                     document.getElementById('ipv4Status').textContent = '检测失败';
                 }
             },
@@ -3106,7 +4201,7 @@
                         Utils.showToast(r.message, 'error');
                         document.getElementById('ipv4Toggle').checked = !enabled;
                     }
-                } catch(e) {
+                } catch (e) {
                     Utils.showToast('操作失败: ' + e, 'error');
                     document.getElementById('ipv4Toggle').checked = !enabled;
                 }
@@ -3123,7 +4218,7 @@
                     status.textContent = enabled ? '已开启' : '已关闭';
                     status.style.background = enabled ? 'rgba(52,199,89,0.15)' : 'var(--bg-tertiary)';
                     status.style.color = enabled ? '#34c759' : 'var(--text-tertiary)';
-                } catch(e) {
+                } catch (e) {
                     document.getElementById('autoEnableIpv4Status').textContent = '检测失败';
                 }
             },
@@ -3138,7 +4233,7 @@
                         Utils.showToast(r.message, 'error');
                         document.getElementById('autoEnableIpv4Toggle').checked = !enabled;
                     }
-                } catch(e) {
+                } catch (e) {
                     Utils.showToast('操作失败: ' + e, 'error');
                     document.getElementById('autoEnableIpv4Toggle').checked = !enabled;
                 }
@@ -3173,9 +4268,9 @@
                         } else {
                             legacyRow.style.display = 'none';
                         }
-                    } catch(e) { legacyRow.style.display = 'none'; }
+                    } catch (e) { legacyRow.style.display = 'none'; }
                     container.innerHTML = html || '<div class="empty-hint">WARP中暂无排除规则</div>';
-                } catch(e) { console.error('loadWarpRanges error:', e); }
+                } catch (e) { console.error('loadWarpRanges error:', e); }
             },
 
             async cleanupLegacyRules() {
@@ -3186,7 +4281,7 @@
                     Utils.showToast(r.message, r.success ? 'success' : 'error');
                     await this.loadRules();
                     await this.loadWarpRanges();
-                } catch(e) { Utils.showToast('清理失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('清理失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -3211,7 +4306,7 @@
                                     <span class="rule-domain">${Utils.escapeHtml(d.domain)}</span>
                                     <div class="rule-actions">
                                         ${statusTag}
-                                        <button class="btn btn-sm ${enabled?'':'btn-primary'}" onclick="WarpTab.toggleDnsFallback('${Utils.escapeHtml(d.domain)}', ${!enabled})">${enabled?'禁用':'启用'}</button>
+                                        <button class="btn btn-sm ${enabled ? '' : 'btn-primary'}" onclick="WarpTab.toggleDnsFallback('${Utils.escapeHtml(d.domain)}', ${!enabled})">${enabled ? '禁用' : '启用'}</button>
                                         <button class="btn btn-sm btn-danger" onclick="WarpTab.removeDnsFallback('${Utils.escapeHtml(d.domain)}')">删除</button>
                                     </div>
                                 </div>
@@ -3222,7 +4317,7 @@
                         }).join('');
                     }
                     await this.loadWarpDnsFallback();
-                } catch(e) { console.error('loadDnsFallbackRules error:', e); }
+                } catch (e) { console.error('loadDnsFallbackRules error:', e); }
             },
 
             async loadWarpDnsFallback() {
@@ -3234,7 +4329,7 @@
                     } else {
                         container.innerHTML = list.map(d => `<div class="warp-range-line">${Utils.escapeHtml(d)}</div>`).join('');
                     }
-                } catch(e) { console.error('loadWarpDnsFallback error:', e); }
+                } catch (e) { console.error('loadWarpDnsFallback error:', e); }
             },
 
             async addDnsFallbackManually() {
@@ -3250,7 +4345,7 @@
                         input.value = '';
                         await this.loadDnsFallbackRules();
                     }
-                } catch(e) { Utils.showToast('添加失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('添加失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -3261,7 +4356,7 @@
                     const r = await window.pywebview.api.remove_dns_fallback(domain);
                     Utils.showToast(r.message, r.success ? 'success' : 'error');
                     if (r.success) await this.loadDnsFallbackRules();
-                } catch(e) { Utils.showToast('移除失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('移除失败: ' + e, 'error'); }
                 Utils.hideLoading();
             },
 
@@ -3270,7 +4365,7 @@
                     const r = await window.pywebview.api.toggle_dns_fallback(domain, enabled);
                     Utils.showToast(r.message, r.success ? 'success' : 'error');
                     await this.loadDnsFallbackRules();
-                } catch(e) { Utils.showToast('操作失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('操作失败: ' + e, 'error'); }
             },
 
             async applyDnsFallbackToWarp() {
@@ -3279,7 +4374,7 @@
                     const r = await window.pywebview.api.apply_dns_fallback_to_warp();
                     Utils.showToast(r.message, r.success ? 'success' : 'error');
                     await this.loadDnsFallbackRules();
-                } catch(e) { Utils.showToast('同步失败: ' + e, 'error'); }
+                } catch (e) { Utils.showToast('同步失败: ' + e, 'error'); }
                 Utils.hideLoading();
             }
         };
@@ -3313,12 +4408,12 @@
             // 6 种路由分类配置（颜色、标签、badge 类名）
             // 标签格式：WARP[v4]→v4 表示 WARP 底层为 IPv4，内部传输 IPv4
             ROUTE_CONFIG: {
-                'ipv4':            { color: '#3b82f6', label: 'IPv4 直连',    badge: 'badge-ipv4' },
-                'ipv6':            { color: '#22C55E', label: 'IPv6 直连',    badge: 'badge-ipv6' },
-                'ipv4_warp':       { color: '#F59E0B', label: 'WARP[v4]→v4',  badge: 'badge-ipv4-warp' },
-                'ipv4_warp_ipv6':  { color: '#EAB308', label: 'WARP[v4]→v6',  badge: 'badge-ipv4-warp-ipv6' },
-                'ipv6_warp':       { color: '#EF4444', label: 'WARP[v6]→v6',  badge: 'badge-ipv6-warp' },
-                'ipv6_warp_ipv4':  { color: '#A855F7', label: 'WARP[v6]→v4',  badge: 'badge-ipv6-warp-ipv4' },
+                'ipv4': { color: '#3b82f6', label: 'IPv4 直连', badge: 'badge-ipv4' },
+                'ipv6': { color: '#22C55E', label: 'IPv6 直连', badge: 'badge-ipv6' },
+                'ipv4_warp': { color: '#F59E0B', label: 'WARP[v4]→v4', badge: 'badge-ipv4-warp' },
+                'ipv4_warp_ipv6': { color: '#EAB308', label: 'WARP[v4]→v6', badge: 'badge-ipv4-warp-ipv6' },
+                'ipv6_warp': { color: '#EF4444', label: 'WARP[v6]→v6', badge: 'badge-ipv6-warp' },
+                'ipv6_warp_ipv4': { color: '#A855F7', label: 'WARP[v6]→v4', badge: 'badge-ipv6-warp-ipv4' },
             },
 
             // ===== 生命周期 =====
@@ -3603,20 +4698,20 @@
                     local: { x: cx, y: cy, label: '本机', color: '#A3A3A3' },
                     tunnel: { x: tunnelX, y: cy, w: tunnelW, h: tunnelH, label: 'WARP 隧道', color: '#F68320' },
                     // 类型节点（端口形状，最右侧竖直排列）
-                    type_ipv4:            { x: typeX, y: typeStartY,                  label: 'IPv4 直连',    color: '#3b82f6', isType: true, routeType: 'ipv4' },
-                    type_ipv6:            { x: typeX, y: typeStartY + typeSpacing,    label: 'IPv6 直连',    color: '#22C55E', isType: true, routeType: 'ipv6' },
-                    type_ipv4_warp:       { x: typeX, y: typeStartY + typeSpacing * 2, label: 'WARP[v4]→v4', color: '#F59E0B', isType: true, routeType: 'ipv4_warp' },
-                    type_ipv4_warp_ipv6:  { x: typeX, y: typeStartY + typeSpacing * 3, label: 'WARP[v4]→v6', color: '#EAB308', isType: true, routeType: 'ipv4_warp_ipv6' },
-                    type_ipv6_warp:       { x: typeX, y: typeStartY + typeSpacing * 4, label: 'WARP[v6]→v6', color: '#EF4444', isType: true, routeType: 'ipv6_warp' },
-                    type_ipv6_warp_ipv4:  { x: typeX, y: typeStartY + typeSpacing * 5, label: 'WARP[v6]→v4', color: '#A855F7', isType: true, routeType: 'ipv6_warp_ipv4' },
+                    type_ipv4: { x: typeX, y: typeStartY, label: 'IPv4 直连', color: '#3b82f6', isType: true, routeType: 'ipv4' },
+                    type_ipv6: { x: typeX, y: typeStartY + typeSpacing, label: 'IPv6 直连', color: '#22C55E', isType: true, routeType: 'ipv6' },
+                    type_ipv4_warp: { x: typeX, y: typeStartY + typeSpacing * 2, label: 'WARP[v4]→v4', color: '#F59E0B', isType: true, routeType: 'ipv4_warp' },
+                    type_ipv4_warp_ipv6: { x: typeX, y: typeStartY + typeSpacing * 3, label: 'WARP[v4]→v6', color: '#EAB308', isType: true, routeType: 'ipv4_warp_ipv6' },
+                    type_ipv6_warp: { x: typeX, y: typeStartY + typeSpacing * 4, label: 'WARP[v6]→v6', color: '#EF4444', isType: true, routeType: 'ipv6_warp' },
+                    type_ipv6_warp_ipv4: { x: typeX, y: typeStartY + typeSpacing * 5, label: 'WARP[v6]→v4', color: '#A855F7', isType: true, routeType: 'ipv6_warp_ipv4' },
                     // 直连计数节点（圆形，隧道右上/右下角外侧）
-                    count_ipv4: { x: tunnelRight + directOffset, y: tunnelTop - directOffset,    color: '#3b82f6', isCount: true, routeType: 'ipv4' },
+                    count_ipv4: { x: tunnelRight + directOffset, y: tunnelTop - directOffset, color: '#3b82f6', isCount: true, routeType: 'ipv4' },
                     count_ipv6: { x: tunnelRight + directOffset, y: tunnelBottom + directOffset, color: '#22C55E', isCount: true, routeType: 'ipv6' },
                     // WARP 计数节点（圆形，隧道矩形内部）
-                    count_ipv4_warp:       { x: tunnelX, y: warpCountStartY,                  color: '#F59E0B', isCount: true, inTunnel: true, routeType: 'ipv4_warp' },
-                    count_ipv4_warp_ipv6:  { x: tunnelX, y: warpCountStartY + warpCountSpacing, color: '#EAB308', isCount: true, inTunnel: true, routeType: 'ipv4_warp_ipv6' },
-                    count_ipv6_warp:       { x: tunnelX, y: warpCountStartY + warpCountSpacing * 2, color: '#EF4444', isCount: true, inTunnel: true, routeType: 'ipv6_warp' },
-                    count_ipv6_warp_ipv4:  { x: tunnelX, y: warpCountStartY + warpCountSpacing * 3, color: '#A855F7', isCount: true, inTunnel: true, routeType: 'ipv6_warp_ipv4' },
+                    count_ipv4_warp: { x: tunnelX, y: warpCountStartY, color: '#F59E0B', isCount: true, inTunnel: true, routeType: 'ipv4_warp' },
+                    count_ipv4_warp_ipv6: { x: tunnelX, y: warpCountStartY + warpCountSpacing, color: '#EAB308', isCount: true, inTunnel: true, routeType: 'ipv4_warp_ipv6' },
+                    count_ipv6_warp: { x: tunnelX, y: warpCountStartY + warpCountSpacing * 2, color: '#EF4444', isCount: true, inTunnel: true, routeType: 'ipv6_warp' },
+                    count_ipv6_warp_ipv4: { x: tunnelX, y: warpCountStartY + warpCountSpacing * 3, color: '#A855F7', isCount: true, inTunnel: true, routeType: 'ipv6_warp_ipv4' },
                 };
             },
 
@@ -3789,7 +4884,7 @@
                 ctx.textBaseline = 'middle';
                 ctx.fillText(n.label, n.x, n.y);
                 const total = (this.stats.ipv4 || 0) + (this.stats.ipv6 || 0) + (this.stats.ipv4_warp || 0) +
-                              (this.stats.ipv4_warp_ipv6 || 0) + (this.stats.ipv6_warp || 0) + (this.stats.ipv6_warp_ipv4 || 0);
+                    (this.stats.ipv4_warp_ipv6 || 0) + (this.stats.ipv6_warp || 0) + (this.stats.ipv6_warp_ipv4 || 0);
                 ctx.fillStyle = '#A3A3A3';
                 ctx.font = '500 8px sans-serif';
                 ctx.fillText(total + ' 连接', n.x, n.y + 32);
@@ -4188,6 +5283,8 @@
 
         // ===== 统一初始化 =====
         async function initApp() {
+            if (_initStarted) return;  // 防止重复初始化
+            _initStarted = true;
             try {
                 await waitForApi(15000);
             } catch (e) {
@@ -4205,7 +5302,7 @@
                 if (typeof HomeTab !== 'undefined' && HomeTab.setDetailCollapsed) {
                     HomeTab.setDetailCollapsed(prefs.network_detail_collapsed || false);
                 }
-            } catch(e) {
+            } catch (e) {
                 console.warn('get_ui_prefs failed:', e);
             }
             // 各tab初始化
@@ -4214,9 +5311,12 @@
             if (typeof TrafficTab !== 'undefined') {
                 TrafficTab.init();
             }
-            // 默认显示主页tab
-            switchTab('home');
+            // 默认显示主页tab（仅当用户未手动切换时）
+            if (!_userSwitchedTab) {
+                switchTab('home');
+            }
         }
     </script>
 </body>
+
 </html>

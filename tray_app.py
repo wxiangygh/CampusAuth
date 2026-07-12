@@ -178,6 +178,33 @@ class ApiBridge:
     def load_config(self):
         return load_config()
 
+    def start_resize(self, direction):
+        """frameless 窗口已改用 JS mousemove + resize_move_window 实现，此方法保留兼容。"""
+        pass
+
+    def get_window_rect(self):
+        """返回当前窗口位置和尺寸 {x, y, width, height}。"""
+        try:
+            hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
+            if hwnd:
+                rect = ctypes.wintypes.RECT()
+                ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                return {'x': rect.left, 'y': rect.top,
+                        'width': rect.right - rect.left, 'height': rect.bottom - rect.top}
+        except Exception as e:
+            logger.error(f"get_window_rect failed: {e}")
+        return {'x': 0, 'y': 0, 'width': 800, 'height': 600}
+
+    def resize_move_window(self, width, height, x, y):
+        """调整窗口大小并移动到指定位置（用于 frameless 窗口自定义拖拽调整大小）。"""
+        try:
+            hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
+            if hwnd:
+                # SWP_NOZORDER=0x0004 | SWP_NOACTIVATE=0x0010
+                ctypes.windll.user32.SetWindowPos(hwnd, 0, int(x), int(y), int(width), int(height), 0x0014)
+        except Exception as e:
+            logger.error(f"resize_move_window failed: {e}")
+
     def minimize_window(self):
         try:
             if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
@@ -189,6 +216,7 @@ class ApiBridge:
     def close_window(self):
         try:
             if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
+                core.state._tray_app_instance.save_window_geometry()
                 core.state._tray_app_instance.settings_window.hide()
                 logger.info("Window hidden via title bar button")
         except Exception as e:
@@ -895,6 +923,9 @@ def on_exit(icon, item):
         core.state._tray_app_instance._should_exit = True
         if not core.state._tray_app_instance._webview_started:
             core.state._tray_app_instance._webview_start_event.set()
+        # 先保存窗口几何，再销毁窗口
+        if core.state._tray_app_instance.settings_window:
+            core.state._tray_app_instance.save_window_geometry()
         # 销毁所有 webview 窗口，让 webview.start() 退出
         for win_attr in ('settings_window',):
             win = getattr(core.state._tray_app_instance, win_attr, None)
@@ -906,8 +937,6 @@ def on_exit(icon, item):
                 setattr(core.state._tray_app_instance, win_attr, None)
     cleanup_wifi_event()
     icon.stop()
-    if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
-        core.state._tray_app_instance.save_window_geometry()
     if core.state.TRAY_MUTEX:
         kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
         kernel32.CloseHandle(core.state.TRAY_MUTEX)

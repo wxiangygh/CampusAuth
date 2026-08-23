@@ -32,7 +32,7 @@ def _interruptible_sleep(seconds, check_interval=0.5):
 
 
 def scan_wifi_networks():
-    code, output, _ = run_command('netsh wlan show networks')
+    code, output, _ = run_command('netsh wlan show networks', timeout=5)
     networks = []
     for line in output.split('\n'):
         line = line.strip()
@@ -44,7 +44,7 @@ def scan_wifi_networks():
 
 
 def get_wifi_interface_name():
-    code, output, _ = run_command('netsh wlan show interfaces')
+    code, output, _ = run_command('netsh wlan show interfaces', timeout=3)
     for line in output.split('\n'):
         line = line.strip()
         if (line.startswith('名称') or line.startswith('Name')) and ':' in line:
@@ -55,7 +55,7 @@ def get_wifi_interface_name():
 def get_local_ip():
     wifi_name = get_wifi_interface_name()
     if wifi_name:
-        code, output, _ = run_command('ipconfig')
+        code, output, _ = run_command('ipconfig', timeout=4)
         lines = output.split('\n')
         found_wifi = False
         for line in lines:
@@ -84,7 +84,7 @@ def get_local_ip():
 
 
 def get_mac_address():
-    code, output, _ = run_command('getmac /fo csv /nh')
+    code, output, _ = run_command('getmac /fo csv /nh', timeout=3)
     for line in output.split('\n'):
         if line.strip():
             parts = line.split(',')
@@ -94,7 +94,7 @@ def get_mac_address():
 
 
 def get_current_wifi_ssid():
-    code, output, _ = run_command('netsh wlan show interfaces')
+    code, output, _ = run_command('netsh wlan show interfaces', timeout=3)
     for line in output.split('\n'):
         line_stripped = line.strip()
         if (line_stripped.startswith('SSID') or line_stripped.startswith('配置文件')) and ':' in line_stripped:
@@ -139,7 +139,7 @@ def has_public_ipv6():
         tuple[bool, str]: (是否找到, 第一个匹配的地址)。
                           未找到时地址为空字符串。
     """
-    code, output, _ = run_command('ipconfig')
+    code, output, _ = run_command('ipconfig', timeout=4)
     if code != 0:
         logger.warning("has_public_ipv6: ipconfig failed")
         return False, ''
@@ -224,10 +224,10 @@ def is_warp_connected():
     return False
 
 
-def _check_internet():
+def _check_internet(timeout=2):
     try:
         import socket
-        socket.create_connection(('8.8.8.8', 53), timeout=3)
+        socket.create_connection(('8.8.8.8', 53), timeout=timeout)
         return True
     except Exception:
         return False

@@ -1,0 +1,7 @@
+pystray
+Pillow
+pywebview
+dnspython
+psutil
+pythonnet
+pyinstaller

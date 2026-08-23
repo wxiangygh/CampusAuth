@@ -15,6 +15,8 @@ _auth_cancelled = threading.Event()
 # WiFi 事件监视
 _wifi_event_handle = None
 _wifi_monitor_started = False
+_wifi_monitor_stop = threading.Event()
+_wifi_monitor_thread = None
 
 # WARP 配置备份（_set_warp_endpoint_ipv6 使用）
 _conf_json_backup = None

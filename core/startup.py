@@ -10,14 +10,27 @@ import time
 import threading
 import traceback
 import logging
+from pathlib import Path
 
 import core.state
 from core.state import WIFI_EVENT_NAME, _auth_lock
 from core.command import run_command
+from core.config import get_config
+from core.status import network_status
 from core.network import get_current_wifi_ssid, is_warp_connected, get_wifi_interface_name
 from core.warp_manager import update_tray_icon, update_tray_icon_restore
 
 logger = logging.getLogger('wifi_tray')
+
+TASK_NAME_STARTUP = 'WiFiAutoAuthStartup'
+SCRIPT_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
+
+
+def is_admin():
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
 
 
 def check_single_instance():
@@ -103,13 +116,19 @@ def wifi_event_monitor():
         logger.info("WiFi event monitor thread started")
         kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
         # 延迟导入以避免循环依赖（放在循环外，避免每次事件触发都执行导入语句）
-        from tray_app import load_config
         from core.auth import run_auth_task, run_restore_task
-        while True:
-            result = kernel32.WaitForSingleObject(core.state._wifi_event_handle, 0xFFFFFFFF)
+        while not core.state._wifi_monitor_stop.is_set():
+            result = kernel32.WaitForSingleObject(core.state._wifi_event_handle, 1000)
+            if core.state._wifi_monitor_stop.is_set():
+                break
+            if result == 258:
+                continue
+            if result != 0:
+                logger.warning('WiFi event wait failed: result=%s', result)
+                break
             if result == 0:
                 logger.info("WiFi connection event signal received")
-                cfg = load_config()
+                cfg = get_config()
                 auto_auth = cfg.get('auto_auth', False)
                 auto_restore = cfg.get('auto_restore', False)
                 if not auto_auth and not auto_restore:
@@ -117,7 +136,7 @@ def wifi_event_monitor():
                     _update_tray_status()
                     continue
                 target_wifi = cfg.get('wifi_name', '')
-                time.sleep(3)
+                time.sleep(1)
                 current_wifi = get_current_wifi_ssid()
                 logger.info(f"Current WiFi: {current_wifi!r}, Target WiFi: {target_wifi!r}")
                 if current_wifi == target_wifi and auto_auth:
@@ -168,26 +187,36 @@ def wifi_event_monitor():
                     _update_tray_status()
     except Exception as e:
         logger.error(f"wifi_event_monitor crashed: {e}\n{traceback.format_exc()}")
+    finally:
+        handle = core.state._wifi_event_handle
+        if handle:
+            try:
+                ctypes.WinDLL('kernel32', use_last_error=True).CloseHandle(handle)
+            except Exception:
+                logger.exception('Failed to close WiFi event handle')
+        core.state._wifi_event_handle = None
         core.state._wifi_monitor_started = False
-
+        core.state._wifi_monitor_thread = None
+        logger.info('WiFi event monitor stopped')
 
 def start_wifi_event_monitor():
     """启动 WiFi 事件监视"""
-    if core.state._wifi_monitor_started:
+    thread = core.state._wifi_monitor_thread
+    if thread and thread.is_alive():
         logger.info("WiFi event monitor already running, skipping")
         return
+    core.state._wifi_monitor_stop.clear()
     core.state._wifi_monitor_started = True
-    t = threading.Thread(target=wifi_event_monitor, daemon=True)
+    t = threading.Thread(target=wifi_event_monitor, name='wifi-event-monitor', daemon=True)
+    core.state._wifi_monitor_thread = t
     t.start()
     logger.info("WiFi event monitor thread launched")
-
 
 def check_startup_wifi_and_auth():
     """开机时检查 WiFi 并认证"""
     # 延迟导入以避免循环依赖
-    from tray_app import load_config
     from core.auth import run_auth_task
-    cfg = load_config()
+    cfg = get_config()
     if not cfg.get('auto_auth'):
         _update_tray_status()
         return
@@ -219,40 +248,26 @@ def check_startup_wifi_and_auth():
 
 
 def _update_tray_status():
-    """更新托盘状态"""
+    """Refresh the shared status; tray and UI update through subscribers."""
     try:
-        if not core.state._tray_app_instance or not core.state._tray_app_instance.icon:
-            return
-        # create_icon 仍由 tray_app.py 持有，延迟导入避免循环依赖
-        from tray_app import create_icon
-        status = core.state._tray_app_instance.api.check_network_status()
-        s = status.get('status', 'disconnected')
-        if s == 'connected' or s == 'partial':
-            core.state._tray_app_instance.icon.icon = create_icon('orange')
-            core.state._tray_app_instance.icon.title = status.get('message', 'WARP已连接')
-        elif s == 'normal':
-            core.state._tray_app_instance.icon.icon = create_icon('green')
-            core.state._tray_app_instance.icon.title = '正常模式'
-        else:
-            core.state._tray_app_instance.icon.icon = create_icon('gray')
-            core.state._tray_app_instance.icon.title = '未连接'
-    except Exception as e:
-        logger.error(f"_update_tray_status failed: {e}")
-
+        return network_status.refresh()
+    except Exception as exc:
+        logger.error('_update_tray_status failed: %s', exc)
+        return {'status': 'unknown', 'message': str(exc)}
 
 def cleanup_wifi_event():
-    """清理 WiFi 事件句柄"""
-    if core.state._wifi_event_handle:
-        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-        kernel32.CloseHandle(core.state._wifi_event_handle)
-        core.state._wifi_event_handle = None
-        logger.info("WiFi event handle released")
-
+    """Request monitor shutdown and wait briefly for deterministic cleanup."""
+    core.state._wifi_monitor_stop.set()
+    handle = core.state._wifi_event_handle
+    if handle:
+        ctypes.WinDLL('kernel32', use_last_error=True).SetEvent(handle)
+    thread = core.state._wifi_monitor_thread
+    if thread and thread is not threading.current_thread():
+        thread.join(timeout=2)
+    logger.info("WiFi event monitor stop requested")
 
 def _build_schtasks_tr(extra_args=''):
     """构建 schtasks /tr 参数"""
-    # SCRIPT_DIR 仍由 tray_app.py 持有，延迟导入避免循环依赖
-    from tray_app import SCRIPT_DIR
     if getattr(sys, 'frozen', False):
         exe_path = sys.executable
         tr = exe_path
@@ -269,11 +284,9 @@ def _build_schtasks_tr(extra_args=''):
 
 def setup_startup_task():
     """设置开机自启任务"""
-    # 以下符号仍由 tray_app.py 持有，延迟导入避免循环依赖
-    from tray_app import is_admin, CONFIG, TASK_NAME_STARTUP
     if is_admin():
         logger.info("Already running as admin, setting up startup task")
-        args = '--silent' if CONFIG.get('silent_startup') else ''
+        args = '--silent' if get_config().get('silent_startup') else ''
         tr_value = _build_schtasks_tr(args)
         cmd_str = f'schtasks /Create /TN "{TASK_NAME_STARTUP}" /TR "{tr_value}" /SC ONLOGON /RL HIGHEST /F'
         logger.info(f"setup_startup_task: cmd={cmd_str}")
@@ -289,9 +302,7 @@ def setup_startup_task():
 
 def register_wifi_event_task():
     """注册 WiFi 事件任务"""
-    # CONFIG 仍由 tray_app.py 持有，延迟导入避免循环依赖
-    from tray_app import CONFIG
-    if not CONFIG.get('wifi_name'):
+    if not get_config().get('wifi_name'):
         return False
     try:
         run_command('schtasks /Delete /TN WiFiAutoAuthEvent /F')
@@ -339,8 +350,6 @@ def unregister_wifi_event_task():
 
 def check_startup_status():
     """检查自启任务状态"""
-    # TASK_NAME_STARTUP 仍由 tray_app.py 持有，延迟导入避免循环依赖
-    from tray_app import TASK_NAME_STARTUP
     code, output, _ = run_command(f'schtasks /Query /TN "{TASK_NAME_STARTUP}"')
     enabled = code == 0
     logger.debug(f"check_startup_status: enabled={enabled}")
@@ -349,8 +358,6 @@ def check_startup_status():
 
 def remove_startup_task():
     """移除自启任务"""
-    # TASK_NAME_STARTUP 仍由 tray_app.py 持有，延迟导入避免循环依赖
-    from tray_app import TASK_NAME_STARTUP
     code, output, _ = run_command(f'schtasks /Delete /TN "{TASK_NAME_STARTUP}" /F')
     if code == 0:
         logger.info("Startup task removed")
@@ -376,8 +383,6 @@ def hide_console():
 
 def elevate_if_needed():
     """如果需要则提权执行"""
-    # is_admin 仍由 tray_app.py 持有，延迟导入避免循环依赖
-    from tray_app import is_admin
     if is_admin():
         return
     logger.info("Not admin, elevating...")

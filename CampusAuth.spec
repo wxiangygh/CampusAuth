@@ -11,6 +11,7 @@ a = Analysis(
         'dns', 'dns.resolver', 'dns.exception', 'dns.rdatatype', 'dns.rdataclass', 'dns.rcode',
         'core', 'core.state', 'core.command', 'core.webview', 'core.network',
         'core.warp_manager', 'core.auth', 'core.startup',
+        'core.config', 'core.secrets', 'core.app_state', 'core.workflow', 'core.auth_workflow', 'core.status',
     ],
     hookspath=[],
     hooksconfig={},

@@ -2389,6 +2389,28 @@
                         </button>
                     </div>
                 </div>
+
+                <div class="form-group" id="workflowEditor">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                        <div>
+                            <label style="margin:0;">认证工作流</label>
+                            <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">
+                                可调整顺序、开关、单步超时和重试次数；失败时自动回滚临时网络设置。
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:6px;">
+                            <button class="btn-icon" type="button" onclick="WorkflowEditor.reset()">恢复默认</button>
+                            <button class="btn-icon" type="button" onclick="WorkflowEditor.save()">保存工作流</button>
+                        </div>
+                    </div>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-tertiary);margin:9px 0 0;">
+                        认证总时限（秒）
+                        <input id="authTotalTimeout" type="number" min="30" max="300" value="90"
+                            onchange="_doAutoSave()" style="width:84px;padding:5px;">
+                    </label>
+                    <div id="workflowSteps" style="display:flex;flex-direction:column;gap:7px;margin-top:10px;"></div>
+                    <div id="workflowMessage" style="font-size:11px;color:var(--text-tertiary);margin-top:7px;"></div>
+                </div>
             </div>
         </div>
 
@@ -2902,6 +2924,28 @@
             }
         }
 
+        let _lastStateRevision = 0;
+        function onAppState(state) {
+            if (!state || Number(state.revision || 0) <= _lastStateRevision) return;
+            _lastStateRevision = Number(state.revision || 0);
+            if (state.config_revision) _configRevision = Math.max(_configRevision || 0, state.config_revision);
+            const operation = state.operation || {};
+            if (operation.status === 'running') {
+                onAuthProgress({
+                    step: operation.step || 0,
+                    total: operation.total || 1,
+                    message: operation.message || '正在处理...',
+                    status: 'running',
+                    action: operation.kind || 'auth'
+                });
+                return;
+            }
+            if (_authRunning && ['success', 'error', 'cancelled'].includes(operation.status)) {
+                finishAuth(operation.status === 'success', operation.message || '', operation.kind || _currentAction);
+                return;
+            }
+            if (!_authRunning && state.network) updateStatusFromCheck(state.network);
+        }
         const STATUS_ICONS = {
             wifi: '<svg viewBox="0 0 24 24"><path d="M1 1l22 22"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>',
             check: '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>',
@@ -3107,22 +3151,38 @@
 
         // ===== Settings =====
         let _autoSaveTimer;
-        let _configLoaded = false;  // 初始配置加载完成前禁止自动保存，防止空表单覆盖已保存的配置
-        function _doAutoSave() {
-            if (!_configLoaded) return;  // 配置未加载完成，跳过自动保存
-            var config = {
+        let _configLoaded = false;
+        let _configRevision = 0;
+        let _saveSerial = Promise.resolve();
+
+        function _collectFormConfig() {
+            return {
                 wifi_name: document.getElementById('wifiName').value.trim(),
                 username: document.getElementById('username').value.trim(),
                 password: document.getElementById('password').value,
                 auto_auth: document.getElementById('autoAuth').checked,
                 auto_restore: document.getElementById('autoRestore').checked,
                 warp_cli_path: document.getElementById('warpCliPath').value.trim(),
-                silent_startup: document.getElementById('silentStartup').checked
+                silent_startup: document.getElementById('silentStartup').checked,
+                auth_total_timeout: Number(document.getElementById('authTotalTimeout').value || 90)
             };
-            window.pywebview.api.auto_save_form(config);
         }
 
-        ['wifiName', 'username', 'password', 'warpCliPath'].forEach(function (id) {
+        function _doAutoSave() {
+            if (!_configLoaded) return Promise.resolve();
+            const config = _collectFormConfig();
+            _saveSerial = _saveSerial.catch(() => null).then(async () => {
+                const result = await window.pywebview.api.auto_save_form(config);
+                if (result && result.revision) _configRevision = result.revision;
+                if (result && result.success === false) {
+                    console.error('Auto-save failed:', result.message);
+                    const message = document.getElementById('workflowMessage');
+                    if (message) message.textContent = '配置保存失败：' + result.message;
+                }
+                return result;
+            });
+            return _saveSerial;
+        }        ['wifiName', 'username', 'password', 'warpCliPath'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) {
                 el.addEventListener('input', function () {
@@ -3154,6 +3214,79 @@
         });
         window.addEventListener('beforeunload', () => _doAutoSave());
 
+        const WorkflowEditor = {
+            catalog: new Map(),
+            workflow: [],
+
+            async init(savedWorkflow) {
+                try {
+                    const data = await window.pywebview.api.get_workflow_catalog();
+                    this.catalog = new Map((data.steps || []).map(step => [step.id, step]));
+                    this.workflow = JSON.parse(JSON.stringify(savedWorkflow?.length ? savedWorkflow : data.workflow || []));
+                    this.render();
+                } catch (e) {
+                    document.getElementById('workflowMessage').textContent = '工作流加载失败：' + e.message;
+                }
+            },
+
+            render() {
+                const container = document.getElementById('workflowSteps');
+                if (!container) return;
+                container.innerHTML = this.workflow.map((step, index) => {
+                    const meta = this.catalog.get(step.id) || { name: step.id, description: '' };
+                    const finalStep = step.id === 'finalize';
+                    return `<div style="display:grid;grid-template-columns:28px minmax(180px,1fr) 86px 72px 58px;gap:7px;align-items:center;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-secondary);">
+                        <input type="checkbox" ${step.enabled !== false ? 'checked' : ''} ${finalStep ? 'disabled' : ''}
+                            onchange="WorkflowEditor.update(${index},'enabled',this.checked)" title="启用步骤">
+                        <div><div style="font-size:12px;font-weight:600;">${Utils.escapeHtml(meta.name)}</div>
+                            <div style="font-size:10px;color:var(--text-tertiary);">${Utils.escapeHtml(meta.description)}</div></div>
+                        <label style="font-size:10px;color:var(--text-tertiary);margin:0;">超时(秒)
+                            <input type="number" min="1" max="180" value="${Number(step.timeout || 15)}"
+                                onchange="WorkflowEditor.update(${index},'timeout',Number(this.value))" style="padding:4px;margin-top:2px;"></label>
+                        <label style="font-size:10px;color:var(--text-tertiary);margin:0;">重试
+                            <input type="number" min="0" max="5" value="${Number(step.retries || 0)}"
+                                onchange="WorkflowEditor.update(${index},'retries',Number(this.value))" style="padding:4px;margin-top:2px;"></label>
+                        <div style="display:flex;gap:3px;"><button class="btn-icon" type="button" ${index === 0 ? 'disabled' : ''}
+                            onclick="WorkflowEditor.move(${index},-1)">↑</button><button class="btn-icon" type="button" ${index === this.workflow.length - 1 ? 'disabled' : ''}
+                            onclick="WorkflowEditor.move(${index},1)">↓</button></div>
+                    </div>`;
+                }).join('');
+            },
+
+            update(index, key, value) {
+                this.workflow[index][key] = value;
+                document.getElementById('workflowMessage').textContent = '有未保存的工作流更改';
+            },
+
+            move(index, offset) {
+                const target = index + offset;
+                if (target < 0 || target >= this.workflow.length) return;
+                [this.workflow[index], this.workflow[target]] = [this.workflow[target], this.workflow[index]];
+                this.render();
+                document.getElementById('workflowMessage').textContent = '有未保存的工作流更改';
+            },
+
+            async save() {
+                const message = document.getElementById('workflowMessage');
+                message.textContent = '正在保存...';
+                const result = await window.pywebview.api.save_workflow(this.workflow);
+                message.textContent = result.message;
+                if (result.success) {
+                    this.workflow = JSON.parse(JSON.stringify(result.workflow));
+                    if (result.revision) _configRevision = result.revision;
+                    this.render();
+                }
+            },
+
+            async reset() {
+                const result = await window.pywebview.api.reset_workflow();
+                document.getElementById('workflowMessage').textContent = result.message;
+                if (result.success) {
+                    this.workflow = JSON.parse(JSON.stringify(result.workflow));
+                    this.render();
+                }
+            }
+        };
         // ===== WiFi Dropdown =====
         const wifiInput = document.getElementById('wifiName');
         const wifiDropdown = document.getElementById('wifiDropdown');
@@ -3480,6 +3613,9 @@
                     document.getElementById('autoRestore').checked = config.auto_restore || false;
                     document.getElementById('warpCliPath').value = config.warp_cli_path || '';
                     document.getElementById('silentStartup').checked = config.silent_startup || false;
+                    document.getElementById('authTotalTimeout').value = config.auth_total_timeout || 90;
+                    _configRevision = config._revision || 0;
+                    await WorkflowEditor.init(config.auth_workflow || []);
                 } catch (e) {
                     console.error('Failed to load config:', e);
                 } finally {

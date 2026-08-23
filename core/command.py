@@ -20,126 +20,65 @@ logger = logging.getLogger('wifi_tray')
 
 
 def run_command(cmd, shell=True, timeout=30):
+    """Execute a bounded command and return ``(code, stdout, stderr)``.
+
+    List commands always bypass the shell, so arguments such as SSIDs and file
+    paths cannot be reinterpreted as command operators. Temporary binary files
+    avoid pipe deadlocks and work reliably in elevated/windowless processes.
     """
-    执行命令并返回结果。
-    使用临时文件来捕获输出，避免 Windows Store 版 Python 在管理员权限下的 subprocess 管道问题。
-    使用 CREATE_NO_WINDOW + SW_HIDE 彻底避免命令行窗口弹窗。
-    """
-    # 构建命令字符串
-    if isinstance(cmd, list):
-        cmd_parts = []
-        for part in cmd:
-            if ' ' in part or '\t' in part:
-                cmd_parts.append(f'"{part}"')
-            else:
-                cmd_parts.append(part)
-        cmd_str = ' '.join(cmd_parts)
-    else:
-        cmd_str = cmd
+    effective_shell = bool(shell and isinstance(cmd, str))
+    display = cmd if isinstance(cmd, str) else ' '.join(map(str, cmd))
 
-    # 创建临时文件（使用唯一标识符避免冲突）
-    unique_id = uuid.uuid4().hex
-    tmp_out = os.path.join(tempfile.gettempdir(), f'cmd_out_{os.getpid()}_{unique_id}.txt')
-    tmp_err = os.path.join(tempfile.gettempdir(), f'cmd_err_{os.getpid()}_{unique_id}.txt')
-
-    # 构建重定向命令
-    redirect_cmd = f'chcp 65001 >nul & {cmd_str} > "{tmp_out}" 2> "{tmp_err}"'
-
-    # 使用 subprocess.Popen 避免窗口弹窗
     si = subprocess.STARTUPINFO()
     si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     si.wShowWindow = subprocess.SW_HIDE
-
-    try:
-        proc = subprocess.Popen(
-            redirect_cmd,
-            shell=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            startupinfo=si,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
+    timed_out = False
+    cancelled = False
+    exit_code = -1
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
         try:
-            poll_interval = 0.5
-            elapsed = 0.0
-            exit_code = None
-            while elapsed < timeout:
-                exit_code = proc.poll()
-                if exit_code is not None:
-                    break
+            proc = subprocess.Popen(
+                cmd, shell=effective_shell, stdout=stdout_file, stderr=stderr_file,
+                startupinfo=si, creationflags=subprocess.CREATE_NO_WINDOW)
+            deadline = time.monotonic() + max(0.1, float(timeout))
+            while proc.poll() is None:
                 if _auth_cancelled.is_set():
+                    cancelled = True
                     proc.kill()
-                    logger.info(f"run_command: killed due to cancellation: {cmd_str[:80]}")
-                    exit_code = -1
                     break
-                time.sleep(poll_interval)
-                elapsed += poll_interval
-            if exit_code is None:
-                proc.kill()
-                exit_code = -1
-        except Exception as e2:
-            logger.error(f"run_command wait error: {e2}")
+                if time.monotonic() >= deadline:
+                    timed_out = True
+                    proc.kill()
+                    break
+                time.sleep(0.1)
             try:
+                exit_code = proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
                 proc.kill()
-            except Exception:
-                pass
-            exit_code = -1
-    except Exception as e:
-        logger.error(f"run_command Popen error: {e}")
-        exit_code = -1
-
-    # 读取输出文件
-    stdout = ''
-    stderr = ''
-    for _attempt in range(3):
-        try:
-            if os.path.exists(tmp_out):
-                with open(tmp_out, 'r', encoding='utf-8', errors='replace') as f:
-                    stdout = f.read()
-                if '\ufffd' in stdout:
-                    try:
-                        with open(tmp_out, 'r', encoding='gbk', errors='replace') as f:
-                            stdout = f.read()
-                    except Exception:
-                        pass
-                try:
-                    os.remove(tmp_out)
-                except Exception:
-                    pass
-            break
-        except Exception as e:
-            if _attempt < 2:
-                time.sleep(0.3)
-            else:
-                logger.debug(f"run_command: failed to read stdout: {e}")
-
-    for _attempt in range(3):
-        try:
-            if os.path.exists(tmp_err):
-                with open(tmp_err, 'r', encoding='utf-8', errors='replace') as f:
-                    stderr = f.read()
-                if '\ufffd' in stderr:
-                    try:
-                        with open(tmp_err, 'r', encoding='gbk', errors='replace') as f:
-                            stderr = f.read()
-                    except Exception:
-                        pass
-                try:
-                    os.remove(tmp_err)
-                except Exception:
-                    pass
-            break
-        except Exception as e:
-            if _attempt < 2:
-                time.sleep(0.3)
-            else:
-                logger.debug(f"run_command: failed to read stderr: {e}")
-
-    if exit_code == -1:
-        stderr = "Command timed out" if not stderr else stderr
-
+                exit_code = proc.wait(timeout=2)
+        except Exception as exc:
+            logger.error('run_command failed (%s): %s', str(display)[:120], exc)
+            return -1, '', str(exc)
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        stdout = _decode_output(stdout_file.read())
+        stderr = _decode_output(stderr_file.read())
+    if cancelled:
+        return -1, stdout, stderr or 'Command cancelled'
+    if timed_out:
+        return -1, stdout, stderr or f'Command timed out after {timeout:g}s'
     return exit_code, stdout, stderr
 
+
+def _decode_output(data):
+    if not data:
+        return ''
+    for encoding in ('utf-8', 'gbk', 'mbcs'):
+        try:
+            return data.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return data.decode('utf-8', errors='replace')
 
 def run_elevated_powershell(ps_command, timeout=30):
     logger.info(f"run_elevated_powershell: cmd={ps_command[:120]!r}")

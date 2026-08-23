@@ -44,6 +44,11 @@ from core.startup import (
     signal_wifi_event, _create_event_with_acl, check_startup_wifi_and_auth,
     _update_tray_status, elevate_if_needed, hide_console, _build_schtasks_tr,
 )
+from core.config import configure_config, get_config_store, DEFAULT_AUTH_WORKFLOW
+from core.app_state import app_state
+from core.status import network_status
+from core.auth_workflow import workflow_catalog, validate_auth_workflow
+
 
 def get_resource_path(relative_path):
     """获取资源文件路径（支持开发环境和PyInstaller打包）"""
@@ -74,52 +79,27 @@ logger = logging.getLogger('wifi_tray')
 logging.getLogger('PIL').setLevel(logging.WARNING)
 logging.getLogger('pystray').setLevel(logging.WARNING)
 
+CONFIG_STORE = configure_config(CONFIG_FILE)
+CONFIG = CONFIG_STORE.snapshot()
+
+
+def _on_config_changed(config, revision, changed):
+    """Keep legacy readers compatible while publishing one live revision."""
+    global CONFIG
+    CONFIG = config
+    app_state.set_config_revision(revision)
+    logger.info('Config updated: revision=%s, fields=%s', revision, sorted(changed))
+
+
+CONFIG_STORE.subscribe(_on_config_changed)
+app_state.set_config_revision(CONFIG_STORE.revision)
+
+
 def load_config():
-    defaults = {
-        'username': '',
-        'password': '',
-        'wifi_name': '',
-        'auto_auth': False,
-        'auto_startup': False,
-        'auto_restore': False,
-        'portal_ip': '10.21.221.98',
-        'portal_port': '801',
-        'warp_cli_path': '',
-        'silent_startup': False,
-        'window_x': None,
-        'window_y': None,
-        'window': None,  # {'width': int, 'height': int, 'x': int, 'y': int} 或 None
-        'ui_prefs': None  # {'page_size': int, 'traffic_subview': 'list'|'canvas'} 或 None
-    }
-    logger.info(f"Loading config from: {CONFIG_FILE}")
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, encoding='utf-8') as f:
-                cfg = json.load(f)
-                if 'portal_server' in cfg and 'portal_ip' not in cfg:
-                    parts = cfg.pop('portal_server').rsplit(':', 1)
-                    cfg['portal_ip'] = parts[0]
-                    cfg['portal_port'] = parts[1] if len(parts) > 1 else ''
-                    save_config_to_file(cfg)
-                    logger.info(f"Migrated portal_server -> portal_ip={cfg['portal_ip']}, portal_port={cfg['portal_port']}")
-                merged = {**defaults, **cfg}
-                logger.info(f"Config loaded: wifi_name={merged.get('wifi_name')}, username={merged.get('username')}, auto_auth={merged.get('auto_auth')}")
-                return merged
-        except Exception as e:
-            logger.error(f"Failed to load config: {e}")
-    logger.info("Config file not found, using defaults")
-    return defaults
+    """Return a current isolated snapshot; callers cannot mutate shared state."""
+    return CONFIG_STORE.snapshot()
 
-def save_config_to_file(cfg):
-    logger.info(f"Saving config to: {CONFIG_FILE}, wifi_name={cfg.get('wifi_name')}, username={cfg.get('username')}, auto_auth={cfg.get('auto_auth')}")
-    try:
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(cfg, f, indent=2, ensure_ascii=False)
-        logger.info("Config saved successfully")
-    except Exception as e:
-        logger.error(f"Failed to save config: {e}")
 
-CONFIG = load_config()
 
 def is_admin():
     try:
@@ -176,7 +156,7 @@ def ensure_app_icon():
 
 class ApiBridge:
     def load_config(self):
-        return load_config()
+        return CONFIG_STORE.snapshot(include_revision=True)
 
     def start_resize(self, direction):
         """frameless 窗口已改用 JS mousemove + resize_move_window 实现，此方法保留兼容。"""
@@ -225,36 +205,41 @@ class ApiBridge:
     def scan_wifi(self):
         return scan_wifi_networks()
 
-    def save_config(self, config):
-        global CONFIG
-        logger.info(f"save_config called: wifi_name={config.get('wifi_name')}, username={config.get('username')}, auto_auth={config.get('auto_auth')}, auto_restore={config.get('auto_restore')}")
-        cfg = load_config()
-        old_auto_auth = cfg.get('auto_auth', False)
-        old_auto_restore = cfg.get('auto_restore', False)
-        cfg.update(config)
-        save_config_to_file(cfg)
-        CONFIG = cfg
-        need_monitor = cfg.get('auto_auth') or cfg.get('auto_restore')
-        old_need_monitor = old_auto_auth or old_auto_restore
-        if need_monitor:
-            if cfg.get('auto_auth') and not cfg.get('wifi_name'):
-                return {'success': False, 'message': '请先选择或输入WiFi名称'}
-            if not old_need_monitor:
-                start_wifi_event_monitor()
-            if register_wifi_event_task():
-                return {'success': True, 'message': '设置已保存'}
-            else:
-                return {'success': False, 'message': '需要管理员权限才能启用WiFi事件监控'}
-        else:
-            if old_need_monitor:
-                cleanup_wifi_event()
+    def _sync_monitor_state(self, old_config, new_config):
+        old_needed = bool(old_config.get('auto_auth') or old_config.get('auto_restore'))
+        needed = bool(new_config.get('auto_auth') or new_config.get('auto_restore'))
+        task_changed = any(old_config.get(key) != new_config.get(key) for key in
+                           ('wifi_name', 'auto_auth', 'auto_restore'))
+        if needed:
+            start_wifi_event_monitor()
+            if task_changed and not register_wifi_event_task():
+                logger.warning('WiFi event task could not be registered; in-process monitor remains active')
+        elif old_needed:
+            cleanup_wifi_event()
             unregister_wifi_event_task()
-            return {'success': True, 'message': '设置已保存'}
-
+    def save_config(self, config):
+        changes = dict(config or {})
+        expected_revision = changes.pop('_revision', None)
+        if changes.get('auto_auth') and not str(changes.get('wifi_name', '')).strip():
+            return {'success': False, 'message': '请先选择或输入 WiFi 名称'}
+        if 'auth_workflow' in changes:
+            try:
+                validate_auth_workflow(changes['auth_workflow'])
+            except ValueError as exc:
+                return {'success': False, 'message': f'工作流配置无效：{exc}'}
+        old_config = CONFIG_STORE.snapshot()
+        try:
+            saved = CONFIG_STORE.patch(changes, expected_revision=expected_revision)
+        except (TypeError, ValueError, OSError) as exc:
+            return {'success': False, 'message': f'保存失败：{exc}'}
+        self._sync_monitor_state(old_config, saved)
+        return {'success': True, 'message': '设置已保存',
+                'revision': saved.get('_revision')}
     def cancel_operation(self):
         logger.info("cancel_operation called")
         if _auth_lock.locked():
             _auth_cancelled.set()
+            app_state.update_operation(status='cancelled', message='已取消')
             logger.info("Cancel flag set, notifying frontend immediately")
             if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
                 js_code = f"onAuthProgress({{step:0, total:1, message:{_js_escape('已取消')}, status:{_js_escape('cancelled')}}})"
@@ -293,85 +278,51 @@ class ApiBridge:
         return {'success': True, 'message': '认证已启动'}
 
     def auto_save_form(self, form_data):
-        cfg = load_config()
-        old_auto_auth = cfg.get('auto_auth', False)
-        old_auto_restore = cfg.get('auto_restore', False)
-        for key in ('wifi_name', 'username', 'password', 'auto_auth', 'auto_restore', 'warp_cli_path', 'silent_startup', 'portal_ip', 'portal_port'):
-            if key in form_data:
-                cfg[key] = form_data[key]
-        save_config_to_file(cfg)
-        global CONFIG
-        CONFIG = cfg
-        logger.info(f"Auto-saved: wifi={form_data.get('wifi_name')}, user={form_data.get('username')}, auto_auth={form_data.get('auto_auth')}, auto_restore={form_data.get('auto_restore')}")
-        new_auto_auth = cfg.get('auto_auth', False)
-        new_auto_restore = cfg.get('auto_restore', False)
-        need_monitor = new_auto_auth or new_auto_restore
-        if need_monitor and not old_auto_auth and not old_auto_restore:
-            start_wifi_event_monitor()
-            if register_wifi_event_task():
-                logger.info("WiFi event monitor started (auto_auth or auto_restore enabled)")
-            else:
-                logger.warning("Failed to register WiFi event task")
-        elif not need_monitor and (old_auto_auth or old_auto_restore):
-            cleanup_wifi_event()
-            unregister_wifi_event_task()
-            logger.info("WiFi event monitor stopped (both auto_auth and auto_restore disabled)")
-        elif need_monitor and not core.state._wifi_monitor_started:
-            start_wifi_event_monitor()
-            if register_wifi_event_task():
-                logger.info("WiFi event monitor restarted")
-
-    def check_network_status(self):
-        logger.info("check_network_status called")
-        warp_connected = False
-        ipv4_disabled = False
-        warp_cli = get_warp_cli()
-        if warp_cli:
-            code, output, _ = run_command([warp_cli, 'status'], shell=False, timeout=10)
-            if code == 0 and ('Network: healthy' in output or 'Status update: Connected' in output):
-                warp_connected = True
-                logger.debug("check_network_status: WARP connected")
-            elif code != 0:
-                logger.warning(f"check_network_status: warp-cli status failed (code={code})")
-        interface_name = get_wifi_interface_name()
-        if not interface_name:
-            interface_name = 'WLAN'
-        ps_cmd = f'(Get-NetAdapterBinding -Name "{interface_name}" -ComponentID ms_tcpip).Enabled'
-        code, output, err = run_command(['powershell', '-Command', ps_cmd], shell=False)
-        logger.debug(f"check_network_status: IPv4 check code={code}, output={output!r}, err={err!r}")
-        if 'False' in output:
-            ipv4_disabled = True
-            logger.debug(f"check_network_status: IPv4 disabled on {interface_name}")
-        if warp_connected and ipv4_disabled:
-            return {'status': 'connected', 'message': 'WARP已连接，IPv4已禁用'}
-        elif warp_connected and not ipv4_disabled:
-            return {'status': 'partial', 'message': 'WARP已连接，但IPv4未禁用'}
-        elif not warp_connected and ipv4_disabled:
-            warp_adapter = self._check_warp_adapter()
-            if warp_adapter:
-                logger.info("check_network_status: WARP adapter exists but warp-cli status failed, treating as connected")
-                return {'status': 'connected', 'message': 'WARP已连接，IPv4已禁用'}
-            return {'status': 'broken', 'message': 'IPv4已禁用但WARP未连接'}
-        else:
-            has_internet = _check_internet()
-            if has_internet:
-                return {'status': 'normal', 'message': '正常模式'}
-            else:
-                return {'status': 'disconnected', 'message': '未连接'}
-
-    def _check_warp_adapter(self):
+        allowed = {
+            'wifi_name', 'username', 'password', 'auto_auth', 'auto_restore',
+            'warp_cli_path', 'silent_startup', 'portal_ip', 'portal_port',
+            'auto_enable_ipv4', 'auth_total_timeout', 'auth_workflow',
+        }
+        changes = {key: value for key, value in (form_data or {}).items() if key in allowed}
+        old_config = CONFIG_STORE.snapshot()
         try:
-            ps_cmd = 'Get-NetAdapter -Name *WARP* | Where-Object { $_.Status -eq \"Up\" } | Select-Object -First 1 -ExpandProperty Name'
-            code, output, _ = run_command(['powershell', '-Command', ps_cmd], shell=False, timeout=5)
-            if code == 0 and output.strip():
-                logger.debug(f"_check_warp_adapter: found {output.strip()}")
-                return True
-        except Exception as e:
-            logger.debug(f"_check_warp_adapter failed: {e}")
-        return False
+            if 'auth_workflow' in changes:
+                validate_auth_workflow(changes['auth_workflow'])
+            saved = CONFIG_STORE.patch(changes)
+            self._sync_monitor_state(old_config, saved)
+            return {'success': True, 'revision': saved.get('_revision')}
+        except Exception as exc:
+            logger.error('Auto-save failed: %s', exc)
+            return {'success': False, 'message': str(exc),
+                    'revision': CONFIG_STORE.revision}
+    def check_network_status(self):
+        return network_status.refresh()
 
+    def get_app_state(self):
+        return app_state.snapshot()
+
+    def get_workflow_catalog(self):
+        return {
+            'steps': workflow_catalog(),
+            'workflow': CONFIG_STORE.get('auth_workflow', DEFAULT_AUTH_WORKFLOW),
+        }
+
+    def save_workflow(self, workflow):
+        try:
+            validate_auth_workflow(workflow)
+            saved = CONFIG_STORE.patch({'auth_workflow': workflow})
+            return {'success': True, 'message': '工作流已保存',
+                    'workflow': saved['auth_workflow'], 'revision': saved['_revision']}
+        except Exception as exc:
+            return {'success': False, 'message': str(exc)}
+
+    def reset_workflow(self):
+        saved = CONFIG_STORE.patch({'auth_workflow': DEFAULT_AUTH_WORKFLOW})
+        return {'success': True, 'message': '已恢复默认工作流',
+                'workflow': saved['auth_workflow'], 'revision': saved['_revision']}
     def restore_network(self):
         logger.info("restore_network called")
+        app_state.update_operation(kind='restore', status='running', step=0, total=2, message='准备恢复网络')
         def _do_restore():
             if not _auth_lock.acquire(blocking=False):
                 logger.warning("restore_network: auth lock busy, cancelling current operation...")
@@ -386,6 +337,8 @@ class ApiBridge:
                     return
             try:
                 success, msg = run_restore_task()
+                app_state.update_operation(kind='restore', status='success' if success else 'error', message=msg)
+                network_status.request_refresh()
                 if _auth_cancelled.is_set():
                     logger.info("restore_network: operation was cancelled, skipping final notification")
                 else:
@@ -396,6 +349,8 @@ class ApiBridge:
                     update_tray_icon_restore(success, msg)
             except Exception as e:
                 logger.error(f"restore_network thread error: {e}")
+                app_state.update_operation(kind='restore', status='error', message=str(e))
+                network_status.request_refresh()
                 if not _auth_cancelled.is_set():
                     update_tray_icon_restore(False, str(e))
             finally:
@@ -410,21 +365,18 @@ class ApiBridge:
 
     def set_startup(self, enabled):
         logger.info(f"set_startup called: enabled={enabled}")
-        global CONFIG
         if enabled:
             if not is_admin():
                 return {'success': False, 'message': '需要管理员权限'}
             if setup_startup_task():
-                CONFIG['auto_startup'] = True
-                save_config_to_file(CONFIG)
+                CONFIG_STORE.patch({'auto_startup': True})
                 if core.state._tray_app_instance:
                     core.state._tray_app_instance._refresh_tray_menu()
                 return {'success': True, 'message': '开机自启已开启'}
             return {'success': False, 'message': '设置失败'}
         else:
             remove_startup_task()
-            CONFIG['auto_startup'] = False
-            save_config_to_file(CONFIG)
+            CONFIG_STORE.patch({'auto_startup': False})
             if core.state._tray_app_instance:
                 core.state._tray_app_instance._refresh_tray_menu()
             return {'success': True, 'message': '开机自启已关闭'}
@@ -662,13 +614,15 @@ class ApiBridge:
         return {'success': ok, 'message': msg}
 
     def get_auto_enable_ipv4(self):
-        cfg = self._get_mgr().get_config()
-        return cfg.get('auto_enable_ipv4', True)
+        return bool(CONFIG_STORE.get('auto_enable_ipv4', True))
 
     def set_auto_enable_ipv4(self, enabled):
         from warp_exclusion import load_exclusion_config, save_exclusion_config
+        value = bool(enabled)
+        CONFIG_STORE.patch({'auto_enable_ipv4': value})
+        # Keep the exclusion manager's legacy field compatible for upgrades.
         cfg = load_exclusion_config()
-        cfg['auto_enable_ipv4'] = enabled
+        cfg['auto_enable_ipv4'] = value
         save_exclusion_config(cfg)
         return {'success': True, 'message': '已更新'}
 
@@ -719,11 +673,9 @@ class ApiBridge:
             dict: {'success': bool}
         """
         try:
-            cfg = load_config()
-            current = cfg.get('ui_prefs') or {}
+            current = CONFIG_STORE.get('ui_prefs') or {}
             current.update(prefs)
-            cfg['ui_prefs'] = current
-            save_config_to_file(cfg)
+            CONFIG_STORE.patch({'ui_prefs': current})
             logger.info(f"[save_ui_prefs] Saved: {prefs}, merged: {current}")
             return {'success': True}
         except Exception as e:
@@ -977,6 +929,7 @@ class TrayApp:
         self._webview_started = False
         self._webview_start_event = threading.Event()
         self._init_done = False
+        self._state_unsubscribe = None
 
     def calc_initial_window_geometry(self):
         """计算初始窗口几何。优先从配置读取，否则按屏幕85%居中。
@@ -1028,14 +981,53 @@ class TrayApp:
                 h = self.settings_window.height
             # 忽略异常值
             if w > 100 and h > 100 and x > -1000 and y > -1000:
-                cfg = load_config()
-                cfg['window'] = {'width': w, 'height': h, 'x': x, 'y': y}
-                save_config_to_file(cfg)
+                CONFIG_STORE.patch({'window': {'width': w, 'height': h, 'x': x, 'y': y}})
                 logger.info(f"[save_window_geometry] Saved: {w}x{h} at ({x},{y})")
             else:
                 logger.warning(f"[save_window_geometry] Ignored abnormal: {w}x{h} at ({x},{y})")
         except Exception as e:
             logger.error(f"[save_window_geometry] FAILED: {e}")
+
+    def _apply_app_state(self, state):
+        """Apply one state snapshot to both tray and the visible window."""
+        try:
+            operation = state.get('operation', {})
+            network = state.get('network', {})
+            if operation.get('status') == 'running':
+                color = 'orange'
+                title = operation.get('message') or '正在处理'
+            else:
+                status = network.get('status', 'unknown')
+                color = {
+                    'connected': 'orange', 'partial': 'orange', 'normal': 'green',
+                    'broken': 'red', 'disconnected': 'gray', 'unknown': 'gray',
+                }.get(status, 'gray')
+                title = network.get('message') or '校园网助手'
+            if self.icon:
+                self.icon.icon = create_icon(color)
+                self.icon.title = str(title)[:120]
+            if self.settings_window:
+                payload = json.dumps(state, ensure_ascii=False)
+                window = self.settings_window
+                def push_to_window():
+                    try:
+                        window.evaluate_js(f'onAppState({payload})')
+                    except Exception as exc:
+                        logger.debug('Failed to push app state to window: %s', exc)
+                threading.Thread(target=push_to_window, name='state-to-webview', daemon=True).start()
+        except Exception as exc:
+            logger.debug('Failed to apply app state: %s', exc)
+
+    def _start_state_sync(self):
+        if self._state_unsubscribe is None:
+            self._state_unsubscribe = app_state.subscribe(self._apply_app_state)
+        network_status.start()
+
+    def _stop_state_sync(self):
+        network_status.stop()
+        if self._state_unsubscribe:
+            self._state_unsubscribe()
+            self._state_unsubscribe = None
 
     def create_tray(self):
         self.icon = pystray.Icon('wifi_auto_auth')
@@ -1198,6 +1190,7 @@ class TrayApp:
         core.state._tray_app_instance = self
         cfg = load_config()
         self.create_tray()
+        self._start_state_sync()
         logger.info(f"Tray started (admin: {is_admin()})")
 
         tray_thread = threading.Thread(target=self.icon.run, daemon=True)
@@ -1351,12 +1344,12 @@ class TrayApp:
 
         self._webview_started = True
         webview.start(debug=False)
+        self._stop_state_sync()
         
         if self.icon:
             self.icon.stop()
 
 def main():
-    global CONFIG
     logger.info("=" * 50)
     logger.info("WiFi Auto-Auth App Starting")
     logger.info(f"SCRIPT_DIR: {SCRIPT_DIR}")

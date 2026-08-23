@@ -17,7 +17,7 @@ Windows 托盘应用，提供校园网自动认证、WARP 排除管理、流量�
 ## 依赖安装
 
 ```powershell
-pip install pystray Pillow pywebview dnspython psutil pythonnet pyinstaller
+pip install -r requirements.txt
 ```
 
 ## 构建
@@ -42,3 +42,7 @@ pyinstaller CampusAuth.spec --noconfirm
 ```powershell
 python tray_app.py
 ```
+
+## 可配置工作流与实时状态
+
+认证流程现在可在设置页调整步骤顺序、开关、超时、重试和总时限。配置采用原子保存与修订号同步，密码使用 Windows DPAPI 加密；窗口与托盘订阅同一实时状态。架构和安全验收说明见 [docs/REFACTORING.md](docs/REFACTORING.md)。

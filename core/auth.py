@@ -53,17 +53,17 @@ def _interruptible_sleep(seconds, check_interval=0.5):
     return True
 
 
-def disable_ipv4(interface_name):
+def disable_ipv4(interface_name, timeout=15):
     """禁用指定接口的 IPv4，返回 bool 表示成功与否"""
     logger.info(f"disable_ipv4: interface={interface_name!r}")
     ps_cmd = f'Disable-NetAdapterBinding -Name "{interface_name}" -ComponentID ms_tcpip'
-    code, output, err = run_command(['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_cmd], shell=False)
+    code, output, err = run_command(['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_cmd], shell=False, timeout=timeout)
     logger.debug(f"disable_ipv4: direct PowerShell code={code}, err={err[:200]!r}")
     if code == 0:
         logger.info(f"disable_ipv4: IPv4 disabled on {interface_name}")
         return True
     logger.warning(f"disable_ipv4: direct PowerShell failed, trying elevated...")
-    code2, output2, err2 = run_elevated_powershell(ps_cmd)
+    code2, output2, err2 = run_elevated_powershell(ps_cmd, timeout=timeout)
     logger.debug(f"disable_ipv4: elevated PowerShell code={code2}, err={err2[:200]!r}")
     if code2 == 0:
         logger.info(f"disable_ipv4: IPv4 disabled on {interface_name} (elevated)")
@@ -72,17 +72,17 @@ def disable_ipv4(interface_name):
     return False
 
 
-def enable_ipv4(interface_name):
+def enable_ipv4(interface_name, timeout=15):
     """启用指定接口的 IPv4，返回 bool 表示成功与否"""
     logger.info(f"enable_ipv4: interface={interface_name!r}")
     ps_cmd = f'Enable-NetAdapterBinding -Name "{interface_name}" -ComponentID ms_tcpip'
-    code, output, err = run_command(['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_cmd], shell=False)
+    code, output, err = run_command(['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_cmd], shell=False, timeout=timeout)
     logger.debug(f"enable_ipv4: direct PowerShell code={code}, err={err[:200]!r}")
     if code == 0:
         logger.info(f"enable_ipv4: IPv4 enabled on {interface_name}")
         return True
     logger.warning(f"enable_ipv4: direct PowerShell failed, trying elevated...")
-    code2, output2, err2 = run_elevated_powershell(ps_cmd)
+    code2, output2, err2 = run_elevated_powershell(ps_cmd, timeout=timeout)
     logger.debug(f"enable_ipv4: elevated PowerShell code={code2}, err={err2[:200]!r}")
     if code2 == 0:
         logger.info(f"enable_ipv4: IPv4 enabled on {interface_name} (elevated)")
@@ -91,123 +91,98 @@ def enable_ipv4(interface_name):
     return False
 
 
-def portal_login():
-    """执行门户认证，返回 (bool, str) 表示 (是否成功, 消息)"""
-    # CONFIG 仍由 tray_app.py 持有，使用延迟导入避免循环依赖
-    from tray_app import CONFIG
-    username = CONFIG.get('username', '')
-    password = CONFIG.get('password', '')
-    portal_ip = CONFIG.get('portal_ip', '10.21.221.98')
-    portal_port = CONFIG.get('portal_port', '801')
+def portal_login(config=None, timeout=8):
+    """Perform one bounded portal login attempt.
+
+    Retry belongs to the workflow runner so the total duration remains
+    predictable and every retry is visible to the user.
+    """
+    config = config or __import__('core.config', fromlist=['get_config']).get_config()
+    username = config.get('username', '')
+    password = config.get('password', '')
+    portal_ip = config.get('portal_ip', '10.21.221.98')
+    portal_port = config.get('portal_port', '801')
     portal_addr = f"{portal_ip}:{portal_port}" if portal_port else portal_ip
-    wait_for_network_ready(portal_ip, portal_port)
+    if not username or not password:
+        return False, "账号或密码未配置"
     local_ip = get_local_ip()
     mac_addr = get_mac_address()
-    import urllib.request
+    import re
+    import urllib.error
     import urllib.parse
-    url = f"http://{portal_addr}/eportal/portal/login"
-    full_account = username + "@campus"
+    import urllib.request
+
     params = {
-        'callback': 'dr1003',
-        'login_method': '1',
-        'user_account': full_account,
-        'user_password': password,
-        'wlan_user_ip': local_ip,
-        'wlan_user_ipv6': '',
-        'wlan_user_mac': mac_addr,
-        'wlan_ac_ip': '',
-        'wlan_ac_name': '',
-        'jsVersion': '4.2.1',
-        'terminal_type': '1',
-        'lang': 'zh-cn',
-        'v': '9171'
+        'callback': 'dr1003', 'login_method': '1',
+        'user_account': username + '@campus', 'user_password': password,
+        'wlan_user_ip': local_ip, 'wlan_user_ipv6': '', 'wlan_user_mac': mac_addr,
+        'wlan_ac_ip': '', 'wlan_ac_name': '', 'jsVersion': '4.2.1',
+        'terminal_type': '1', 'lang': 'zh-cn', 'v': '9171'
     }
-    # 安全修复：仅记录密码长度，不记录密码前缀、加密状态、含密码的 URL
-    logger.info(f"portal_login: username='{username}', password_len={len(password)}")
-    query_string = urllib.parse.urlencode(params)
-    full_url = f"{url}?{query_string}"
-    logger.info(f"Login URL length: {len(full_url)}")
+    full_url = (f"http://{portal_addr}/eportal/portal/login?" +
+                urllib.parse.urlencode(params))
+    logger.info("Portal login: user=%r, password_len=%d, url_len=%d",
+                username, len(password), len(full_url))
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    for _attempt in range(3):
-        try:
-            req = urllib.request.Request(full_url)
-            req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
-            req.add_header('Referer', f'http://{portal_addr}/eportal/portal.jsp')
-            response = opener.open(req, timeout=10)
-            result = response.read().decode('utf-8')
-            logger.info(f"Response: {result}")
-            if '"result":1' in result or '"result": 1' in result:
-                return True, "认证成功"
-            elif '已经在线' in result or 'already online' in result or '"ret_code":2' in result:
-                return True, "IP已经在线"
-            elif 'AC' in result:
-                return False, "AC认证失败"
-            else:
-                return False, f"认证失败: {result[:100]}"
-        except urllib.error.HTTPError as e:
-            if e.code in (502, 503) and _attempt < 2:
-                logger.warning(f"Portal login got HTTP {e.code}, retrying ({_attempt+1}/3)...")
-                if not _interruptible_sleep(3): return False, "已取消"
-                continue
-            return False, f"认证请求失败: HTTP Error {e.code}: {e.reason}"
-        except Exception as e:
-            if _attempt < 2 and ('timed out' in str(e) or 'Connection' in str(e)):
-                logger.warning(f"Portal login error, retrying ({_attempt+1}/3): {e}")
-                if not _interruptible_sleep(3): return False, "已取消"
-                continue
-            return False, f"认证请求失败: {e}"
-
-
-def portal_logout():
-    """执行门户注销，返回 bool 表示成功与否"""
-    # CONFIG 仍由 tray_app.py 持有，使用延迟导入避免循环依赖
-    from tray_app import CONFIG
-    username = CONFIG.get('username', '')
-    password = CONFIG.get('password', '')
-    portal_ip = CONFIG.get('portal_ip', '10.21.221.98')
-    portal_port = CONFIG.get('portal_port', '801')
-    portal_addr = f"{portal_ip}:{portal_port}" if portal_port else portal_ip
-    local_ip = get_local_ip()
-    mac_addr = get_mac_address()
-    import urllib.request
-    import urllib.parse
-    url = f"http://{portal_addr}/eportal/portal/logout"
-    params = {
-        'callback': 'dr1003',
-        'login_method': '1',
-        'user_account': username + "@campus",
-        'user_password': password,
-        'ac_logout': '0',
-        'register_mode': '0',
-        'wlan_user_ip': local_ip,
-        'wlan_user_ipv6': '',
-        'wlan_vlan_id': '0',
-        'wlan_user_mac': mac_addr,
-        'wlan_ac_ip': '',
-        'wlan_ac_name': '',
-        'jsVersion': '4.2.1',
-        'v': '7724',
-        'lang': 'zh'
-    }
-    query_string = urllib.parse.urlencode(params)
-    full_url = f"{url}?{query_string}"
-    logger.info(f"Logout URL length: {len(full_url)}")
     try:
-        req = urllib.request.Request(full_url)
-        req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
-        req.add_header('Accept', '*/*')
-        req.add_header('Referer', f'http://{portal_addr}/eportal/portal.jsp')
-        req.add_header('Connection', 'keep-alive')
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        response = opener.open(req, timeout=15)
-        result = response.read().decode('utf-8')
-        logger.info(f"Logout response: {result}")
-        _interruptible_sleep(3)
-        return True
-    except Exception as e:
-        logger.error(f"Logout failed: {e}")
-        return False
+        request = urllib.request.Request(full_url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'Referer': f'http://{portal_addr}/eportal/portal.jsp',
+        })
+        response = opener.open(request, timeout=max(1, min(float(timeout), 8)))
+        text = response.read().decode('utf-8', errors='replace')
+        # Portal responses are commonly JSONP. Match fields instead of relying
+        # on one exact spacing variant.
+        if re.search(r'"result"\s*:\s*1', text):
+            return True, '认证成功'
+        lower = text.lower()
+        if '已经在线' in text or 'already online' in lower or re.search(r'"ret_code"\s*:\s*2', text):
+            return True, 'IP已经在线'
+        if 'AC认证' in text or re.search(r'\bAC\b', text):
+            return False, 'AC认证失败，请稍后重试'
+        return False, f"认证被门户拒绝：{text[:120]}"
+    except urllib.error.HTTPError as exc:
+        retryable = exc.code in (408, 429, 500, 502, 503, 504)
+        prefix = '门户暂时不可用' if retryable else '认证请求被拒绝'
+        return False, f"{prefix}（HTTP {exc.code}）"
+    except (TimeoutError, urllib.error.URLError, OSError) as exc:
+        return False, f"认证服务器连接失败：{exc}"
+    except Exception as exc:
+        logger.exception('Unexpected portal login failure')
+        return False, f"认证请求异常：{exc}"
 
+
+def portal_logout(config=None, timeout=6):
+    """Perform a bounded best-effort portal logout."""
+    config = config or __import__('core.config', fromlist=['get_config']).get_config()
+    username = config.get('username', '')
+    password = config.get('password', '')
+    portal_ip = config.get('portal_ip', '10.21.221.98')
+    portal_port = config.get('portal_port', '801')
+    portal_addr = f"{portal_ip}:{portal_port}" if portal_port else portal_ip
+    import urllib.parse
+    import urllib.request
+    params = {
+        'callback': 'dr1003', 'login_method': '1',
+        'user_account': username + '@campus', 'user_password': password,
+        'ac_logout': '0', 'register_mode': '0', 'wlan_user_ip': get_local_ip(),
+        'wlan_user_ipv6': '', 'wlan_vlan_id': '0',
+        'wlan_user_mac': get_mac_address(), 'wlan_ac_ip': '', 'wlan_ac_name': '',
+        'jsVersion': '4.2.1', 'v': '7724', 'lang': 'zh'
+    }
+    full_url = (f"http://{portal_addr}/eportal/portal/logout?" +
+                urllib.parse.urlencode(params))
+    try:
+        request = urllib.request.Request(full_url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'Referer': f'http://{portal_addr}/eportal/portal.jsp',
+        })
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        opener.open(request, timeout=max(1, min(float(timeout), 6))).read()
+        return True
+    except Exception as exc:
+        logger.warning('Portal logout failed: %s', exc)
+        return False
 
 def _push_auth_progress(step, total, message, status='running', action='auth'):
     """推送认证进度到前端"""
@@ -218,228 +193,6 @@ def _push_auth_progress(step, total, message, status='running', action='auth'):
             logger.debug(f"push_auth_progress: step={step}/{total}, status={status}, action={action}, msg={message}")
     except Exception as e:
         logger.error(f"push_auth_progress failed: {e}")
-
-
-def run_auth_task():
-    """执行认证任务（完整流程），返回 (bool, str) 表示 (是否成功, 消息)"""
-    # CONFIG 仍由 tray_app.py 持有，使用延迟导入避免循环依赖
-    from tray_app import CONFIG
-    logger.info("=" * 60)
-    logger.info("Starting authentication process")
-    logger.info("=" * 60)
-    _auth_cancelled.clear()
-    wifi_name = CONFIG.get('wifi_name', '')
-    if not wifi_name:
-        logger.error("WiFi name not configured")
-        return False, "WiFi名称未配置"
-    if not CONFIG.get('username') or not CONFIG.get('password'):
-        logger.error("Credentials not configured")
-        return False, "账号或密码未配置"
-    _push_auth_progress(0, 5, '检查WiFi连接...')
-    logger.info(f"[0/5] Checking WiFi connection to: {wifi_name}")
-    code, output, err = run_command('netsh wlan show interfaces')
-    logger.debug(f"netsh wlan show interfaces output:\n{output[:500]}")
-    wifi_connected = wifi_name in output and ("已连接" in output or "connected" in output.lower())
-    if not wifi_connected:
-        logger.info(f"Not connected to {wifi_name}, attempting to connect...")
-        code, output, err = run_command(f'netsh wlan connect name="{wifi_name}"')
-        if code != 0:
-            error_detail = output.strip() or err.strip() or f"返回码={code}"
-            logger.error(f"Failed to connect to WiFi: {error_detail}")
-            _push_auth_progress(0, 5, f'WiFi连接失败: {error_detail}', 'error')
-            return False, f"WiFi连接失败: {error_detail}"
-        for retry in range(8):
-            if not _interruptible_sleep(2): return False, "已取消"
-            code, output, _ = run_command('netsh wlan show interfaces')
-            if wifi_name in output and ("已连接" in output or "connected" in output.lower()):
-                wifi_connected = True
-                break
-            logger.debug(f"WiFi not ready yet (check {retry+1}/8)")
-        if not wifi_connected:
-            logger.error(f"WiFi connected but target SSID not confirmed")
-            _push_auth_progress(0, 5, f'未检测到目标网络 {wifi_name}', 'error')
-            return False, f"WiFi连接后未检测到目标网络 {wifi_name}"
-    if _check_cancel(): return False, "已取消"
-    logger.info(f"Connected to target WiFi: {wifi_name}")
-    interface_name = get_wifi_interface_name()
-    if not interface_name:
-        logger.error("Cannot get WiFi interface name")
-        _push_auth_progress(0, 5, '无法获取WiFi接口名称', 'error')
-        return False, "无法获取WiFi接口名称"
-    if is_warp_connected():
-        logger.info("WARP already connected, checking IPv4 status...")
-        ps_cmd = f'(Get-NetAdapterBinding -Name "{interface_name}" -ComponentID ms_tcpip).Enabled'
-        code, output, _ = run_command(['powershell', '-Command', ps_cmd], shell=False)
-        if 'False' in output:
-            logger.info("WARP connected and IPv4 disabled, no need to re-authenticate")
-            _push_auth_progress(5, 5, '已认证，WARP已连接', 'success')
-            return True, "已认证，WARP已连接"
-        logger.info("WARP connected but IPv4 still enabled, disabling IPv4...")
-        if disable_ipv4(interface_name):
-            _push_auth_progress(5, 5, '已认证，WARP已连接', 'success')
-            return True, "已认证，WARP已连接"
-        else:
-            _push_auth_progress(5, 5, 'WARP已连接，但IPv4禁用失败', 'error')
-            return False, "WARP已连接，但IPv4禁用失败"
-    if _check_cancel(): return False, "已取消"
-    logger.info(f"WiFi interface: {interface_name}")
-    _push_auth_progress(1, 5, '断开WARP...')
-    logger.info("[1/5] Checking WARP...")
-    disconnect_warp(full=False)
-    code, svc_output, _ = run_command('sc query "CloudflareWARP"')
-    warp_service_was_running = 'RUNNING' in svc_output
-    if warp_service_was_running:
-        logger.info("Disabling WARP virtual adapter to release network filter...")
-        run_command('netsh interface set interface "CloudflareWARP" disable')
-        _interruptible_sleep(1)
-    if _check_cancel(): return False, "已取消"
-    _push_auth_progress(2, 5, '启用IPv4...')
-    logger.info("[2/5] Checking IPv4 status...")
-    ps_cmd = f'(Get-NetAdapterBinding -Name "{interface_name}" -ComponentID ms_tcpip).Enabled'
-    code, output, _ = run_command(['powershell', '-Command', ps_cmd], shell=False)
-    if 'True' not in output:
-        logger.info("IPv4 disabled, enabling...")
-        if not enable_ipv4(interface_name):
-            _push_auth_progress(2, 5, 'IPv4启用失败', 'error')
-            return False, "IPv4启用失败"
-        for ip_retry in range(6):
-            if _check_cancel(): return False, "已取消"
-            try:
-                import socket
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.settimeout(1)
-                s.connect(('8.8.8.8', 80))
-                ip = s.getsockname()[0]
-                s.close()
-                if ip and not ip.startswith('127.'):
-                    logger.info(f"IPv4 address obtained: {ip}")
-                    break
-            except Exception:
-                pass
-            if not _interruptible_sleep(1): return False, "已取消"
-    if _check_cancel(): return False, "已取消"
-    _push_auth_progress(3, 5, 'Portal认证...')
-    logger.info("[3/5] Portal authentication...")
-    success, msg = portal_login()
-    if not success:
-        if 'AC' in msg:
-            logger.info("AC auth failed, logging out and retrying...")
-            portal_logout()
-            if not _interruptible_sleep(2): return False, "已取消"
-            if _check_cancel(): return False, "已取消"
-            success, msg = portal_login()
-        if not success:
-            _push_auth_progress(3, 5, msg, 'error')
-            logger.warning("Portal auth failed, rolling back: reconnecting WARP")
-            disable_ipv4(interface_name)
-            if warp_service_was_running:
-                run_command('netsh interface set interface "CloudflareWARP" enable')
-            connect_warp()
-            return False, msg
-    if _check_cancel(): return False, "已取消"
-    _push_auth_progress(4, 5, '设置IPv6 DNS...')
-    logger.info("[4/5] Setting IPv6 DNS before disabling IPv4...")
-    run_command(f'netsh interface ipv6 set dnsservers "{interface_name}" static 2606:4700:4700::1111 primary')
-    run_command(f'netsh interface ipv6 add dnsservers "{interface_name}" 2606:4700:4700::1001 index=2')
-    logger.info("IPv6 DNS set to Cloudflare (2606:4700:4700::1111, 2606:4700:4700::1001)")
-    if _check_cancel(): return False, "已取消"
-    _push_auth_progress(5, 5, '禁用IPv4并连接WARP...')
-    logger.info("[5/5] Disabling IPv4 and connecting WARP...")
-    if not disable_ipv4(interface_name):
-        _push_auth_progress(5, 5, '禁用IPv4失败', 'error')
-        return False, "禁用IPv4失败"
-    if _check_cancel(): return False, "已取消"
-    if warp_service_was_running:
-        logger.info("Re-enabling WARP virtual adapter...")
-        run_command('netsh interface set interface "CloudflareWARP" enable')
-    # 等待公网 IPv6 地址（2001 开头），最多 60 秒
-    if not _wait_for_ipv6_ready(max_retries=20):
-        # IPv6 不可达，进入重新认证回退循环（最多 2 轮）
-        ipv6_ready = False
-        for retry in range(2):
-            if _check_cancel(): return False, "已取消"
-            _push_auth_progress(5, 5, f'IPv6未就绪，重新认证以获取IPv6（第{retry+1}轮）...')
-            logger.info(f"IPv6 not ready, re-authenticating to trigger IPv6 assignment (round {retry+1}/2)")
-            # 临时启用 IPv4 以恢复网络连接
-            if not enable_ipv4(interface_name):
-                logger.warning("Failed to temporarily enable IPv4 during re-auth retry")
-            if _check_cancel(): return False, "已取消"
-            # 注销当前会话
-            portal_logout()
-            if not _interruptible_sleep(2): return False, "已取消"
-            if _check_cancel(): return False, "已取消"
-            # 重新认证
-            success, msg = portal_login()
-            if not success:
-                _push_auth_progress(5, 5, f'重新认证失败: {msg}', 'error')
-                logger.error(f"Re-auth failed during IPv6 retry: {msg}")
-                return False, f"重新认证失败: {msg}"
-            if _check_cancel(): return False, "已取消"
-            # 再次禁用 IPv4
-            if not disable_ipv4(interface_name):
-                _push_auth_progress(5, 5, '禁用IPv4失败', 'error')
-                return False, "禁用IPv4失败"
-            if _check_cancel(): return False, "已取消"
-            # 等待 IPv6 就绪
-            if _wait_for_ipv6_ready(max_retries=20):
-                ipv6_ready = True
-                logger.info(f"IPv6 ready after re-auth round {retry+1}")
-                break
-            logger.warning(f"IPv6 still not ready after re-auth round {retry+1}")
-        if not ipv6_ready:
-            # 2 轮重新认证后 IPv6 仍不可达，恢复 IPv4 并返回失败
-            enable_ipv4(interface_name)
-            _push_auth_progress(5, 5, 'IPv6网络不可用，已尝试重新认证', 'error')
-            return False, "IPv6网络不可用，无法连接WARP（已尝试重新认证）"
-    if _check_cancel(): return False, "已取消"
-    # IPv6 可达，清空 conf.json 的 IPv4 端点以强制 WARP 走 IPv6
-    if not _set_warp_endpoint_ipv6(True):
-        logger.warning("_set_warp_endpoint_ipv6(True) failed, continuing with default endpoints")
-    if _check_cancel(): return False, "已取消"
-    run_command('sc config "CloudflareWARP" start= auto')
-    code, svc_output, _ = run_command('sc query "CloudflareWARP"')
-    if 'RUNNING' not in svc_output:
-        logger.info("Starting WARP service for MASQUE config...")
-        run_command('net start "CloudflareWARP"')
-        time.sleep(3)
-    warp_cli = get_warp_cli()
-    _set_warp_masque_mode(warp_cli, True)
-    if not connect_warp():
-        # WARP 连接失败：记录诊断日志
-        logger.error("WARP connection failed. Diagnostics:")
-        try:
-            code, status_output, _ = run_command([warp_cli, 'status'], shell=False)
-            logger.error(f"warp-cli status:\n{status_output}")
-        except Exception as diag_e:
-            logger.error(f"Failed to get warp-cli status: {diag_e}")
-        has_v6, v6_addr = has_public_ipv6()
-        logger.error(f"Public IPv6: {has_v6}, addr={v6_addr}")
-        code, route_output, _ = run_command('netsh interface ipv6 show route')
-        logger.error(f"IPv6 routes (first 500 chars):\n{route_output[:500]}")
-        # 恢复配置
-        _set_warp_masque_mode(warp_cli, False)
-        _set_warp_endpoint_ipv6(False)
-        _push_auth_progress(5, 5, 'WARP连接超时，请手动检查', 'error')
-        return False, "WARP连接超时，请手动检查"
-    # WARP 连接成功，恢复配置
-    _set_warp_masque_mode(warp_cli, False)
-    _set_warp_endpoint_ipv6(False)
-    logger.info("=" * 60)
-    logger.info("Authentication completed successfully")
-    logger.info("=" * 60)
-    # 认证成功后，根据配置决定是否重新启用 IPv4
-    # auto_enable_ipv4=True：启用 IPv4（同时保持 WARP，用户可同时访问 IPv4 和 IPv6）
-    # auto_enable_ipv4=False：保持 IPv4 禁用，所有流量走 WARP（IPv6）
-    if CONFIG.get('auto_enable_ipv4', True):
-        logger.info("auto_enable_ipv4=True, re-enabling IPv4 after auth")
-        if enable_ipv4(interface_name):
-            logger.info("IPv4 re-enabled after auth")
-        else:
-            logger.warning("Failed to re-enable IPv4 after auth")
-    else:
-        logger.info("auto_enable_ipv4=False, keeping IPv4 disabled (all traffic via WARP)")
-    _push_auth_progress(5, 5, '认证成功', 'success')
-    return True, "认证成功"
 
 
 def run_restore_task():
@@ -498,3 +251,9 @@ def run_restore_task():
         logger.warning(f"IPv4 has IP but no internet: {e}")
         _push_auth_progress(3, 3, 'IPv4已启用，但可能需要Portal认证', 'success', action='restore')
         return True, "IPv4已启用，但可能需要Portal认证"
+
+
+def run_auth_task():
+    """Run the configured authentication workflow."""
+    from core.auth_workflow import run_auth_workflow
+    return run_auth_workflow()

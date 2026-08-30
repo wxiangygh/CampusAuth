@@ -2,7 +2,7 @@
 import { onMounted, onBeforeUnmount, watch } from 'vue'
 import { NConfigProvider } from 'naive-ui'
 import { naiveTheme, themeOverrides, setThemeMode, isDark, themeMode } from './theme'
-import { store } from './store'
+import { store, checkForUpdate } from './store'
 import { waitForApi, api as bridgeApi } from './bridge'
 import { ui } from './ui'
 import TitleBar from './components/TitleBar.vue'
@@ -30,6 +30,20 @@ watch(
       bridgeApi()?.save_ui_prefs({ active_tab: name })?.catch(() => {})
     }
   }
+)
+
+// 启动时自动检测更新（受设置页"自动检测更新"开关控制；失败静默）
+let _updateChecked = false
+watch(
+  () => store.configLoaded,
+  (loaded) => {
+    if (!loaded || _updateChecked) return
+    _updateChecked = true
+    if (store.form.auto_check_update === false) return
+    // 延迟执行，避免与启动阶段的网络探测/状态刷新抢占
+    setTimeout(() => checkForUpdate(), 2500)
+  },
+  { immediate: true }
 )
 
 // ===== frameless 窗口拖拽缩放（JS mousemove 驱动）=====

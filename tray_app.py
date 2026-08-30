@@ -47,7 +47,11 @@ from core.startup import (
     _update_tray_status, elevate_if_needed, hide_console, _build_schtasks_tr,
 )
 from core.config import configure_config, get_config_store, DEFAULT_AUTH_WORKFLOW
-from core.app_state import app_state
+from core.app_state import app_st
+from core.updater import (UpdateDownloader, check_for_update as _check_for_update,
+                          cleanup_temp_files, install_update as _install_update,
+                          resolve_install_dir)
+from core.version import __version__ate
 from core.status import network_status
 from core.auth_workflow import (
     run_workflow_by_id, validate_auth_workflow, workflow_catalog,
@@ -105,6 +109,24 @@ seed_default_configs()
 
 CONFIG_STORE = configure_config(CONFIG_FILE)
 CONFIG = CONFIG_STORE.snapshot()
+
+
+def record_install_dir():
+    """记录首次安装目录，后续更新始终覆盖安装到该位置。"""
+    try:
+        record = CONFIG_STORE.get('install_dir')
+        resolved = resolve_install_dir(record)
+        if str(record or '') != str(resolved):
+            CONFIG_STORE.patch({'install_dir': str(resolved)})
+        return resolved
+    except Exception:
+        logger.debug('record_install_dir failed', exc_info=True)
+        return None
+
+
+INSTALL_DIR = record_install_dir()
+# 清理上一次更新遗留的临时文件
+cleanup_temp_files()
 
 
 def _on_config_changed(config, revision, changed):
@@ -338,8 +360,108 @@ def ensure_app_icon():
     return str(icon_path)
 
 class ApiBridge:
+    # 应用级单例：一次只进行一个下载任务
+    _update_downloader = UpdateDownloader()
+    _update_state = {'available': False, 'checked': False}
+    _update_lock = threading.Lock()
+
     def load_config(self):
         return CONFIG_STORE.snapshot(include_revision=True)
+
+    # ===== 应用更新（GitHub Releases）=====
+    def get_app_info(self):
+        """应用版本与安装位置（设置页展示用）。"""
+        return {
+            'version': __version__,
+            'install_dir': str(INSTALL_DIR or resolve_install_dir(
+                CONFIG_STORE.get('install_dir'))),
+            'exe': str(Path(INSTALL_DIR or resolve_install_dir(
+                CONFIG_STORE.get('install_dir'))) / 'CampusAuth.exe'),
+        }
+
+    def check_for_update(self):
+        """检查 GitHub Releases 是否有新版本；失败静默（available=False）。"""
+        try:
+            result = _check_for_update()
+            with self._update_lock:
+                self._update_state['available'] = bool(result.get('available'))
+                self._update_state['checked'] = True
+            return result
+        except Exception as exc:
+            logger.info('[updater] check_for_update failed silently: %s', exc)
+            return {'available': False, 'current': __version__, 'latest': None,
+                    'reason': 'error'}
+
+    def get_update_progress(self):
+        """轮询更新下载/安装进度。"""
+        with self._update_lock:
+            available = self._update_state['available']
+        progress = self._update_downloader.progress()
+        progress['available'] = available
+        return progress
+
+    def install_update(self):
+        """下载并安装最新版本，成功后自动退出应用由更新脚本完成覆盖安装。
+
+        只替换 exe 本身，同目录的 tray_config.json / warp_exclusion_config.json 不受影响。
+        """
+        try:
+            with self._update_lock:
+                if not self._update_state['available']:
+                    # 未检测过（或缓存丢失）时先检测一次，避免直接安装失败
+                    result = _check_for_update()
+                    if not result.get('available'):
+                        return {'success': False, 'message': '未检测到新版本'}
+                    self._update_state['available'] = True
+            latest = _check_for_update().get('latest') or {}
+            url = latest.get('download_url')
+            if not url:
+                return {'success': False, 'message': '新版本缺少可下载的安装包'}
+            if self._update_downloader.busy:
+                return {'success': True, 'message': '更新任务进行中',
+                        'progress': self._update_downloader.progress()}
+            self._update_downloader.start(url, latest.get('size', 0),
+                                          on_done=self._on_update_downloaded)
+            return {'success': True, 'message': '开始下载更新',
+                    'progress': self._update_downloader.progress()}
+        except Exception as exc:
+            logger.exception('[updater] install_update failed')
+            return {'success': False, 'message': str(exc)}
+
+    def _on_update_downloaded(self, result):
+        """下载完成后：启动更新脚本 → 退出应用 → 由脚本覆盖安装并重启。"""
+        if not result or not result.get('success'):
+            logger.warning('[updater] download failed, update aborted: %s',
+                           (result or {}).get('error'))
+            return
+        try:
+            self._update_downloader._set(status='installing', pct=100,
+                                         message='正在安装更新…')
+        except Exception:
+            pass
+        install_dir = resolve_install_dir(CONFIG_STORE.get('install_dir'))
+        restart = not bool(CONFIG_STORE.get('silent_startup'))
+        outcome = _install_update(result['file'], install_dir, restart=restart)
+        if not outcome.get('success'):
+            self._update_downloader._set(status='error', pct=0,
+                                         message=f"安装失败：{outcome.get('message')}",
+                                         error=outcome.get('message', 'install_failed'))
+            logger.error('[updater] 覆盖安装启动失败: %s', outcome.get('message'))
+            return
+        # 稍作延迟让前端收到状态更新，然后退出应用，交棒给更新脚本
+        def _exit_later():
+            time.sleep(1.2)
+            try:
+                app = core.state._tray_app_instance
+                if app:
+                    app.request_exit()
+                else:
+                    os._exit(0)
+            except Exception:
+                logger.exception('[updater] exit after update failed')
+                os._exit(0)
+
+        threading.Thread(target=_exit_later, daemon=True).start()
 
     def start_resize(self, direction):
         """frameless 窗口已改用 JS mousemove + resize_move_window 实现，此方法保留兼容。"""
@@ -514,6 +636,7 @@ class ApiBridge:
             'warp_cli_path', 'silent_startup', 'portal_ip', 'portal_port',
             'auto_enable_ipv4', 'auth_total_timeout', 'auth_workflow',
             'auth_button_workflow', 'restore_button_workflow',
+            'auto_check_update',
         }
         changes = {key: value for key, value in (form_data or {}).items() if key in allowed}
         old_config = CONFIG_STORE.snapshot()
@@ -1259,28 +1382,14 @@ def on_reauth(icon, item):
 def on_exit(icon, item):
     logger.info("on_exit: user clicked Exit")
     if core.state._tray_app_instance:
-        core.state._tray_app_instance._should_exit = True
-        if not core.state._tray_app_instance._webview_started:
-            core.state._tray_app_instance._webview_start_event.set()
-        # 先保存窗口几何，再销毁窗口
-        if core.state._tray_app_instance.settings_window:
-            core.state._tray_app_instance.save_window_geometry()
-        # 销毁所有 webview 窗口，让 webview.start() 退出
-        for win_attr in ('settings_window',):
-            win = getattr(core.state._tray_app_instance, win_attr, None)
-            if win:
-                try:
-                    win.destroy()
-                except Exception as e:
-                    logger.debug(f"on_exit: destroy {win_attr} failed: {e}")
-                setattr(core.state._tray_app_instance, win_attr, None)
-    cleanup_wifi_event()
-    icon.stop()
-    if core.state.TRAY_MUTEX:
-        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-        kernel32.CloseHandle(core.state.TRAY_MUTEX)
-        core.state.TRAY_MUTEX = None
-        logger.debug("on_exit: mutex released")
+        core.state._tray_app_instance.request_exit()
+    else:
+        cleanup_wifi_event()
+        icon.stop()
+        if core.state.TRAY_MUTEX:
+            kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+            kernel32.CloseHandle(core.state.TRAY_MUTEX)
+            core.state.TRAY_MUTEX = None
     logger.info("on_exit: application exiting")
     # 退出应用，允许 atexit 和 finally 执行清理
     sys.exit(0)
@@ -1386,6 +1495,41 @@ class TrayApp:
             self._geometry_save_timer.start()
         except Exception as e:
             logger.debug(f"_schedule_geometry_save failed: {e}")
+
+    def request_exit(self):
+        """统一的退出流程（托盘菜单"退出"与更新安装共用）。"""
+        logger.info("request_exit: shutting down")
+        self._should_exit = True
+        if not self._webview_started:
+            self._webview_start_event.set()
+        # 先保存窗口几何，再销毁窗口
+        try:
+            self.save_window_geometry()
+        except Exception as e:
+            logger.debug(f"request_exit: save geometry failed: {e}")
+        for win_attr in ('settings_window',):
+            win = getattr(self, win_attr, None)
+            if win:
+                try:
+                    win.destroy()
+                except Exception as e:
+                    logger.debug(f"request_exit: destroy {win_attr} failed: {e}")
+                setattr(self, win_attr, None)
+        cleanup_wifi_event()
+        if self.icon:
+            try:
+                self.icon.stop()
+            except Exception as e:
+                logger.debug(f"request_exit: icon.stop failed: {e}")
+        if core.state.TRAY_MUTEX:
+            try:
+                kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+                kernel32.CloseHandle(core.state.TRAY_MUTEX)
+                core.state.TRAY_MUTEX = None
+                logger.debug("request_exit: mutex released")
+            except Exception as e:
+                logger.debug(f"request_exit: mutex release failed: {e}")
+        logger.info("request_exit: application exiting")
 
     def _apply_app_state(self, state):
         """Apply one state snapshot to both tray and the visible window."""

@@ -30,6 +30,7 @@ export const store = reactive({
     portal_port: '',
     silent_startup: false,
     auto_startup: false,
+    auto_check_update: true,
     auth_total_timeout: 90,
     // 主页按钮绑定的工作流：'' = 恢复按钮使用内置恢复逻辑
     auth_button_workflow: 'default_auth',
@@ -37,6 +38,18 @@ export const store = reactive({
   },
   configLoaded: false,
   configRevision: 0,
+
+  // ===== 应用更新（GitHub Releases）=====
+  update: {
+    visible: false,
+    version: '',
+    name: '',
+    notes: '',
+    status: '', // downloading | downloading… | installing | error
+    pct: 0,
+    message: '',
+    busy: false,
+  },
 
   // 网络详情
   detail: null,
@@ -335,6 +348,7 @@ export function collectFormConfig() {
     portal_ip: String(f.portal_ip || '').trim(),
     portal_port: String(f.portal_port || '').trim(),
     silent_startup: !!f.silent_startup,
+    auto_check_update: f.auto_check_update !== false,
     auth_total_timeout: Number(f.auth_total_timeout || 90),
     auth_button_workflow: String(f.auth_button_workflow || 'default_auth'),
     restore_button_workflow: String(f.restore_button_workflow || ''),
@@ -358,6 +372,88 @@ export function doAutoSave() {
       }
     })
   return _saveSerial
+}
+
+// ===== 应用更新 =====
+// 更新弹窗由侧边栏底部弹出，展示 Release 说明；确认后下载并覆盖安装，
+// 安装阶段后端会退出应用，由更新脚本完成替换（配置文件保留）。
+let _updatePollTimer = null
+
+export function openUpdate(release) {
+  if (!release) return
+  store.update = {
+    visible: true,
+    version: release.version || '',
+    name: release.name || '',
+    notes: release.notes || '',
+    status: '',
+    pct: 0,
+    message: '',
+    busy: false,
+  }
+}
+
+export function closeUpdate() {
+  store.update.visible = false
+}
+
+function stopUpdatePolling() {
+  if (_updatePollTimer) {
+    clearInterval(_updatePollTimer)
+    _updatePollTimer = null
+  }
+}
+
+export async function checkForUpdate() {
+  const a = api()
+  if (!a) return
+  try {
+    const result = await a.check_for_update()
+    if (result && result.available && result.latest) openUpdate(result.latest)
+  } catch (e) {
+    // 检测失败静默处理，不影响正常使用
+    console.debug('check_for_update failed:', e)
+  }
+}
+
+export async function startUpdate() {
+  const a = api()
+  if (!a || store.update.busy) return
+  store.update.busy = true
+  store.update.status = 'downloading'
+  store.update.pct = 0
+  store.update.message = '正在准备下载…'
+  try {
+    const result = await a.install_update()
+    if (result && result.success === false) {
+      store.update.busy = false
+      store.update.status = 'error'
+      store.update.message = result.message || '更新失败'
+      return
+    }
+  } catch (e) {
+    store.update.busy = false
+    store.update.status = 'error'
+    store.update.message = '更新失败：' + e.message
+    return
+  }
+  // 轮询进度：下载完成并由脚本接管后应用会退出，届时轮询自然失效
+  stopUpdatePolling()
+  _updatePollTimer = setInterval(async () => {
+    try {
+      const progress = await api().get_update_progress()
+      if (!progress) return
+      store.update.pct = progress.pct || 0
+      store.update.status = progress.status || store.update.status
+      if (progress.message) store.update.message = progress.message
+      if (progress.status === 'error') {
+        stopUpdatePolling()
+        store.update.busy = false
+      }
+    } catch (e) {
+      // 应用正在退出，忽略
+    }
+  }, 400)
 }
 
 // ===== 网络详情 =====

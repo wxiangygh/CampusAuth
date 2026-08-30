@@ -109,6 +109,10 @@ DEFAULT_CONFIG = {
     "auto_enable_ipv4": True, "auth_total_timeout": 90,
     "portal_ip": "10.21.221.98", "portal_port": "801",
     "warp_cli_path": "", "silent_startup": False,
+    # 启动时自动检测 GitHub Releases 更新
+    "auto_check_update": True,
+    # 首次运行记录的安装目录，后续更新始终覆盖安装到同一目录
+    "install_dir": None,
     "window_x": None, "window_y": None, "window": None, "ui_prefs": None,
     "active_workflow_id": "default_auth",
     "workflows": _builtin_workflows(),

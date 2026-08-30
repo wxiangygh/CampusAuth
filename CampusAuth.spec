@@ -17,6 +17,7 @@ a = Analysis(
         'core', 'core.state', 'core.command', 'core.webview', 'core.network',
         'core.warp_manager', 'core.auth', 'core.startup',
         'core.config', 'core.secrets', 'core.app_state', 'core.workflow', 'core.auth_workflow', 'core.status',
+        'core.updater', 'core.version',
     ],
     hookspath=[],
     hooksconfig={},

@@ -5,6 +5,9 @@ import { store, doAutoSave } from '../store'
 import { api } from '../bridge'
 import { ui } from '../ui'
 
+// ===== 应用信息（版本 / 安装位置）=====
+const appInfo = ref({ version: '', install_dir: '', exe: '' })
+
 // ===== 按钮绑定工作流 =====
 const workflows = ref([])
 
@@ -65,7 +68,7 @@ watch(
 
 // 开关：立即保存
 watch(
-  () => [store.form.auto_auth, store.form.auto_restore],
+  () => [store.form.auto_auth, store.form.auto_restore, store.form.auto_check_update],
   () => {
     if (!store.configLoaded) return
     clearTimeout(autoSaveTimer)
@@ -131,6 +134,7 @@ async function initSettings() {
     f.portal_ip = config.portal_ip || ''
     f.portal_port = config.portal_port || ''
     f.silent_startup = config.silent_startup || false
+    f.auto_check_update = config.auto_check_update !== false
     f.auth_total_timeout = config.auth_total_timeout || 90
     f.auth_button_workflow = config.auth_button_workflow || 'default_auth'
     f.restore_button_workflow = config.restore_button_workflow || ''
@@ -150,6 +154,13 @@ async function initSettings() {
   } catch (e) {
     suppressStartupWatch = false
     console.error('Failed to get startup status:', e)
+  }
+  // 加载应用信息（版本 / 安装位置）
+  try {
+    const info = await api().get_app_info()
+    if (info) appInfo.value = info
+  } catch (e) {
+    console.error('Failed to load app info:', e)
   }
   // 加载工作流列表供按钮绑定下拉使用
   try {
@@ -272,6 +283,25 @@ onBeforeUnmount(() => {
           </div>
           <div class="toggle-tip">开机自启时不显示主窗口</div>
         </div>
+        <div class="toggle-card">
+          <div class="toggle-head">
+            <span class="toggle-title">自动检测更新</span>
+            <n-switch v-model:value="store.form.auto_check_update" size="small" />
+          </div>
+          <div class="toggle-tip">启动时静默检查 GitHub 新版本</div>
+        </div>
+      </div>
+
+      <div class="about-row">
+        <div class="about-item">
+          <span class="about-label">当前版本</span>
+          <span class="about-value">v{{ appInfo.version || '—' }}</span>
+        </div>
+        <div class="about-item">
+          <span class="about-label">安装位置</span>
+          <span class="about-value path" :title="appInfo.install_dir">{{ appInfo.install_dir || '—' }}</span>
+        </div>
+        <div class="about-tip">更新时会覆盖安装到上述位置，配置文件始终保留</div>
       </div>
     </section>
   </div>
@@ -338,6 +368,46 @@ onBeforeUnmount(() => {
 
 .toggle-tip {
   margin-top: 5px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ===== 版本与安装位置 ===== */
+.about-row {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.about-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.about-label {
+  width: 62px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.about-value {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.about-value.path {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.about-tip {
   font-size: 11px;
   color: var(--text-tertiary);
 }

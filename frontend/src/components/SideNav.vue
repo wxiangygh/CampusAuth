@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch, nextTick } from 'vue'
-import { store } from '../store'
+import { store, closeUpdate, startUpdate } from '../store'
 import { themeMode, setThemeMode } from '../theme'
 import { api } from '../bridge'
 import AppIcon from './AppIcon.vue'
@@ -50,6 +50,29 @@ function onThemeChange(mode) {
   setThemeMode(mode)
   api()?.save_ui_prefs({ theme: mode })?.catch(() => {})
 }
+
+// ===== 更新弹窗（侧边栏底部，主题切换按钮上方）=====
+const updateBodyRef = ref(null)
+
+function onUpdateConfirm() {
+  startUpdate()
+}
+
+function onUpdateClose() {
+  // 下载/安装进行中不允许关闭，避免更新流程被打断
+  if (store.update.busy) return
+  closeUpdate()
+}
+
+// 新内容到达时把说明区滚动回顶部
+watch(
+  () => store.update.visible,
+  async (visible) => {
+    if (!visible) return
+    await nextTick()
+    if (updateBodyRef.value) updateBodyRef.value.scrollTop = 0
+  }
+)
 </script>
 
 <template>
@@ -65,6 +88,30 @@ function onThemeChange(mode) {
       </div>
     </nav>
     <div class="nav-footer">
+      <!-- 更新卡片：从侧边栏底部弹出，位于主题切换按钮上方 -->
+      <transition name="update-pop">
+        <div v-if="store.update.visible" class="update-card">
+          <button class="update-close" title="关闭" @click="onUpdateClose">
+            <AppIcon name="x" :size="12" />
+          </button>
+          <div class="update-head">
+            <span class="update-badge">更新</span>
+            <span class="update-version">v{{ store.update.version }}</span>
+          </div>
+          <div class="update-title">{{ store.update.name || '发现新版本' }}</div>
+          <div class="update-notes" ref="updateBodyRef">{{ store.update.notes }}</div>
+          <div class="update-progress" v-if="store.update.busy">
+            <div class="update-track">
+              <div class="update-fill" :class="{ indeterminate: store.update.status === 'installing' }"
+                :style="{ width: store.update.pct + '%' }"></div>
+            </div>
+            <div class="update-hint">{{ store.update.message }}</div>
+          </div>
+          <button class="update-confirm" :disabled="store.update.busy" @click="onUpdateConfirm">
+            {{ store.update.busy ? '正在处理…' : '立即更新' }}
+          </button>
+        </div>
+      </transition>
       <div class="theme-toggle">
         <span class="theme-indicator" :style="{ transform: `translateX(${themeIndex * 32}px)` }">
           <span class="theme-indicator-inner" ref="indicatorInner"></span>
@@ -231,5 +278,163 @@ function onThemeChange(mode) {
   letter-spacing: 0.3px;
   font-family: var(--font-mono);
   text-align: center;
+}
+
+/* ===== 更新卡片 =====
+   从侧边栏底部弹出（向上位移 + 渐显），收起时反向 */
+.update-card {
+  width: 100%;
+  position: relative;
+  padding: 10px 11px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.update-pop-enter-active {
+  transition:
+    transform 0.32s cubic-bezier(0.22, 1.1, 0.36, 1),
+    opacity 0.24s ease;
+}
+
+.update-pop-leave-active {
+  transition:
+    transform 0.22s ease,
+    opacity 0.18s ease;
+}
+
+.update-pop-enter-from,
+.update-pop-leave-to {
+  transform: translateY(14px) scale(0.97);
+  opacity: 0;
+}
+
+.update-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.update-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.update-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 22px;
+}
+
+.update-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--bg-base);
+}
+
+.update-version {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.update-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.update-notes {
+  max-height: 132px;
+  overflow-y: auto;
+  padding-right: 2px;
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.update-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.update-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.update-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.update-fill.indeterminate {
+  width: 40% !important;
+  animation: update-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes update-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+.update-hint {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.update-confirm {
+  margin-top: 1px;
+  height: 28px;
+  border: none;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--bg-base);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.update-confirm:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.update-confirm:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 </style>

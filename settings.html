@@ -2390,24 +2390,48 @@
                     </div>
                 </div>
 
+                <div class="form-group">
+                    <label>校园网认证服务器</label>
+                    <div class="input-row">
+                        <input type="text" id="portalIp" placeholder="服务器 IP" />
+                        <input type="text" id="portalPort" placeholder="端口" style="max-width:110px;" />
+                    </div>
+                </div>
+
                 <div class="form-group" id="workflowEditor">
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
                         <div>
-                            <label style="margin:0;">认证工作流</label>
+                            <label style="margin:0;">可定制工作流</label>
                             <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">
-                                可调整顺序、开关、单步超时和重试次数；失败时自动回滚临时网络设置。
+                                支持多个独立工作流、注销节点、WARP 服务重启节点；勾选托盘显示后会加入托盘菜单。
                             </div>
                         </div>
-                        <div style="display:flex;gap:6px;">
-                            <button class="btn-icon" type="button" onclick="WorkflowEditor.reset()">恢复默认</button>
-                            <button class="btn-icon" type="button" onclick="WorkflowEditor.save()">保存工作流</button>
-                        </div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-top:10px;">
+                        <label style="font-size:11px;color:var(--text-tertiary);margin:0;">工作流
+                            <select id="workflowSelect" onchange="WorkflowEditor.load(this.value)" style="width:100%;padding:6px;margin-top:3px;"></select>
+                        </label>
+                        <label style="font-size:11px;color:var(--text-tertiary);margin:0;">名称
+                            <input id="workflowName" type="text" maxlength="60" style="width:100%;padding:6px;margin-top:3px;">
+                        </label>
+                        <label style="font-size:11px;color:var(--text-tertiary);margin:0;display:flex;align-items:end;gap:5px;padding-bottom:7px;white-space:nowrap;">
+                            <input id="workflowTray" type="checkbox" onchange="WorkflowEditor.toggleTray(this.checked)"> 托盘菜单
+                        </label>
                     </div>
                     <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-tertiary);margin:9px 0 0;">
-                        认证总时限（秒）
+                        工作流总时限（秒）
                         <input id="authTotalTimeout" type="number" min="30" max="300" value="90"
                             onchange="_doAutoSave()" style="width:84px;padding:5px;">
                     </label>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;">
+                        <select id="availableStep" style="flex:1;min-width:220px;padding:6px;"></select>
+                        <button class="btn-icon" type="button" onclick="WorkflowEditor.addSelectedStep()">添加节点</button>
+                        <button class="btn-icon" type="button" onclick="WorkflowEditor.newWorkflow()">新建</button>
+                        <button class="btn-icon" type="button" onclick="WorkflowEditor.saveAs()">另存为独立功能</button>
+                        <button class="btn-icon" type="button" onclick="WorkflowEditor.save()">保存</button>
+                        <button class="btn-icon" type="button" onclick="WorkflowEditor.reset()">恢复内置</button>
+                        <button class="btn-icon" type="button" onclick="WorkflowEditor.removeWorkflow()">删除</button>
+                    </div>
                     <div id="workflowSteps" style="display:flex;flex-direction:column;gap:7px;margin-top:10px;"></div>
                     <div id="workflowMessage" style="font-size:11px;color:var(--text-tertiary);margin-top:7px;"></div>
                 </div>
@@ -2824,15 +2848,42 @@
             window.pywebview.api.resize_move_window(newW, newH, newX, newY);
         });
 
+        let _windowGeometryTimer = null;
+        let _lastGeometrySignature = '';
+        async function persistWindowGeometry() {
+            if (!window.pywebview?.api?.get_window_rect || !window.pywebview?.api?.save_window_geometry) return;
+            try {
+                const rect = await window.pywebview.api.get_window_rect();
+                const signature = JSON.stringify(rect);
+                if (signature === _lastGeometrySignature) return;
+                const result = await window.pywebview.api.save_window_geometry(rect);
+                if (result?.success !== false) _lastGeometrySignature = signature;
+            } catch (e) {
+                console.warn('persistWindowGeometry failed:', e);
+            }
+        }
+        function schedulePersistWindowGeometry(delay = 250) {
+            clearTimeout(_windowGeometryTimer);
+            _windowGeometryTimer = setTimeout(persistWindowGeometry, delay);
+        }
+        setInterval(persistWindowGeometry, 2000);
+
         document.addEventListener('mouseup', function () {
+            const wasResizing = _resizeState !== null;
             _resizeState = null;
+            if (wasResizing) schedulePersistWindowGeometry();
         });
+        document.addEventListener('mouseup', () => schedulePersistWindowGeometry());
+        window.addEventListener('blur', () => schedulePersistWindowGeometry(100));
 
         // ===== Tab Switching =====
         let _userSwitchedTab = false;  // 标记用户是否手动切换过tab
         let _statusCheckTimer = null;  // 主页定期状态检查定时器
         function switchTab(name, event) {
             if (event) _userSwitchedTab = true;  // 用户手动点击切换
+            if (['home', 'warp', 'traffic'].includes(name) && window.pywebview?.api?.save_ui_prefs) {
+                window.pywebview.api.save_ui_prefs({ active_tab: name }).catch(() => {});
+            }
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             document.getElementById('tab-' + name).classList.add('active');
@@ -3163,6 +3214,8 @@
                 auto_auth: document.getElementById('autoAuth').checked,
                 auto_restore: document.getElementById('autoRestore').checked,
                 warp_cli_path: document.getElementById('warpCliPath').value.trim(),
+                portal_ip: document.getElementById('portalIp').value.trim(),
+                portal_port: document.getElementById('portalPort').value.trim(),
                 silent_startup: document.getElementById('silentStartup').checked,
                 auth_total_timeout: Number(document.getElementById('authTotalTimeout').value || 90)
             };
@@ -3182,7 +3235,7 @@
                 return result;
             });
             return _saveSerial;
-        }        ['wifiName', 'username', 'password', 'warpCliPath'].forEach(function (id) {
+        }        ['wifiName', 'username', 'password', 'warpCliPath', 'portalIp', 'portalPort'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) {
                 el.addEventListener('input', function () {
@@ -3192,6 +3245,10 @@
             }
         });
 
+        ['wifiName', 'username', 'password', 'warpCliPath', 'portalIp', 'portalPort'].forEach(id => {
+            document.getElementById(id)?.addEventListener('change', () => { clearTimeout(_autoSaveTimer); _doAutoSave(); });
+        });
+        document.getElementById('authTotalTimeout')?.addEventListener('change', () => { clearTimeout(_autoSaveTimer); _doAutoSave(); });
         document.getElementById('autoAuth')?.addEventListener('change', () => { clearTimeout(_autoSaveTimer); _doAutoSave(); });
         document.getElementById('autoRestore')?.addEventListener('change', () => { clearTimeout(_autoSaveTimer); _doAutoSave(); });
         document.getElementById('autoStartup')?.addEventListener('change', async function () {
@@ -3214,77 +3271,239 @@
         });
         window.addEventListener('beforeunload', () => _doAutoSave());
 
-        const WorkflowEditor = {
+const WorkflowEditor = {
             catalog: new Map(),
-            workflow: [],
+            workflows: [],
+            currentId: null,
+            workflow: { id: '', name: '', steps: [], tray_menu: true, built_in: false },
 
-            async init(savedWorkflow) {
+            async init(activeId) {
                 try {
                     const data = await window.pywebview.api.get_workflow_catalog();
                     this.catalog = new Map((data.steps || []).map(step => [step.id, step]));
-                    this.workflow = JSON.parse(JSON.stringify(savedWorkflow?.length ? savedWorkflow : data.workflow || []));
-                    this.render();
+                    this.workflows = data.workflows || [];
+                    this.renderCatalogOptions();
+                    await this.load(activeId || data.active_workflow_id || 'default_auth', false);
                 } catch (e) {
-                    document.getElementById('workflowMessage').textContent = '工作流加载失败：' + e.message;
+                    this.setMessage('工作流加载失败：' + e.message, true);
                 }
+            },
+
+            defaultStep(stepId) {
+                const meta = this.catalog.get(stepId);
+                return {
+                    id: stepId,
+                    enabled: true,
+                    retries: Number(meta?.default_retries || 0),
+                    timeout: Number(meta?.default_timeout || 15),
+                    retry_delay: 1,
+                    continue_on_error: false
+                };
+            },
+
+            renderCatalogOptions() {
+                const select = document.getElementById('availableStep');
+                if (!select) return;
+                const groups = new Map();
+                for (const step of this.catalog.values()) {
+                    const group = step.group || '其他';
+                    if (!groups.has(group)) groups.set(group, []);
+                    groups.get(group).push(step);
+                }
+                select.innerHTML = Array.from(groups.entries()).map(([group, steps]) => {
+                    const options = steps.map(step =>
+                        `<option value="${Utils.escapeHtml(step.id)}">${Utils.escapeHtml(step.name)}</option>`).join('');
+                    return `<optgroup label="${Utils.escapeHtml(group)}">${options}</optgroup>`;
+                }).join('');
+            },
+
+            renderWorkflowOptions() {
+                const select = document.getElementById('workflowSelect');
+                if (!select) return;
+                const draftOption = this.currentId ? '' : '<option value="" selected>未保存的新工作流</option>';
+                select.innerHTML = draftOption + this.workflows.map(wf =>
+                    `<option value="${Utils.escapeHtml(wf.id)}" ${wf.id === this.currentId ? 'selected' : ''}>${Utils.escapeHtml(wf.name)}${wf.built_in ? '（内置）' : ''}</option>`
+                ).join('');
+            },
+
+            async load(id, makeActive = true) {
+                if (!id) return;
+                if (makeActive) {
+                    const result = await window.pywebview.api.select_workflow(id);
+                    if (result.success === false) {
+                        this.setMessage(result.message, true);
+                        return;
+                    }
+                    this.workflows = result.workflows || this.workflows;
+                    if (result.revision) _configRevision = result.revision;
+                }
+                const workflow = this.workflows.find(item => item.id === id);
+                if (!workflow) {
+                    this.setMessage('工作流不存在', true);
+                    return;
+                }
+                this.currentId = id;
+                this.workflow = JSON.parse(JSON.stringify(workflow));
+                this.workflow.steps = this.workflow.steps || [];
+                this.renderWorkflowOptions();
+                this.renderMeta();
+                this.render();
+                this.setMessage(makeActive ? `已切换到：${this.workflow.name}` : '');
+            },
+
+            renderMeta() {
+                this.renderWorkflowOptions();
+                const name = document.getElementById('workflowName');
+                const tray = document.getElementById('workflowTray');
+                if (name) {
+                    name.value = this.workflow.name || '';
+                    name.disabled = !!this.workflow.built_in;
+                    name.title = this.workflow.built_in ? '内置工作流名称不可修改，可另存为自定义工作流' : '';
+                }
+                if (tray) tray.checked = this.workflow.tray_menu !== false;
             },
 
             render() {
                 const container = document.getElementById('workflowSteps');
                 if (!container) return;
-                container.innerHTML = this.workflow.map((step, index) => {
-                    const meta = this.catalog.get(step.id) || { name: step.id, description: '' };
-                    const finalStep = step.id === 'finalize';
-                    return `<div style="display:grid;grid-template-columns:28px minmax(180px,1fr) 86px 72px 58px;gap:7px;align-items:center;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-secondary);">
-                        <input type="checkbox" ${step.enabled !== false ? 'checked' : ''} ${finalStep ? 'disabled' : ''}
+                container.innerHTML = this.workflow.steps.map((step, index) => {
+                    const meta = this.catalog.get(step.id) || { name: step.id, description: '', group: '' };
+                    return `<div style="display:grid;grid-template-columns:28px minmax(170px,1fr) 72px 58px 66px 58px 76px;gap:6px;align-items:center;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-secondary);">
+                        <input type="checkbox" ${step.enabled !== false ? 'checked' : ''}
                             onchange="WorkflowEditor.update(${index},'enabled',this.checked)" title="启用步骤">
                         <div><div style="font-size:12px;font-weight:600;">${Utils.escapeHtml(meta.name)}</div>
-                            <div style="font-size:10px;color:var(--text-tertiary);">${Utils.escapeHtml(meta.description)}</div></div>
-                        <label style="font-size:10px;color:var(--text-tertiary);margin:0;">超时(秒)
+                            <div style="font-size:10px;color:var(--text-tertiary);">${Utils.escapeHtml(meta.description || '')}</div></div>
+                        <label style="font-size:10px;color:var(--text-tertiary);margin:0;">超时
                             <input type="number" min="1" max="180" value="${Number(step.timeout || 15)}"
                                 onchange="WorkflowEditor.update(${index},'timeout',Number(this.value))" style="padding:4px;margin-top:2px;"></label>
                         <label style="font-size:10px;color:var(--text-tertiary);margin:0;">重试
                             <input type="number" min="0" max="5" value="${Number(step.retries || 0)}"
                                 onchange="WorkflowEditor.update(${index},'retries',Number(this.value))" style="padding:4px;margin-top:2px;"></label>
-                        <div style="display:flex;gap:3px;"><button class="btn-icon" type="button" ${index === 0 ? 'disabled' : ''}
-                            onclick="WorkflowEditor.move(${index},-1)">↑</button><button class="btn-icon" type="button" ${index === this.workflow.length - 1 ? 'disabled' : ''}
-                            onclick="WorkflowEditor.move(${index},1)">↓</button></div>
+                        <label style="font-size:10px;color:var(--text-tertiary);margin:0;">延迟
+                            <input type="number" min="0" max="30" step="0.5" value="${Number(step.retry_delay ?? 1)}"
+                                onchange="WorkflowEditor.update(${index},'retry_delay',Number(this.value))" style="padding:4px;margin-top:2px;"></label>
+                        <label style="font-size:10px;color:var(--text-tertiary);margin:0;text-align:center;">跳过错误
+                            <input type="checkbox" ${step.continue_on_error ? 'checked' : ''}
+                                onchange="WorkflowEditor.update(${index},'continue_on_error',this.checked)"></label>
+                        <div style="display:flex;gap:3px;">
+                            <button class="btn-icon" type="button" ${index === 0 ? 'disabled' : ''} onclick="WorkflowEditor.move(${index},-1)">↑</button>
+                            <button class="btn-icon" type="button" ${index === this.workflow.steps.length - 1 ? 'disabled' : ''} onclick="WorkflowEditor.move(${index},1)">↓</button>
+                            <button class="btn-icon" type="button" onclick="WorkflowEditor.removeStep(${index})">×</button>
+                        </div>
                     </div>`;
                 }).join('');
             },
 
             update(index, key, value) {
-                this.workflow[index][key] = value;
-                document.getElementById('workflowMessage').textContent = '有未保存的工作流更改';
+                this.workflow.steps[index][key] = value;
+                this.setMessage('有未保存的工作流更改');
             },
 
             move(index, offset) {
                 const target = index + offset;
-                if (target < 0 || target >= this.workflow.length) return;
-                [this.workflow[index], this.workflow[target]] = [this.workflow[target], this.workflow[index]];
+                if (target < 0 || target >= this.workflow.steps.length) return;
+                [this.workflow.steps[index], this.workflow.steps[target]] = [this.workflow.steps[target], this.workflow.steps[index]];
                 this.render();
-                document.getElementById('workflowMessage').textContent = '有未保存的工作流更改';
+                this.setMessage('有未保存的工作流更改');
+            },
+
+            removeStep(index) {
+                this.workflow.steps.splice(index, 1);
+                this.render();
+                this.setMessage('有未保存的工作流更改');
+            },
+
+            addSelectedStep() {
+                const select = document.getElementById('availableStep');
+                if (!select?.value) return;
+                this.workflow.steps.push(this.defaultStep(select.value));
+                this.render();
+                this.setMessage(`已添加节点：${this.catalog.get(select.value)?.name || select.value}`);
+            },
+
+            newWorkflow() {
+                this.currentId = null;
+                this.workflow = {
+                    id: null, name: '新工作流', built_in: false, tray_menu: true,
+                    steps: [this.defaultStep('refresh_status')]
+                };
+                const select = document.getElementById('workflowSelect');
+                if (select) select.value = '';
+                this.renderMeta();
+                this.render();
+                this.setMessage('正在编辑新工作流，点击“另存为独立功能”保存');
+            },
+
+            applyResult(result, successMessage) {
+                if (result.success === false) {
+                    this.setMessage(result.message, true);
+                    return false;
+                }
+                this.workflows = result.workflows || this.workflows;
+                if (result.workflow) {
+                    this.currentId = result.workflow.id;
+                    this.workflow = JSON.parse(JSON.stringify(result.workflow));
+                }
+                if (result.active_workflow_id) this.currentId = result.active_workflow_id;
+                if (result.revision) _configRevision = result.revision;
+                this.renderWorkflowOptions();
+                this.renderMeta();
+                this.render();
+                this.setMessage(successMessage || result.message || '已保存');
+                return true;
             },
 
             async save() {
-                const message = document.getElementById('workflowMessage');
-                message.textContent = '正在保存...';
-                const result = await window.pywebview.api.save_workflow(this.workflow);
-                message.textContent = result.message;
-                if (result.success) {
-                    this.workflow = JSON.parse(JSON.stringify(result.workflow));
-                    if (result.revision) _configRevision = result.revision;
-                    this.render();
-                }
+                if (!this.currentId) return this.saveAs();
+                this.setMessage('正在保存...');
+                const result = await window.pywebview.api.save_workflow(this.workflow.steps, this.currentId);
+                this.applyResult(result);
+            },
+
+            async saveAs() {
+                const nameInput = document.getElementById('workflowName');
+                const name = (nameInput?.value || this.workflow.name || '').trim();
+                if (!name) return this.setMessage('请输入工作流名称', true);
+                const tray = document.getElementById('workflowTray')?.checked !== false;
+                this.setMessage('正在保存为独立工作流...');
+                const result = await window.pywebview.api.save_workflow_as(name, this.workflow.steps, tray);
+                this.applyResult(result);
+            },
+
+            async toggleTray(enabled) {
+                this.workflow.tray_menu = !!enabled;
+                if (!this.currentId) return;
+                const result = await window.pywebview.api.update_workflow_meta(this.currentId, null, enabled);
+                if (result.success === false) return this.setMessage(result.message, true);
+                this.workflows = result.workflows || this.workflows;
+                if (result.revision) _configRevision = result.revision;
+                this.setMessage(enabled ? '该工作流将显示在托盘菜单' : '已从托盘菜单隐藏');
+            },
+
+            async removeWorkflow() {
+                if (!this.currentId) return this.newWorkflow();
+                const target = this.workflows.find(item => item.id === this.currentId);
+                if (target?.built_in) return this.setMessage('内置工作流不能删除', true);
+                if (!confirm(`确定删除工作流“${target?.name || this.currentId}”吗？`)) return;
+                const result = await window.pywebview.api.delete_workflow(this.currentId);
+                if (result.success === false) return this.setMessage(result.message, true);
+                this.workflows = result.workflows || [];
+                if (result.revision) _configRevision = result.revision;
+                await this.load(result.active_workflow_id || 'default_auth', false);
+                this.setMessage(result.message);
             },
 
             async reset() {
-                const result = await window.pywebview.api.reset_workflow();
-                document.getElementById('workflowMessage').textContent = result.message;
-                if (result.success) {
-                    this.workflow = JSON.parse(JSON.stringify(result.workflow));
-                    this.render();
-                }
+                if (!this.currentId) return;
+                const result = await window.pywebview.api.reset_workflow(this.currentId);
+                this.applyResult(result);
+            },
+
+            setMessage(message, isError = false) {
+                const el = document.getElementById('workflowMessage');
+                if (!el) return;
+                el.textContent = message || '';
+                el.style.color = isError ? '#EF4444' : 'var(--text-tertiary)';
             }
         };
         // ===== WiFi Dropdown =====
@@ -3612,10 +3831,12 @@
                     document.getElementById('autoAuth').checked = config.auto_auth || false;
                     document.getElementById('autoRestore').checked = config.auto_restore || false;
                     document.getElementById('warpCliPath').value = config.warp_cli_path || '';
+                    document.getElementById('portalIp').value = config.portal_ip || '';
+                    document.getElementById('portalPort').value = config.portal_port || '';
                     document.getElementById('silentStartup').checked = config.silent_startup || false;
                     document.getElementById('authTotalTimeout').value = config.auth_total_timeout || 90;
                     _configRevision = config._revision || 0;
-                    await WorkflowEditor.init(config.auth_workflow || []);
+                    await WorkflowEditor.init(config.active_workflow_id || 'default_auth');
                 } catch (e) {
                     console.error('Failed to load config:', e);
                 } finally {
@@ -5449,8 +5670,10 @@
                 return;
             }
             // 加载 UI 偏好
+            let savedActiveTab = 'home';
             try {
                 const prefs = await window.pywebview.api.get_ui_prefs();
+                savedActiveTab = prefs.active_tab || 'home';
                 WarpTab.setPageSize(prefs.page_size || 20);
                 if (typeof TrafficTab !== 'undefined') {
                     TrafficTab.subview = prefs.traffic_subview || 'list';
@@ -5470,7 +5693,7 @@
             }
             // 默认显示主页tab（仅当用户未手动切换时）
             if (!_userSwitchedTab) {
-                switchTab('home');
+                switchTab(savedActiveTab || 'home');
             }
         }
     </script>

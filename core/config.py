@@ -10,6 +10,7 @@ import copy
 import json
 import logging
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any, Callable
@@ -18,15 +19,89 @@ from core.secrets import PREFIX as SECRET_PREFIX, protect_text, unprotect_text
 
 logger = logging.getLogger("wifi_tray")
 
+
+def _step(step_id: str, *, enabled: bool = True, retries: int = 0,
+          timeout: float = 15.0, retry_delay: float = 1.0,
+          continue_on_error: bool = False) -> dict[str, Any]:
+    return {
+        "id": step_id,
+        "enabled": enabled,
+        "retries": retries,
+        "timeout": timeout,
+        "retry_delay": retry_delay,
+        "continue_on_error": continue_on_error,
+    }
+
+
+# The default authentication workflow is intentionally split into small,
+# independently composable nodes. Composite legacy nodes remain available for
+# configurations saved by older versions.
 DEFAULT_AUTH_WORKFLOW = [
-    {"id": "ensure_wifi", "enabled": True, "retries": 0, "timeout": 10, "retry_delay": 1.0},
-    {"id": "prepare_network", "enabled": True, "retries": 0, "timeout": 8, "retry_delay": 1.0},
-    {"id": "portal_login", "enabled": True, "retries": 1, "timeout": 8, "retry_delay": 1.5},
-    {"id": "configure_ipv6", "enabled": True, "retries": 1, "timeout": 15, "retry_delay": 2.0},
-    {"id": "configure_warp", "enabled": True, "retries": 0, "timeout": 8, "retry_delay": 1.0},
-    {"id": "connect_warp", "enabled": True, "retries": 1, "timeout": 15, "retry_delay": 2.0},
-    {"id": "finalize", "enabled": True, "retries": 0, "timeout": 5, "retry_delay": 1.0},
+    _step("ensure_wifi", timeout=10),
+    _step("detect_warp_state", timeout=4),
+    _step("disconnect_warp", timeout=8),
+    _step("enable_ipv4", timeout=8),
+    _step("portal_login", retries=1, timeout=8, retry_delay=1.5),
+    _step("configure_ipv6_dns", timeout=5),
+    _step("disable_ipv4", timeout=8),
+    _step("wait_public_ipv6", retries=1, timeout=15, retry_delay=2.0),
+    _step("set_warp_endpoint_ipv6", timeout=5),
+    _step("set_warp_masque", timeout=5),
+    _step("start_warp_service", timeout=8),
+    _step("connect_warp", retries=1, timeout=15, retry_delay=2.0),
+    _step("reset_warp_masque", timeout=5),
+    _step("reset_warp_endpoint_ipv6", timeout=5),
+    _step("enable_ipv4", timeout=8),
+    _step("reset_ipv6_dns", timeout=5),
+    _step("refresh_status", timeout=4),
 ]
+
+DEFAULT_PORTAL_LOGOUT_WORKFLOW = [_step("portal_logout", timeout=6)]
+DEFAULT_REAUTH_WORKFLOW = [*copy.deepcopy(DEFAULT_PORTAL_LOGOUT_WORKFLOW),
+                           *copy.deepcopy(DEFAULT_AUTH_WORKFLOW)]
+DEFAULT_RESTART_WARP_WORKFLOW = [
+    _step("restart_warp_service", retries=1, timeout=12, retry_delay=1.5),
+    _step("connect_warp", retries=1, timeout=15, retry_delay=2.0),
+    _step("refresh_status", timeout=4),
+]
+
+
+def _builtin_workflows() -> dict[str, dict[str, Any]]:
+    return {
+        "default_auth": {
+            "id": "default_auth",
+            "name": "完整校园网认证",
+            "description": "从 WiFi 检查、Portal 认证、IPv6 准备到 WARP 连接的完整流程。",
+            "built_in": True,
+            "tray_menu": True,
+            "steps": copy.deepcopy(DEFAULT_AUTH_WORKFLOW),
+        },
+        "portal_reauth": {
+            "id": "portal_reauth",
+            "name": "注销并重新认证",
+            "description": "先注销校园网 Portal，再执行完整认证流程。",
+            "built_in": True,
+            "tray_menu": True,
+            "steps": copy.deepcopy(DEFAULT_REAUTH_WORKFLOW),
+        },
+        "portal_logout": {
+            "id": "portal_logout",
+            "name": "注销校园网",
+            "description": "仅执行 Portal 注销，可与其他节点自由组合。",
+            "built_in": True,
+            "tray_menu": True,
+            "steps": copy.deepcopy(DEFAULT_PORTAL_LOGOUT_WORKFLOW),
+        },
+        "restart_warp": {
+            "id": "restart_warp",
+            "name": "重启 Cloudflare WARP",
+            "description": "独立重启 CloudflareWARP 服务并重新连接 WARP。",
+            "built_in": True,
+            "tray_menu": True,
+            "steps": copy.deepcopy(DEFAULT_RESTART_WARP_WORKFLOW),
+        },
+    }
+
 
 DEFAULT_CONFIG = {
     "username": "", "password": "", "wifi_name": "",
@@ -35,19 +110,134 @@ DEFAULT_CONFIG = {
     "portal_ip": "10.21.221.98", "portal_port": "801",
     "warp_cli_path": "", "silent_startup": False,
     "window_x": None, "window_y": None, "window": None, "ui_prefs": None,
+    "active_workflow_id": "default_auth",
+    "workflows": _builtin_workflows(),
     "auth_workflow": DEFAULT_AUTH_WORKFLOW,
+    # 主页按钮绑定的工作流：开始认证 / 恢复网络
+    # restore_button_workflow 为空串时使用内置恢复逻辑（run_restore_task）
+    "auth_button_workflow": "default_auth",
+    "restore_button_workflow": "",
 }
 
 
-def _merge_defaults(raw: dict[str, Any]) -> dict[str, Any]:
+def _normalize_steps(steps: Any, fallback: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not isinstance(steps, list) or not steps:
+        return copy.deepcopy(fallback)
+    normalized: list[dict[str, Any]] = []
+    for item in steps:
+        if not isinstance(item, dict):
+            continue
+        step_id = str(item.get("id", "")).strip()
+        if not step_id:
+            continue
+        normalized.append(copy.deepcopy(item))
+    return normalized or copy.deepcopy(fallback)
+
+
+def _normalize_workflow(value: Any, workflow_id: str,
+                        fallback: dict[str, Any]) -> dict[str, Any]:
+    base = copy.deepcopy(fallback)
+    if not isinstance(value, dict):
+        return base
+    result = copy.deepcopy(base)
+    result["id"] = workflow_id
+    name = str(value.get("name") or base.get("name") or workflow_id).strip()
+    result["name"] = name[:60]
+    result["description"] = str(value.get("description") or base.get("description") or "")[:200]
+    result["tray_menu"] = bool(value.get("tray_menu", base.get("tray_menu", True)))
+    result["built_in"] = bool(base.get("built_in", value.get("built_in", False)))
+    customized = bool(value.get("customized", False))
+    result["customized"] = customized
+    fallback_steps = base["steps"]
+    stored_steps = value.get("steps")
+    if result["built_in"] and not customized:
+        result["steps"] = copy.deepcopy(fallback_steps)
+    else:
+        result["steps"] = _normalize_steps(stored_steps, fallback_steps)
+    return result
+
+
+def _normalize_workflows(raw: dict[str, Any], legacy_workflow: Any,
+                          raw_workflows: Any = None,
+                          active_override: str | None = None) -> tuple[dict[str, Any], str]:
+    workflows = _builtin_workflows()
+    if isinstance(raw_workflows, dict):
+        for workflow_id, stored in raw_workflows.items():
+            workflow_id = str(workflow_id).strip()
+            if not workflow_id:
+                continue
+            fallback = workflows.get(workflow_id, {
+                "id": workflow_id,
+                "name": workflow_id,
+                "description": "",
+                "built_in": False,
+                "tray_menu": True,
+                "steps": _normalize_steps(legacy_workflow, DEFAULT_AUTH_WORKFLOW),
+            })
+            workflows[workflow_id] = _normalize_workflow(stored, workflow_id, fallback)
+    elif legacy_workflow and legacy_workflow != DEFAULT_AUTH_WORKFLOW:
+        # Upgrade versions that only had a single editable auth_workflow.
+        workflows["legacy_auth"] = {
+            "id": "legacy_auth",
+            "name": "旧版认证工作流",
+            "description": "从旧版本自动迁移。",
+            "built_in": False,
+            "tray_menu": False,
+            "steps": _normalize_steps(legacy_workflow, DEFAULT_AUTH_WORKFLOW),
+        }
+        active_override = "legacy_auth"
+
+    active = str(active_override or raw.get("active_workflow_id") or "default_auth")
+    if active not in workflows:
+        active = "default_auth"
+    return workflows, active
+
+
+def _sync_active_workflow(data: dict[str, Any], *, auth_workflow_is_source: bool = False) -> dict[str, Any]:
+    active_id = data.get("active_workflow_id", "default_auth")
+    workflows = data.setdefault("workflows", _builtin_workflows())
+    if active_id not in workflows:
+        active_id = "default_auth"
+        data["active_workflow_id"] = active_id
+    active = workflows[active_id]
+    if auth_workflow_is_source and isinstance(data.get("auth_workflow"), list) and data["auth_workflow"]:
+        active["steps"] = _normalize_steps(data["auth_workflow"], active["steps"])
+        if active.get("built_in"):
+            active["customized"] = True
+    else:
+        data["auth_workflow"] = copy.deepcopy(active["steps"])
+    return data
+
+
+def _merge_defaults(raw: dict[str, Any], *, auth_workflow_is_source: bool | None = None) -> dict[str, Any]:
     data = copy.deepcopy(DEFAULT_CONFIG)
     data.update(raw)
-    data["auth_workflow"] = copy.deepcopy(data.get("auth_workflow") or DEFAULT_AUTH_WORKFLOW)
+    inferred_auth_source = isinstance(raw.get("auth_workflow"), list) and bool(raw.get("auth_workflow"))
+    explicit_auth_workflow = (inferred_auth_source if auth_workflow_is_source is None
+                              else auth_workflow_is_source)
+    legacy_active = "legacy_auth" if (not isinstance(raw.get("workflows"), dict)
+                                      and isinstance(raw.get("auth_workflow"), list)
+                                      and raw.get("auth_workflow") != DEFAULT_AUTH_WORKFLOW) else None
+    workflows, active_id = _normalize_workflows(
+        data, data.get("auth_workflow"), raw_workflows=raw.get("workflows"),
+        active_override=legacy_active)
+    data["workflows"] = workflows
+    data["active_workflow_id"] = active_id
     try:
         data["auth_total_timeout"] = max(30, min(int(data.get("auth_total_timeout", 90)), 300))
     except (TypeError, ValueError):
         data["auth_total_timeout"] = 90
-    return data
+    if not isinstance(data.get("ui_prefs"), dict):
+        data["ui_prefs"] = {}
+    if not explicit_auth_workflow:
+        data["auth_workflow"] = copy.deepcopy(workflows[active_id]["steps"])
+    return _sync_active_workflow(data, auth_workflow_is_source=explicit_auth_workflow)
+
+
+def workflow_id_from_name(name: str) -> str:
+    """Create a stable, filesystem/tray-safe custom workflow id."""
+    value = re.sub(r"[^0-9a-zA-Z_\-]+", "_", str(name).strip()).strip("_").lower()
+    return value[:40] or "custom_workflow"
 
 
 class ConfigStore:
@@ -127,7 +317,8 @@ class ConfigStore:
                 return self.snapshot(include_revision=True)
             next_data = copy.deepcopy(self._data)
             next_data.update(clean)
-            next_data = _merge_defaults(next_data)
+            next_data = _merge_defaults(
+                next_data, auth_workflow_is_source="auth_workflow" in clean)
             self._write_atomic(next_data)
             self._data = next_data
             self._revision += 1

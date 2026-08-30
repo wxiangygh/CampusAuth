@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import copy
 import ctypes
 import ctypes.wintypes
 import threading
@@ -47,7 +48,9 @@ from core.startup import (
 from core.config import configure_config, get_config_store, DEFAULT_AUTH_WORKFLOW
 from core.app_state import app_state
 from core.status import network_status
-from core.auth_workflow import workflow_catalog, validate_auth_workflow
+from core.auth_workflow import (
+    run_workflow_by_id, validate_auth_workflow, workflow_catalog,
+)
 
 
 def get_resource_path(relative_path):
@@ -89,6 +92,11 @@ def _on_config_changed(config, revision, changed):
     CONFIG = config
     app_state.set_config_revision(revision)
     logger.info('Config updated: revision=%s, fields=%s', revision, sorted(changed))
+    if changed & {'workflows', 'active_workflow_id', 'auth_workflow'} and core.state._tray_app_instance:
+        try:
+            core.state._tray_app_instance._refresh_tray_menu()
+        except Exception:
+            logger.exception('Failed to refresh workflow tray menu')
 
 
 CONFIG_STORE.subscribe(_on_config_changed)
@@ -100,6 +108,152 @@ def load_config():
     return CONFIG_STORE.snapshot()
 
 
+def _virtual_screen_metrics():
+    user32 = ctypes.windll.user32
+    return {
+        'x': user32.GetSystemMetrics(76),
+        'y': user32.GetSystemMetrics(77),
+        'width': user32.GetSystemMetrics(78),
+        'height': user32.GetSystemMetrics(79),
+    }
+
+
+def _find_main_hwnd():
+    """查找主窗口句柄，找不到返回 0。"""
+    try:
+        return ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
+    except Exception:
+        return 0
+
+
+def _is_window_zoomed():
+    """主窗口当前是否处于最大化状态。"""
+    hwnd = _find_main_hwnd()
+    return bool(hwnd and ctypes.windll.user32.IsZoomed(hwnd))
+
+
+def _dpi_scale():
+    """当前系统 DPI 缩放系数（物理像素 / 逻辑像素）。
+
+    pywebview 6.x 的约定：create_window 的 width/height/x/y/min_size 是
+    逻辑像素，WinForms 层内部会乘以 DPI scale 换算为物理像素；
+    而 GetWindowRect/GetWindowPlacement/SetWindowPos 全程使用物理像素。
+    保存/恢复几何时必须跨越这两个坐标系，此函数负责换算比例。
+    """
+    try:
+        dpi = ctypes.windll.user32.GetDpiForSystem()
+        if dpi:
+            return dpi / 96.0
+    except Exception:
+        pass
+    return 1.0
+
+
+class WINDOWPLACEMENT(ctypes.Structure):
+    _fields_ = [
+        ('length', ctypes.c_uint),
+        ('flags', ctypes.c_uint),
+        ('showCmd', ctypes.c_uint),
+        ('ptMinPosition', ctypes.wintypes.POINT),
+        ('ptMaxPosition', ctypes.wintypes.POINT),
+        ('rcNormalPosition', ctypes.wintypes.RECT),
+    ]
+
+
+SW_SHOWMINIMIZED = 2
+SW_SHOWMAXIMIZED = 3
+
+
+def _primary_workarea_origin():
+    """主显示器工作区原点（屏幕坐标）。GetWindowPlacement 的
+    rcNormalPosition 使用工作区坐标，原点即主显示器工作区左上角。"""
+    try:
+        user32 = ctypes.windll.user32
+        monitor = user32.MonitorFromWindow(None, 1)  # MONITOR_DEFAULTTOPRIMARY
+        if monitor:
+            class MONITORINFO(ctypes.Structure):
+                _fields_ = [('cbSize', ctypes.c_uint),
+                            ('rcMonitor', ctypes.wintypes.RECT),
+                            ('rcWork', ctypes.wintypes.RECT),
+                            ('dwFlags', ctypes.c_uint)]
+            mi = MONITORINFO()
+            mi.cbSize = ctypes.sizeof(mi)
+            if user32.GetMonitorInfoW(monitor, ctypes.byref(mi)):
+                return mi.rcWork.left, mi.rcWork.top
+    except Exception:
+        pass
+    return 0, 0
+
+
+def _capture_window_geometry():
+    """采集窗口当前几何（物理屏幕坐标 + 最大化标记），任何保存路径共用。
+
+    采用 Win32 规范做法（GetWindowPlacement，各原生应用保存窗口状态的标准方式）：
+    - 最大化/最小化时取 rcNormalPosition（还原后的普通态矩形），
+      避免把最大化矩形误存为普通尺寸；
+    - 普通态直接取 GetWindowRect 实时矩形。
+    """
+    hwnd = _find_main_hwnd()
+    if not hwnd:
+        return None
+    wp = WINDOWPLACEMENT()
+    wp.length = ctypes.sizeof(wp)
+    has_placement = bool(ctypes.windll.user32.GetWindowPlacement(hwnd, ctypes.byref(wp)))
+    maximized = bool(has_placement and wp.showCmd == SW_SHOWMAXIMIZED)
+    if has_placement and (maximized or wp.showCmd == SW_SHOWMINIMIZED):
+        # 最大化/最小化：取还原矩形（工作区坐标 → 屏幕坐标）
+        off_x, off_y = _primary_workarea_origin()
+        rc = wp.rcNormalPosition
+        x, y = rc.left + off_x, rc.top + off_y
+        w, h = rc.right - rc.left, rc.bottom - rc.top
+    else:
+        rect = ctypes.wintypes.RECT()
+        if not ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return None
+        x, y = rect.left, rect.top
+        w, h = rect.right - rect.left, rect.bottom - rect.top
+    return {'width': int(w), 'height': int(h), 'x': int(x), 'y': int(y),
+            'maximized': maximized}
+
+
+def _enable_dpi_awareness():
+    """在创建任何窗口/读取屏幕指标前声明系统级 DPI 感知。
+
+    WinForms/WebView2 运行时会使进程成为 DPI 感知（GetWindowRect 返回物理像素），
+    但若不在启动早期设置，calc_initial_window_geometry 里的 GetSystemMetrics
+    仍处于 DPI 虚拟化状态（返回逻辑像素），导致保存的物理坐标被按逻辑屏幕
+    校验/创建，出现窗口位置与大小"记不住"的问题。这里提前设置，保证全程
+    使用同一套物理像素坐标系。与 WinForms 默认行为一致（system-aware）。
+    """
+    try:
+        # PROCESS_SYSTEM_DPI_AWARE = 1（shcore 优先，失败再退 user32）
+        try:
+            val = ctypes.c_int(1)
+            if ctypes.windll.shcore.SetProcessDpiAwareness(val) == 0:
+                return
+        except Exception:
+            pass
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        logger.debug('Failed to set DPI awareness', exc_info=True)
+
+
+def _valid_window_geometry(width, height, x, y):
+    try:
+        width, height, x, y = int(width), int(height), int(x), int(y)
+    except (TypeError, ValueError):
+        return False
+    if width < TrayApp.MIN_W or height < TrayApp.MIN_H:
+        return False
+    if width > 10000 or height > 10000:
+        return False
+    screen = _virtual_screen_metrics()
+    # Keep at least part of the title bar reachable, including on multi-monitor
+    # setups where the secondary monitor has negative virtual coordinates.
+    return (screen['x'] - width + 120 <= x <= screen['x'] + screen['width'] - 120 and
+            screen['y'] - height + 80 <= y <= screen['y'] + screen['height'] - 80)
+
+
 
 def is_admin():
     try:
@@ -108,50 +262,58 @@ def is_admin():
         return False
 
 def create_icon(color='orange'):
+    """CAuth 托盘图标：深色圆角方形徽章 + 粗体白色 "C" 字标 + 状态色指示点。
+
+    与前端 LogoMark（C 字标）和黑白单色设计系统保持一致，
+    状态通过徽章描边与右下角指示点的颜色表达：
+      gray=待机 green=正常 orange=进行中 red=异常
+    """
     size = (64, 64)
     img = Image.new('RGBA', size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     colors = {
-        'gray': (180, 180, 180),
-        'green': (52, 199, 89),
-        'orange': (246, 131, 32),
-        'red': (255, 59, 48)
+        'gray': (155, 155, 161),
+        'green': (34, 197, 94),
+        'orange': (245, 158, 11),
+        'red': (239, 68, 68)
     }
-    c = colors.get(color, colors['orange'])
-    draw.ellipse([4, 4, 60, 60], fill=c)
-    cx, cy = 32, 28
-    arcs = [(22, 10, 16), (16, 6, 10), (10, 3, 5)]
-    for r, w, _ in arcs:
-        draw.arc([cx - r, cy - r, cx + r, cy + r], 250, 290, fill=(255, 255, 255), width=w)
-    draw.ellipse([cx - 3, cy + 10, cx + 3, cy + 16], fill=(255, 255, 255))
+    status = colors.get(color, colors['orange'])
+
+    # 徽章：深色圆角方形 + 状态色描边（浅/深任务栏上都可辨识）
+    draw.rounded_rectangle([2, 2, 62, 62], radius=15,
+                           fill=(26, 26, 30, 255), outline=status, width=3)
+    # 粗体 "C" 字标：白色粗弧线，开口朝右
+    draw.arc([17, 17, 47, 47], start=45, end=315, fill=(255, 255, 255), width=9)
+    # 状态指示点：右下角，带深色衬圈
+    draw.ellipse([45, 45, 58, 58], fill=(26, 26, 30, 255))
+    draw.ellipse([48, 48, 55, 55], fill=status)
     return img
 
 def ensure_app_icon():
     icon_path = SCRIPT_DIR / 'app.ico'
-    if not icon_path.exists():
-        import io
-        img = create_icon('orange')
-        sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
-        imgs = [img.resize(s, Image.LANCZOS) for s in sizes]
-        png_bufs = []
-        for im in imgs:
-            b = io.BytesIO()
-            im.save(b, format='PNG')
-            png_bufs.append(b.getvalue())
-        header = b'\x00\x00\x01\x00'
-        count = len(png_bufs)
-        header += count.to_bytes(2, 'little')
-        offset = 6 + count * 16
-        dir_entries = b''
-        for s, data in zip(sizes, png_bufs):
-            w = s[0] if s[0] < 256 else 0
-            h = s[1] if s[1] < 256 else 0
-            entry = bytes([w, h, 0, 0, 1, 0, 32, 0]) + len(data).to_bytes(4, 'little') + offset.to_bytes(4, 'little')
-            dir_entries += entry
-            offset += len(data)
-        with open(str(icon_path), 'wb') as f:
-            f.write(header + dir_entries + b''.join(png_bufs))
-        logger.info(f"App icon saved to {icon_path}")
+    import io
+    img = create_icon('orange')
+    sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+    imgs = [img.resize(s, Image.LANCZOS) for s in sizes]
+    png_bufs = []
+    for im in imgs:
+        b = io.BytesIO()
+        im.save(b, format='PNG')
+        png_bufs.append(b.getvalue())
+    header = b'\x00\x00\x01\x00'
+    count = len(png_bufs)
+    header += count.to_bytes(2, 'little')
+    offset = 6 + count * 16
+    dir_entries = b''
+    for s, data in zip(sizes, png_bufs):
+        w = s[0] if s[0] < 256 else 0
+        h = s[1] if s[1] < 256 else 0
+        entry = bytes([w, h, 0, 0, 1, 0, 32, 0]) + len(data).to_bytes(4, 'little') + offset.to_bytes(4, 'little')
+        dir_entries += entry
+        offset += len(data)
+    with open(str(icon_path), 'wb') as f:
+        f.write(header + dir_entries + b''.join(png_bufs))
+    logger.info(f"App icon saved to {icon_path}")
     return str(icon_path)
 
 class ApiBridge:
@@ -173,7 +335,7 @@ class ApiBridge:
                         'width': rect.right - rect.left, 'height': rect.bottom - rect.top}
         except Exception as e:
             logger.error(f"get_window_rect failed: {e}")
-        return {'x': 0, 'y': 0, 'width': 800, 'height': 600}
+        return {'x': 0, 'y': 0, 'width': 1210, 'height': 770}
 
     def resize_move_window(self, width, height, x, y):
         """调整窗口大小并移动到指定位置（用于 frameless 窗口自定义拖拽调整大小）。"""
@@ -184,6 +346,39 @@ class ApiBridge:
                 ctypes.windll.user32.SetWindowPos(hwnd, 0, int(x), int(y), int(width), int(height), 0x0014)
         except Exception as e:
             logger.error(f"resize_move_window failed: {e}")
+
+    def save_window_geometry(self, rect=None):
+        """即时保存窗口位置和尺寸；前端拖拽/缩放结束时调用。
+
+        统一走 _capture_window_geometry()（GetWindowPlacement 规范做法）：
+        普通态存实时矩形；最大化/最小化只更新 maximized 标记并保存
+        还原后的普通态矩形，避免把最大化矩形当普通尺寸保存。
+        rect 参数仅为兼容前端签名，几何一律以 Win32 实时数据为准。
+        """
+        try:
+            captured = _capture_window_geometry()
+            if captured is None:
+                if rect is None:
+                    return {'success': True}
+                width, height = rect.get('width'), rect.get('height')
+                x, y = rect.get('x'), rect.get('y')
+                if not _valid_window_geometry(width, height, x, y):
+                    return {'success': False, 'message': '窗口位置或尺寸异常，已忽略'}
+                captured = {'width': int(width), 'height': int(height),
+                            'x': int(x), 'y': int(y), 'maximized': False}
+            if not _valid_window_geometry(captured['width'], captured['height'],
+                                          captured['x'], captured['y']):
+                logger.warning(f"[save_window_geometry] Ignored abnormal: "
+                               f"{captured['width']}x{captured['height']} at ({captured['x']},{captured['y']})")
+                return {'success': False, 'message': '窗口位置或尺寸异常，已忽略'}
+            saved = CONFIG_STORE.patch({'window': captured})
+            state = 'maximized' if captured['maximized'] else 'normal'
+            logger.info(f"[save_window_geometry] Saved ({state}): "
+                        f"{captured['width']}x{captured['height']} at ({captured['x']},{captured['y']})")
+            return {'success': True, 'revision': saved.get('_revision')}
+        except Exception as exc:
+            logger.exception('save_window_geometry failed')
+            return {'success': False, 'message': str(exc)}
 
     def minimize_window(self):
         try:
@@ -248,14 +443,29 @@ class ApiBridge:
         return {'success': True, 'message': '没有正在进行的操作'}
 
     def test_auth(self):
+        # 分配新操作纪元：旧操作滞后的进度/终态事件将被前端整体忽略
+        app_state.start_operation('auth')
+
         def _do_auth():
             if not _auth_lock.acquire(blocking=False):
-                js_code = f"onAuthProgress({{step:5, total:5, message:{_js_escape('认证正在进行中，请稍候')}, status:{_js_escape('error')}}})"
-                if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
-                    core.state._tray_app_instance.settings_window.evaluate_js(js_code)
-                return
+                # 操作抢占：取消当前操作并接管，确保执行用户的最新操作
+                logger.info("test_auth: auth lock busy, cancelling current operation for new request")
+                _auth_cancelled.set()
+                app_state.update_operation(status='cancelled', message='已被新的认证请求取代')
+                if not _auth_lock.acquire(timeout=3):
+                    logger.error("test_auth: could not acquire lock after cancel")
+                    js_code = f"onAuthProgress({{step:5, total:5, message:{_js_escape('无法取消当前操作，请稍后重试')}, status:{_js_escape('error')}}})"
+                    if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
+                        core.state._tray_app_instance.settings_window.evaluate_js(js_code)
+                    return
             try:
-                success, msg = run_auth_task()
+                # 按配置绑定的工作流执行；绑定无效时回退到激活工作流
+                auth_wf_id = CONFIG_STORE.get('auth_button_workflow') or ''
+                if auth_wf_id and (CONFIG_STORE.get('workflows') or {}).get(auth_wf_id):
+                    logger.info(f"test_auth: running bound workflow {auth_wf_id}")
+                    success, msg = run_workflow_by_id(auth_wf_id)
+                else:
+                    success, msg = run_auth_task()
                 if _auth_cancelled.is_set():
                     logger.info("test_auth: operation was cancelled, skipping final notification")
                 else:
@@ -282,6 +492,7 @@ class ApiBridge:
             'wifi_name', 'username', 'password', 'auto_auth', 'auto_restore',
             'warp_cli_path', 'silent_startup', 'portal_ip', 'portal_port',
             'auto_enable_ipv4', 'auth_total_timeout', 'auth_workflow',
+            'auth_button_workflow', 'restore_button_workflow',
         }
         changes = {key: value for key, value in (form_data or {}).items() if key in allowed}
         old_config = CONFIG_STORE.snapshot()
@@ -301,28 +512,199 @@ class ApiBridge:
     def get_app_state(self):
         return app_state.snapshot()
 
+    def _workflow_snapshot(self, config=None):
+        config = config or CONFIG_STORE.snapshot()
+        workflows = list((config.get('workflows') or {}).values())
+        workflows.sort(key=lambda item: (not item.get('built_in', False), item.get('id', '')))
+        return workflows
+
     def get_workflow_catalog(self):
+        config = CONFIG_STORE.snapshot(include_revision=True)
+        active_id = config.get('active_workflow_id', 'default_auth')
+        workflow = (config.get('workflows') or {}).get(active_id, {})
         return {
             'steps': workflow_catalog(),
-            'workflow': CONFIG_STORE.get('auth_workflow', DEFAULT_AUTH_WORKFLOW),
+            'workflows': self._workflow_snapshot(config),
+            'active_workflow_id': active_id,
+            'workflow': workflow.get('steps', DEFAULT_AUTH_WORKFLOW),
+            'revision': config.get('_revision'),
         }
 
-    def save_workflow(self, workflow):
+    def list_workflows(self):
+        return {'workflows': self._workflow_snapshot(),
+                'active_workflow_id': CONFIG_STORE.get('active_workflow_id', 'default_auth')}
+
+    def _validate_workflow_steps(self, steps):
+        validate_auth_workflow(steps)
+        return [dict(item) for item in steps]
+
+    def save_workflow(self, workflow, workflow_id=None, name=None):
+        config = CONFIG_STORE.snapshot()
+        target_id = workflow_id or config.get('active_workflow_id', 'default_auth')
+        workflows = config.get('workflows') or {}
+        target = workflows.get(target_id)
+        if not target:
+            return {'success': False, 'message': '工作流不存在'}
         try:
-            validate_auth_workflow(workflow)
-            saved = CONFIG_STORE.patch({'auth_workflow': workflow})
+            steps = self._validate_workflow_steps(workflow)
+            updated = copy.deepcopy(workflows)
+            # 名称与步骤一起保存：修复"改名后点保存名称不生效"的问题
+            clean_name = None
+            if name is not None:
+                clean_name = str(name).strip()[:60]
+                if not clean_name:
+                    return {'success': False, 'message': '工作流名称不能为空'}
+                if clean_name != target.get('name') and target.get('built_in'):
+                    return {'success': False, 'message': '内置工作流名称不可修改，可另存为自定义工作流'}
+            updated[target_id] = {**target,
+                                  'steps': steps,
+                                  'name': clean_name or target.get('name'),
+                                  'customized': bool(target.get('built_in', False))}
+            patch = {'workflows': updated}
+            if config.get('active_workflow_id') == target_id:
+                patch['auth_workflow'] = steps
+            saved = CONFIG_STORE.patch(patch)
             return {'success': True, 'message': '工作流已保存',
-                    'workflow': saved['auth_workflow'], 'revision': saved['_revision']}
+                    'workflows': self._workflow_snapshot(saved),
+                    'workflow': saved['workflows'][target_id],
+                    'active_workflow_id': saved['active_workflow_id'],
+                    'revision': saved['_revision']}
         except Exception as exc:
+            logger.exception('save_workflow failed')
             return {'success': False, 'message': str(exc)}
 
-    def reset_workflow(self):
-        saved = CONFIG_STORE.patch({'auth_workflow': DEFAULT_AUTH_WORKFLOW})
+    def save_workflow_as(self, name, workflow, tray_menu=True):
+        clean_name = str(name or '').strip()[:60]
+        if not clean_name:
+            return {'success': False, 'message': '请输入工作流名称'}
+        try:
+            steps = self._validate_workflow_steps(workflow)
+        except Exception as exc:
+            return {'success': False, 'message': str(exc)}
+        config = CONFIG_STORE.snapshot()
+        workflows = copy.deepcopy(config.get('workflows') or {})
+        from core.config import workflow_id_from_name
+        base_id = workflow_id_from_name(clean_name)
+        workflow_id = base_id
+        suffix = 2
+        while workflow_id in workflows:
+            workflow_id = f'{base_id}_{suffix}'
+            suffix += 1
+        workflows[workflow_id] = {
+            'id': workflow_id,
+            'name': clean_name,
+            'description': '用户自定义工作流',
+            'built_in': False,
+            'tray_menu': bool(tray_menu),
+            'steps': steps,
+        }
+        saved = CONFIG_STORE.patch({'workflows': workflows,
+                                    'active_workflow_id': workflow_id,
+                                    'auth_workflow': steps})
+        return {'success': True, 'message': f'已保存为独立工作流：{clean_name}',
+                'workflows': self._workflow_snapshot(saved),
+                'workflow': saved['workflows'][workflow_id],
+                'active_workflow_id': workflow_id,
+                'revision': saved['_revision']}
+
+    def update_workflow_meta(self, workflow_id, name=None, tray_menu=None):
+        config = CONFIG_STORE.snapshot()
+        workflows = copy.deepcopy(config.get('workflows') or {})
+        target = workflows.get(workflow_id)
+        if not target:
+            return {'success': False, 'message': '工作流不存在'}
+        if name is not None:
+            clean_name = str(name).strip()[:60]
+            if not clean_name:
+                return {'success': False, 'message': '工作流名称不能为空'}
+            target['name'] = clean_name
+        if tray_menu is not None:
+            target['tray_menu'] = bool(tray_menu)
+        saved = CONFIG_STORE.patch({'workflows': workflows})
+        return {'success': True, 'workflows': self._workflow_snapshot(saved),
+                'workflow': saved['workflows'][workflow_id],
+                'revision': saved['_revision']}
+
+    def select_workflow(self, workflow_id):
+        config = CONFIG_STORE.snapshot()
+        workflows = config.get('workflows') or {}
+        if workflow_id not in workflows:
+            return {'success': False, 'message': '工作流不存在'}
+        steps = workflows[workflow_id].get('steps', [])
+        saved = CONFIG_STORE.patch({'active_workflow_id': workflow_id,
+                                    'auth_workflow': steps})
+        return {'success': True, 'workflows': self._workflow_snapshot(saved),
+                'workflow': saved['workflows'][workflow_id],
+                'active_workflow_id': workflow_id,
+                'revision': saved['_revision']}
+
+    def delete_workflow(self, workflow_id):
+        config = CONFIG_STORE.snapshot()
+        workflows = copy.deepcopy(config.get('workflows') or {})
+        target = workflows.get(workflow_id)
+        if not target:
+            return {'success': False, 'message': '工作流不存在'}
+        if target.get('built_in'):
+            return {'success': False, 'message': '内置工作流不能删除，可取消托盘显示或另存为自定义工作流'}
+        del workflows[workflow_id]
+        active_id = config.get('active_workflow_id')
+        patch = {'workflows': workflows}
+        if active_id == workflow_id:
+            patch['active_workflow_id'] = 'default_auth'
+            patch['auth_workflow'] = workflows['default_auth']['steps']
+        saved = CONFIG_STORE.patch(patch)
+        return {'success': True, 'message': '工作流已删除',
+                'workflows': self._workflow_snapshot(saved),
+                'active_workflow_id': saved['active_workflow_id'],
+                'revision': saved['_revision']}
+
+    def reset_workflow(self, workflow_id=None):
+        config = CONFIG_STORE.snapshot()
+        target_id = workflow_id or config.get('active_workflow_id', 'default_auth')
+        workflows = copy.deepcopy(config.get('workflows') or {})
+        target = workflows.get(target_id)
+        if not target or not target.get('built_in'):
+            return {'success': False, 'message': '仅内置工作流支持一键恢复默认'}
+        from core.config import _builtin_workflows
+        workflows[target_id] = copy.deepcopy(_builtin_workflows()[target_id])
+        patch = {'workflows': workflows}
+        if config.get('active_workflow_id') == target_id:
+            patch['auth_workflow'] = workflows[target_id]['steps']
+        saved = CONFIG_STORE.patch(patch)
         return {'success': True, 'message': '已恢复默认工作流',
-                'workflow': saved['auth_workflow'], 'revision': saved['_revision']}
+                'workflows': self._workflow_snapshot(saved),
+                'workflow': saved['workflows'][target_id],
+                'active_workflow_id': saved['active_workflow_id'],
+                'revision': saved['_revision']}
+
+    def run_workflow(self, workflow_id):
+        workflow = (CONFIG_STORE.get('workflows') or {}).get(workflow_id)
+        if not workflow:
+            return {'success': False, 'message': '工作流不存在'}
+        # 分配新操作纪元，保证进度事件归属于本次启动的工作流
+        app_state.start_operation('auth')
+
+        def _do_run():
+            if not _auth_lock.acquire(blocking=False):
+                js_code = f"onAuthProgress({{step:1,total:1,message:{_js_escape('工作流正在进行中，请稍候')},status:{_js_escape('error')}}})"
+                if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
+                    core.state._tray_app_instance.settings_window.evaluate_js(js_code)
+                return
+            try:
+                success, message = run_workflow_by_id(workflow_id)
+                if not _auth_cancelled.is_set() and core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
+                    status = 'success' if success else 'error'
+                    js_code = f"onAuthProgress({{step:1,total:1,message:{_js_escape(message)},status:{_js_escape(status)}}})"
+                    core.state._tray_app_instance.settings_window.evaluate_js(js_code)
+            finally:
+                _auth_cancelled.clear()
+                _auth_lock.release()
+        threading.Thread(target=_do_run, daemon=True).start()
+        return {'success': True, 'message': f'工作流 {workflow.get("name", workflow_id)} 已启动'}
     def restore_network(self):
         logger.info("restore_network called")
-        app_state.update_operation(kind='restore', status='running', step=0, total=2, message='准备恢复网络')
+        # 分配新操作纪元：旧操作滞后的进度/终态事件将被前端整体忽略
+        app_state.start_operation('restore')
         def _do_restore():
             if not _auth_lock.acquire(blocking=False):
                 logger.warning("restore_network: auth lock busy, cancelling current operation...")
@@ -336,7 +718,13 @@ class ApiBridge:
                         core.state._tray_app_instance.settings_window.evaluate_js(js_code)
                     return
             try:
-                success, msg = run_restore_task()
+                # 按配置绑定的工作流执行；未绑定（空串）时使用内置恢复逻辑
+                restore_wf_id = CONFIG_STORE.get('restore_button_workflow') or ''
+                if restore_wf_id and (CONFIG_STORE.get('workflows') or {}).get(restore_wf_id):
+                    logger.info(f"restore_network: running bound workflow {restore_wf_id}")
+                    success, msg = run_workflow_by_id(restore_wf_id)
+                else:
+                    success, msg = run_restore_task()
                 app_state.update_operation(kind='restore', status='success' if success else 'error', message=msg)
                 network_status.request_refresh()
                 if _auth_cancelled.is_set():
@@ -666,45 +1054,47 @@ class ApiBridge:
             raise
 
     def save_ui_prefs(self, prefs):
-        """保存 UI 偏好（page_size, traffic_subview, network_detail_collapsed）。
-        Args:
-            prefs: dict，如 {'page_size': 50} 或 {'traffic_subview': 'canvas'} 或 {'network_detail_collapsed': True}
-        Returns:
-            dict: {'success': bool}
-        """
+        """保存界面偏好，包括分页、视图模式、详情折叠状态、当前标签页和主题。"""
         try:
+            allowed = {'page_size', 'traffic_subview', 'network_detail_collapsed', 'active_tab', 'theme'}
+            clean = {key: value for key, value in (prefs or {}).items() if key in allowed}
+            if clean.get('theme') not in ('light', 'dark', 'system'):
+                clean.pop('theme', None)
             current = CONFIG_STORE.get('ui_prefs') or {}
-            current.update(prefs)
-            CONFIG_STORE.patch({'ui_prefs': current})
-            logger.info(f"[save_ui_prefs] Saved: {prefs}, merged: {current}")
-            return {'success': True}
+            current.update(clean)
+            saved = CONFIG_STORE.patch({'ui_prefs': current})
+            logger.info(f"[save_ui_prefs] Saved: {clean}, merged: {current}")
+            return {'success': True, 'revision': saved.get('_revision')}
         except Exception as e:
             logger.error(f"[save_ui_prefs] FAILED: {e}\n{traceback.format_exc()}")
             return {'success': False}
 
     def get_ui_prefs(self):
-        """读取 UI 偏好，供前端初始化。
-        Returns:
-            dict: {'page_size': int, 'traffic_subview': str, 'network_detail_collapsed': bool}
-        """
+        """读取界面偏好，供前端初始化。"""
+        fallback = {'page_size': 20, 'traffic_subview': 'list',
+                    'network_detail_collapsed': False, 'active_tab': 'home',
+                    'theme': 'system'}
         try:
-            cfg = load_config()
-            prefs = cfg.get('ui_prefs') or {}
+            prefs = load_config().get('ui_prefs') or {}
             result = {
                 'page_size': int(prefs.get('page_size', 20)),
                 'traffic_subview': prefs.get('traffic_subview', 'list'),
-                'network_detail_collapsed': bool(prefs.get('network_detail_collapsed', False))
+                'network_detail_collapsed': bool(prefs.get('network_detail_collapsed', False)),
+                'active_tab': prefs.get('active_tab', 'home'),
+                'theme': prefs.get('theme', 'system'),
             }
-            # 校验 page_size 取值范围
             if result['page_size'] not in (10, 20, 50, 100):
                 result['page_size'] = 20
             if result['traffic_subview'] not in ('list', 'canvas'):
                 result['traffic_subview'] = 'list'
-            logger.info(f"[get_ui_prefs] Returning: {result}")
+            if result['active_tab'] not in ('home', 'workflow', 'warp', 'traffic', 'settings'):
+                result['active_tab'] = 'home'
+            if result['theme'] not in ('light', 'dark', 'system'):
+                result['theme'] = 'system'
             return result
         except Exception as e:
             logger.error(f"[get_ui_prefs] FAILED: {e}\n{traceback.format_exc()}")
-            return {'page_size': 20, 'traffic_subview': 'list', 'network_detail_collapsed': False}
+            return fallback
 
     def get_network_detail(self):
         """聚合网络详情，供主页tab展示。
@@ -773,33 +1163,43 @@ def on_settings(icon, item):
     logger.info("User clicked: Settings")
 
 def on_auth(icon, item):
-    logger.info("User clicked: Manual Auth")
-    icon.icon = create_icon('orange')
-    icon.title = '正在认证...'
-    icon.notify('正在执行校园网认证...', '校园网助手')
-    threading.Thread(target=_run_auth, args=(icon,), daemon=True).start()
+    _start_tray_workflow('default_auth', icon)
 
-def _run_auth(icon):
+
+def _start_tray_workflow(workflow_id, icon=None):
+    definition = (load_config().get('workflows') or {}).get(workflow_id, {})
+    name = definition.get('name', workflow_id)
+    if icon:
+        icon.icon = create_icon('orange')
+        icon.title = f'正在执行：{name}'
+        icon.notify(f'正在执行工作流：{name}', '校园网助手')
+    threading.Thread(target=_run_tray_workflow, args=(workflow_id, icon, name), daemon=True).start()
+
+
+def _run_tray_workflow(workflow_id, icon, name):
     if not _auth_lock.acquire(blocking=False):
-        icon.notify('认证正在进行中，请稍候', '校园网助手')
-        icon.icon = create_icon('green')
-        icon.title = '校园网助手'
+        if icon:
+            icon.notify('工作流正在进行中，请稍候', '校园网助手')
+            icon.icon = create_icon('green')
+            icon.title = '校园网助手'
         return
     try:
-        success, msg = run_auth_task()
-        if success:
-            icon.icon = create_icon('orange')
-            icon.title = 'WARP已连接'
-            icon.notify(msg, '校园网助手')
-        else:
-            icon.icon = create_icon('red')
-            icon.title = '认证失败'
-            icon.notify(f'失败: {msg}', '校园网助手')
+        success, msg = run_workflow_by_id(workflow_id)
+        if icon:
+            if success:
+                icon.icon = create_icon('orange')
+                icon.title = name
+                icon.notify(msg, '校园网助手')
+            else:
+                icon.icon = create_icon('red')
+                icon.title = '工作流失败'
+                icon.notify(f'失败: {msg}', '校园网助手')
     except Exception as e:
-        logger.error(f"Auth error: {e}")
-        icon.icon = create_icon('red')
-        icon.title = '错误'
-        icon.notify(f'错误: {e}', '校园网助手')
+        logger.exception("Workflow %s error", workflow_id)
+        if icon:
+            icon.icon = create_icon('red')
+            icon.title = '错误'
+            icon.notify(f'错误: {e}', '校园网助手')
     finally:
         _auth_lock.release()
 
@@ -833,41 +1233,7 @@ def _run_restore(icon):
         _auth_lock.release()
 
 def on_reauth(icon, item):
-    """注销并重新认证：先注销 Portal，再重新执行认证流程"""
-    logger.info("User clicked: Re-auth (logout + auth)")
-    icon.icon = create_icon('orange')
-    icon.title = '正在重新认证...'
-    icon.notify('正在注销并重新认证...', '校园网助手')
-    threading.Thread(target=_run_reauth, args=(icon,), daemon=True).start()
-
-def _run_reauth(icon):
-    if not _auth_lock.acquire(blocking=False):
-        icon.notify('操作正在进行中，请稍候', '校园网助手')
-        icon.icon = create_icon('green')
-        icon.title = '校园网助手'
-        return
-    try:
-        # 1. 先注销 Portal
-        logger.info("[reauth] Logging out from portal...")
-        portal_logout()
-        # 2. 重新认证
-        logger.info("[reauth] Starting re-authentication...")
-        success, msg = run_auth_task()
-        if success:
-            icon.icon = create_icon('orange')
-            icon.title = 'WARP已连接'
-            icon.notify(msg, '校园网助手')
-        else:
-            icon.icon = create_icon('red')
-            icon.title = '认证失败'
-            icon.notify(f'失败: {msg}', '校园网助手')
-    except Exception as e:
-        logger.error(f"Re-auth error: {e}")
-        icon.icon = create_icon('red')
-        icon.title = '错误'
-        icon.notify(f'错误: {e}', '校园网助手')
-    finally:
-        _auth_lock.release()
+    _start_tray_workflow('portal_reauth', icon)
 
 def on_exit(icon, item):
     logger.info("on_exit: user clicked Exit")
@@ -917,13 +1283,14 @@ def on_setup_admin(icon, item):
 
 class TrayApp:
     # 首次启动默认尺寸（屏幕85%），实际从配置读取
-    MIN_W = 800
-    MIN_H = 600
+    MIN_W = 1210
+    MIN_H = 770
 
     def __init__(self, silent=False):
         self.icon = None
         self.api = ApiBridge()
         self.settings_window = None
+        self._geometry_save_timer = None
         self._should_exit = False
         self._silent = silent
         self._webview_started = False
@@ -932,61 +1299,72 @@ class TrayApp:
         self._state_unsubscribe = None
 
     def calc_initial_window_geometry(self):
-        """计算初始窗口几何。优先从配置读取，否则按屏幕85%居中。
-        Returns: (width, height, x, y)
+        """计算初始窗口几何（含最大化标记），支持多显示器坐标并在屏幕拔出时安全回退。
+
+        返回 (width, height, x, y, maximized)。
         """
         user32 = ctypes.windll.user32
         screen_w = user32.GetSystemMetrics(0)
         screen_h = user32.GetSystemMetrics(1)
+        default_w, default_h = screen_w * 85 // 100, screen_h * 85 // 100
+        default_x, default_y = (screen_w - default_w) // 2, (screen_h - default_h) // 2
         cfg = load_config()
         saved = cfg.get('window')
         if saved and isinstance(saved, dict):
-            w = int(saved.get('width', screen_w * 85 // 100))
-            h = int(saved.get('height', screen_h * 85 // 100))
-            x = int(saved.get('x', (screen_w - w) // 2))
-            y = int(saved.get('y', (screen_h - h) // 2))
-            # 校正越界（外接显示器拔出场景）
-            if w > screen_w:
-                w = screen_w * 85 // 100
-            if h > screen_h:
-                h = screen_h * 85 // 100
-            x = max(0, min(x, screen_w - w))
-            y = max(0, min(y, screen_h - h))
-            logger.info(f"[window_geometry] From config: {w}x{h} at ({x},{y})")
-            return w, h, x, y
-        # 首次启动：屏幕85%居中
-        w = screen_w * 85 // 100
-        h = screen_h * 85 // 100
-        x = (screen_w - w) // 2
-        y = (screen_h - h) // 2
-        logger.info(f"[window_geometry] Default 85%: {w}x{h} at ({x},{y})")
-        return w, h, x, y
+            try:
+                w = int(saved.get('width', default_w))
+                h = int(saved.get('height', default_h))
+                x = int(saved.get('x', default_x))
+                y = int(saved.get('y', default_y))
+            except (TypeError, ValueError):
+                w, h, x, y = default_w, default_h, default_x, default_y
+            if _valid_window_geometry(w, h, x, y):
+                maximized = bool(saved.get('maximized'))
+                logger.info(f"[window_geometry] From config: {w}x{h} at ({x},{y}), maximized={maximized}")
+                return w, h, x, y, maximized
+            logger.warning('[window_geometry] Saved geometry unavailable, using primary screen center')
+        logger.info(f"[window_geometry] Default 85%: {default_w}x{default_h} at ({default_x},{default_y})")
+        return default_w, default_h, default_x, default_y, False
 
     def save_window_geometry(self):
-        """保存当前窗口尺寸和位置到配置。"""
+        """保存当前窗口尺寸和位置到配置（GetWindowPlacement 规范做法）。"""
         try:
             if not self.settings_window:
                 return
-            hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
-            if hwnd:
-                rect = ctypes.wintypes.RECT()
-                ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
-                x, y = rect.left, rect.top
-                w = rect.right - rect.left
-                h = rect.bottom - rect.top
-            else:
+            captured = _capture_window_geometry()
+            if captured is None:
                 x = self.settings_window.x
                 y = self.settings_window.y
                 w = self.settings_window.width
                 h = self.settings_window.height
-            # 忽略异常值
-            if w > 100 and h > 100 and x > -1000 and y > -1000:
-                CONFIG_STORE.patch({'window': {'width': w, 'height': h, 'x': x, 'y': y}})
-                logger.info(f"[save_window_geometry] Saved: {w}x{h} at ({x},{y})")
+                captured = {'width': int(w), 'height': int(h),
+                            'x': int(x), 'y': int(y), 'maximized': False}
+            if _valid_window_geometry(captured['width'], captured['height'],
+                                      captured['x'], captured['y']):
+                CONFIG_STORE.patch({'window': captured})
+                state = 'maximized' if captured['maximized'] else 'normal'
+                logger.info(f"[save_window_geometry] Saved ({state}): "
+                            f"{captured['width']}x{captured['height']} at ({captured['x']},{captured['y']})")
             else:
-                logger.warning(f"[save_window_geometry] Ignored abnormal: {w}x{h} at ({x},{y})")
+                logger.warning(f"[save_window_geometry] Ignored abnormal: "
+                               f"{captured['width']}x{captured['height']} at ({captured['x']},{captured['y']})")
         except Exception as e:
             logger.error(f"[save_window_geometry] FAILED: {e}")
+
+    def _schedule_geometry_save(self, delay=0.4):
+        """防抖保存窗口几何：move/resize 事件高频触发，仅保留最后一次。
+
+        pywebview 的 Window.x/y/width/height 属性更新滞后，
+        save_window_geometry 内部始终用 Win32 实时矩形，保证保存的是最新几何。
+        """
+        try:
+            if self._geometry_save_timer is not None:
+                self._geometry_save_timer.cancel()
+            self._geometry_save_timer = threading.Timer(delay, self.save_window_geometry)
+            self._geometry_save_timer.daemon = True
+            self._geometry_save_timer.start()
+        except Exception as e:
+            logger.debug(f"_schedule_geometry_save failed: {e}")
 
     def _apply_app_state(self, state):
         """Apply one state snapshot to both tray and the visible window."""
@@ -1029,16 +1407,37 @@ class TrayApp:
             self._state_unsubscribe()
             self._state_unsubscribe = None
 
-    def create_tray(self):
-        self.icon = pystray.Icon('wifi_auto_auth')
-        self.icon.icon = create_icon('gray')
-        self.icon.title = '校园网助手'
-        startup_enabled = CONFIG.get('auto_startup', False)
+    @staticmethod
+    def _make_workflow_handler(workflow_id):
+        """pystray 菜单回调签名只允许 (icon, item) 两个位置参数，
+        用工厂闭包绑定 workflow_id，避免第三个参数触发 ValueError。"""
+        def handler(icon, item):
+            _start_tray_workflow(workflow_id, icon)
+        return handler
+
+    def _workflow_menu_items(self):
+        items = []
+        workflows = list((load_config().get('workflows') or {}).values())
+        workflows.sort(key=lambda item: (not item.get('built_in', False), item.get('id', '')))
+        for workflow in workflows:
+            if not workflow.get('tray_menu', True):
+                continue
+            steps = workflow.get('steps') or []
+            if not any(step.get('enabled', True) for step in steps if isinstance(step, dict)):
+                continue
+            workflow_id = workflow['id']
+
+            items.append(pystray.MenuItem(
+                str(workflow.get('name') or workflow_id),
+                self._make_workflow_handler(workflow_id)))
+        return items
+
+    def _build_menu_items(self, startup_enabled):
         menu_items = [
             pystray.MenuItem('显示主窗口', lambda i, item: self.show_settings()),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem('手动认证', on_auth),
-            pystray.MenuItem('注销并重新认证', on_reauth),
+            *self._workflow_menu_items(),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem('恢复正常模式', on_restore),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem('WARP排除', lambda i, item: self.show_main_window('warp')),
@@ -1055,6 +1454,15 @@ class TrayApp:
             pystray.MenuItem('查看日志', on_show_log),
             pystray.MenuItem('退出', on_exit),
         ])
+        return menu_items
+
+    def create_tray(self):
+
+        self.icon = pystray.Icon('wifi_auto_auth')
+        self.icon.icon = create_icon('gray')
+        self.icon.title = '校园网助手'
+        startup_enabled = load_config().get('auto_startup', False)
+        menu_items = self._build_menu_items(startup_enabled)
         self.icon.menu = pystray.Menu(*menu_items)
         self.icon.on_activate = self._on_tray_activate
         # Monkey-patch pystray 的消息处理器，让左键单击也触发 on_activate
@@ -1112,28 +1520,12 @@ class TrayApp:
 
     def _refresh_tray_menu(self):
         try:
-            startup_enabled = CONFIG.get('auto_startup', False)
-            startup_label = '取消开机自启' if startup_enabled else '设置开机自启'
-            menu_items = [
-                pystray.MenuItem('手动认证', on_auth),
-                pystray.MenuItem('注销并重新认证', on_reauth),
-                pystray.MenuItem('恢复正常模式', on_restore),
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem('WARP排除', lambda i, item: self.show_main_window('warp')),
-                pystray.MenuItem('流量', lambda i, item: self.show_main_window('traffic')),
-                pystray.MenuItem('打开主页', lambda i, item: self.show_main_window('home')),
-                pystray.Menu.SEPARATOR,
-            ]
-            if not is_admin():
-                menu_items.append(pystray.MenuItem('以管理员身份运行', lambda i, item: elevate_if_needed()))
-                menu_items.append(pystray.Menu.SEPARATOR)
-            menu_items.extend([
-                pystray.MenuItem(startup_label, self._toggle_startup),
-                pystray.MenuItem('查看日志', on_show_log),
-                pystray.MenuItem('退出', on_exit),
-            ])
+            startup_enabled = load_config().get('auto_startup', False)
+            menu_items = self._build_menu_items(startup_enabled)
             self.icon.menu = pystray.Menu(*menu_items)
-            logger.debug(f"Tray menu refreshed, startup={'enabled' if startup_enabled else 'disabled'}")
+            logger.debug("Tray menu refreshed, startup=%s, workflows=%s",
+                         'enabled' if startup_enabled else 'disabled',
+                         len(self._workflow_menu_items()))
         except Exception as e:
             logger.error(f"_refresh_tray_menu failed: {e}")
 
@@ -1161,19 +1553,23 @@ class TrayApp:
         if self.settings_window:
             try:
                 self.settings_window.show()
-                self.settings_window.restore()
+                # 最大化状态下不要 restore（会把最大化窗口还原成普通大小）
+                if not _is_window_zoomed():
+                    self.settings_window.restore()
                 logger.info("[show_settings] Window shown via pywebview")
 
-                hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
+                hwnd = _find_main_hwnd()
                 if hwnd:
                     logger.info(f"[show_settings] Found window hwnd={hwnd}")
                     SW_RESTORE = 9
+                    SW_SHOW = 5
                     HWND_TOPMOST = -1
                     HWND_NOTOPMOST = -2
                     SWP_NOMOVE = 0x0002
                     SWP_NOSIZE = 0x0001
                     SWP_SHOWWINDOW = 0x0040
-                    ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+                    # 已最大化的窗口用 SW_SHOW，避免 SW_RESTORE 撤销最大化
+                    ctypes.windll.user32.ShowWindow(hwnd, SW_SHOW if _is_window_zoomed() else SW_RESTORE)
                     ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
                     ctypes.windll.user32.SetForegroundWindow(hwnd)
                     ctypes.windll.user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
@@ -1237,11 +1633,27 @@ class TrayApp:
 
             logger.info("Silent mode: WebView2 init triggered, starting now...")
 
+        # 优先加载 Vue3 前端构建产物，回退到旧版 settings.html
         html_file = get_resource_path('settings.html')
+        dist_index = get_resource_path('frontend/dist/index.html')
+        if os.path.isfile(dist_index):
+            html_file = dist_index
+            logger.info(f"run: using Vue frontend at {dist_index}")
         logger.debug(f"run: html_file={html_file}")
 
         # 从配置读取窗口几何，否则按屏幕85%居中
-        win_w, win_h, wx, wy = self.calc_initial_window_geometry()
+        win_w, win_h, wx, wy, win_maximized = self.calc_initial_window_geometry()
+        self._restore_maximized = win_maximized
+
+        # pywebview 6.x 约定：create_window 的 width/height/x/y 为逻辑像素，
+        # WinForms 层内部会乘以 DPI 缩放转为物理像素。保存的几何是物理像素
+        # （GetWindowRect/GetWindowPlacement），必须先除以缩放比例，
+        # 否则高 DPI 屏上每次重启窗口都会放大 25%（缩放 1.25 时）。
+        scale = _dpi_scale()
+        logical_w = round(win_w / scale)
+        logical_h = round(win_h / scale)
+        logical_x = round(wx / scale)
+        logical_y = round(wy / scale)
 
         try:
             html_url = f'file:///{html_file.replace(chr(92), "/")}'
@@ -1249,10 +1661,10 @@ class TrayApp:
                 'CampusAuth',
                 url=html_url,
                 js_api=self.api,
-                width=win_w,
-                height=win_h,
-                x=wx,
-                y=wy,
+                width=logical_w,
+                height=logical_h,
+                x=logical_x,
+                y=logical_y,
                 resizable=True,
                 min_size=(self.MIN_W, self.MIN_H),
                 background_color='#0D0D0D',
@@ -1260,7 +1672,9 @@ class TrayApp:
                 frameless=True,
                 hidden=self._silent
             )
-            logger.info(f"Window created at ({wx}, {wy}), size={win_w}x{win_h}, url={html_url}")
+            logger.info(f"Window created: physical {win_w}x{win_h} at ({wx},{wy}) -> "
+                        f"logical {logical_w}x{logical_h} at ({logical_x},{logical_y}) "
+                        f"(dpi scale {scale:g}), url={html_url}")
         except Exception as e:
             logger.error(f"run: create_window failed: {e}\n{traceback.format_exc()}")
             return
@@ -1283,6 +1697,14 @@ class TrayApp:
             return False
         
         self.settings_window.events.closing += on_closing
+
+        # 窗口移动/缩放/最小化/还原时防抖保存几何（读取 Win32 实时矩形），
+        # 解决 pywebview 属性滞后与前端轮询间隔导致的"位置大小没记住"问题
+        self.settings_window.events.moved += lambda *args: self._schedule_geometry_save()
+        self.settings_window.events.resized += lambda *args: self._schedule_geometry_save()
+        self.settings_window.events.restored += lambda *args: self._schedule_geometry_save()
+        self.settings_window.events.maximized += lambda *args: self._schedule_geometry_save()
+        self.settings_window.events.minimized += lambda *args: self._schedule_geometry_save()
 
         _icon_handles = []
 
@@ -1328,13 +1750,28 @@ class TrayApp:
 
         self.settings_window.events.shown += set_window_icon
 
+        # 恢复上次的最大化状态（在窗口显示后应用，普通态几何已在创建时恢复）
+        def restore_maximized_state():
+            if not getattr(self, '_restore_maximized', False):
+                return
+            self._restore_maximized = False
+            hwnd = _find_main_hwnd()
+            if hwnd:
+                SW_MAXIMIZE = 3
+                ctypes.windll.user32.ShowWindow(hwnd, SW_MAXIMIZE)
+                logger.info("[restore_maximized_state] Window maximized per saved state")
+
+        self.settings_window.events.shown += restore_maximized_state
+
         if not self._silent:
             def ensure_visible():
                 try:
                     time.sleep(0.5)
                     if self.settings_window:
                         self.settings_window.show()
-                        self.settings_window.restore()
+                        # 最大化状态下不要 restore（会撤销 restore_maximized_state）
+                        if not _is_window_zoomed():
+                            self.settings_window.restore()
                         logger.info("Non-silent mode: window ensured visible")
                 except Exception as e:
                     logger.error(f"Non-silent mode ensure visible failed: {e}")
@@ -1350,6 +1787,9 @@ class TrayApp:
             self.icon.stop()
 
 def main():
+    # 必须在任何窗口创建与屏幕指标读取之前声明 DPI 感知，
+    # 保证窗口几何的保存/校验/恢复全程使用同一套物理像素坐标
+    _enable_dpi_awareness()
     logger.info("=" * 50)
     logger.info("WiFi Auto-Auth App Starting")
     logger.info(f"SCRIPT_DIR: {SCRIPT_DIR}")

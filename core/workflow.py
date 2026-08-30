@@ -77,7 +77,12 @@ class WorkflowContext:
         return fallback if not deadlines else max(0.1, min(deadlines) - time.monotonic())
 
     def add_rollback(self, name: str, callback: Callable[[], None]) -> None:
+        self.remove_rollback(name)
         self._rollbacks.append((name, callback))
+
+    def remove_rollback(self, name: str) -> None:
+        self._rollbacks = [(item_name, callback) for item_name, callback in self._rollbacks
+                           if item_name != name]
 
     def rollback(self) -> None:
         while self._rollbacks:
@@ -103,23 +108,16 @@ class WorkflowRunner:
         steps = [StepSpec.from_dict(value) for value in raw_steps]
         if not steps:
             raise ValueError("工作流不能为空")
-        seen: set[str] = set()
         for step in steps:
             if not step.id or step.id not in self.actions:
                 raise ValueError(f"未知工作流步骤: {step.id or '<empty>'}")
-            if step.id in seen:
-                raise ValueError(f"工作流步骤重复: {step.id}")
-            seen.add(step.id)
         enabled = [step for step in steps if step.enabled]
         if not enabled:
             raise ValueError("至少需要启用一个工作流步骤")
-        if len(enabled) < 2:
-            raise ValueError("工作流除完成步骤外至少需要一个认证步骤")
-        if enabled[-1].id != "finalize":
-            raise ValueError("启用的工作流必须以“完成与清理”步骤结束")
         return steps
 
-    def run(self, raw_steps: list[dict[str, Any]], context: WorkflowContext) -> WorkflowResult:
+    def run(self, raw_steps: list[dict[str, Any]], context: WorkflowContext,
+            success_message: str = "工作流执行完成") -> WorkflowResult:
         steps = [step for step in self.validate(raw_steps) if step.enabled]
         started = time.monotonic()
         completed: list[str] = []
@@ -127,7 +125,7 @@ class WorkflowRunner:
         for index, step in enumerate(steps, 1):
             if context.overall_deadline is not None and time.monotonic() >= context.overall_deadline:
                 context.rollback()
-                return WorkflowResult(False, '认证超过总时限，已恢复临时网络设置',
+                return WorkflowResult(False, '工作流超过总时限，已执行回滚',
                                       'workflow_timeout', step.id,
                                       time.monotonic() - started, tuple(completed))
             if context.cancelled():
@@ -176,7 +174,7 @@ class WorkflowRunner:
                 return WorkflowResult(False, last.message, last.code, step.id,
                                       time.monotonic() - started, tuple(completed))
         context.clear_rollbacks()
-        return WorkflowResult(True, "认证成功", "ok", None,
+        return WorkflowResult(True, success_message, "ok", None,
                               time.monotonic() - started, tuple(completed))
 
 

@@ -185,12 +185,15 @@ def portal_logout(config=None, timeout=6):
         return False
 
 def _push_auth_progress(step, total, message, status='running', action='auth'):
-    """推送认证进度到前端"""
+    """推送认证进度到前端（带操作纪元，前端只接受最新纪元的进度）"""
     try:
+        from core.app_state import app_state
+        op_id = app_state.snapshot().get('operation', {}).get('operation_id', 0)
         if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
-            js_code = f"onAuthProgress({{step:{step}, total:{total}, message:{_js_escape(message)}, status:{_js_escape(status)}, action:{_js_escape(action)}}})"
+            js_code = (f"onAuthProgress({{step:{step}, total:{total}, message:{_js_escape(message)}, "
+                       f"status:{_js_escape(status)}, action:{_js_escape(action)}, operationId:{op_id}}})")
             core.state._tray_app_instance.settings_window.evaluate_js(js_code)
-            logger.debug(f"push_auth_progress: step={step}/{total}, status={status}, action={action}, msg={message}")
+            logger.debug(f"push_auth_progress: step={step}/{total}, status={status}, action={action}, op={op_id}, msg={message}")
     except Exception as e:
         logger.error(f"push_auth_progress failed: {e}")
 
@@ -205,8 +208,10 @@ def run_restore_task():
     if not interface_name:
         interface_name = "WLAN"
     logger.info(f"WiFi interface: {interface_name}")
-    _push_auth_progress(1, 2, '恢复网络...', action='restore')
-    logger.info("[1/2] Disconnecting WARP and enabling IPv4 in parallel...")
+    # 3 个固定阶段，total 恒为 3，进度单调递增不回退：
+    # 1=断开WARP+启用IPv4  2=验证IPv4地址  3=验证互联网连通
+    _push_auth_progress(1, 3, '断开 WARP 并启用 IPv4...', action='restore')
+    logger.info("[1/3] Disconnecting WARP and enabling IPv4 in parallel...")
 
     warp_result = [None]
     ipv4_result = [None]
@@ -229,23 +234,23 @@ def run_restore_task():
     if not ipv4_result[0]:
         logger.warning("enable_ipv4 failed, rolling back: reconnecting WARP")
         connect_warp()
-        _push_auth_progress(2, 2, '启用IPv4失败，已恢复WARP', 'error', action='restore')
+        _push_auth_progress(1, 3, '启用IPv4失败，已恢复WARP', 'error', action='restore')
         return False, "启用IPv4失败，已恢复WARP"
-    _push_auth_progress(2, 2, '验证网络...', action='restore')
-    logger.info("[2/2] Verifying network...")
+    _push_auth_progress(2, 3, '验证 IPv4 地址...', action='restore')
+    logger.info("[2/3] Verifying network...")
     if not _interruptible_sleep(3): return False, "已取消"
     code, output, _ = run_command(f'netsh interface ipv4 show config name="{interface_name}"')
     has_ipv4 = any(ip in output for ip in ['192.168.', '10.'])
     if not has_ipv4:
         logger.warning("No valid IPv4 address found after enabling")
-        _push_auth_progress(2, 2, 'IPv4未获取到有效地址', 'error', action='restore')
+        _push_auth_progress(2, 3, 'IPv4未获取到有效地址', 'error', action='restore')
         return False, "IPv4未获取到有效地址"
     try:
         import urllib.request
         req = urllib.request.Request('http://www.baidu.com', method='HEAD')
         urllib.request.urlopen(req, timeout=5)
         logger.info("Network connectivity verified")
-        _push_auth_progress(2, 2, '网络已恢复正常模式', 'success', action='restore')
+        _push_auth_progress(3, 3, '网络已恢复正常模式', 'success', action='restore')
         return True, "网络已恢复正常模式"
     except Exception as e:
         logger.warning(f"IPv4 has IP but no internet: {e}")

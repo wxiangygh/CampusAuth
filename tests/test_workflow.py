@@ -3,7 +3,8 @@ import unittest
 from core.workflow import StepResult, WorkflowContext, WorkflowRunner
 
 
-CATALOG = {'first': {'name': 'First'}, 'finalize': {'name': 'Finalize'}}
+CATALOG = {'first': {'name': 'First'}, 'second': {'name': 'Second'},
+           'finalize': {'name': 'Finalize'}}
 
 
 class WorkflowTests(unittest.TestCase):
@@ -43,11 +44,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(rolled_back, ['two', 'one'])
 
-    def test_finalize_must_be_last_enabled_step(self):
-        runner = WorkflowRunner({'first': lambda c, s: StepResult.ok('ok'),
-                                 'finalize': lambda c, s: StepResult.ok('ok')}, CATALOG)
-        with self.assertRaisesRegex(ValueError, '完成与清理'):
-            runner.validate([{'id': 'finalize'}, {'id': 'first'}])
+    def test_custom_workflow_need_not_end_with_finalize(self):
+        runner = WorkflowRunner({
+            'first': lambda c, s: StepResult.ok('ok'),
+            'second': lambda c, s: StepResult.ok('done'),
+        }, CATALOG)
+        steps = runner.validate([{'id': 'first'}, {'id': 'second'}])
+        self.assertEqual([step.id for step in steps], ['first', 'second'])
+
+    def test_same_action_can_be_repeated_for_fine_grained_flows(self):
+        calls = []
+
+        def first(context, step):
+            calls.append(step.id)
+            return StepResult.ok('ok')
+
+        runner = WorkflowRunner({'first': first}, CATALOG)
+        result = runner.run([{'id': 'first'}, {'id': 'first'}],
+                            WorkflowContext(config={}, cancelled=lambda: False))
+        self.assertTrue(result.success)
+        self.assertEqual(calls, ['first', 'first'])
 
 
 if __name__ == '__main__':

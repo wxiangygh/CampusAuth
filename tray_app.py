@@ -1,5 +1,6 @@
 import os
 import sys
+import shutil
 import json
 import copy
 import ctypes
@@ -81,6 +82,26 @@ logging.basicConfig(
 logger = logging.getLogger('wifi_tray')
 logging.getLogger('PIL').setLevel(logging.WARNING)
 logging.getLogger('pystray').setLevel(logging.WARNING)
+
+
+def seed_default_configs():
+    """首次运行时用打包内置模板播种配置文件。
+
+    模板（config/）预置了作者调好的分流规则与工作流，不含任何
+    WiFi 名称、账号、密码等敏感信息——新用户开箱只需在设置页
+    填写敏感信息即可使用。已存在的配置文件不会被覆盖。
+    """
+    try:
+        if not CONFIG_FILE.exists():
+            tpl = Path(get_resource_path('config/tray_config.json'))
+            if tpl.exists():
+                shutil.copyfile(tpl, CONFIG_FILE)
+                logger.info(f'[seed] tray_config.json seeded from {tpl}')
+    except Exception:
+        logger.debug('seed tray_config.json failed', exc_info=True)
+
+
+seed_default_configs()
 
 CONFIG_STORE = configure_config(CONFIG_FILE)
 CONFIG = CONFIG_STORE.snapshot()

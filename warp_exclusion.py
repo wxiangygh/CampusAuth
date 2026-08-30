@@ -857,7 +857,8 @@ def load_exclusion_config():
         'dns_fallback': [{domain, enabled, added_at}]  # dns fallback DNS查询排除
     }
     """
-    defaults = {'domains': [], 'dns_fallback': []}
+    _seed_exclusion_config()
+    defaults = {'domains': [], 'dns_fallback': [], 'ip_ranges': []}
     if EXCLUSION_CONFIG_FILE.exists():
         try:
             with open(EXCLUSION_CONFIG_FILE, encoding='utf-8') as f:
@@ -870,6 +871,23 @@ def load_exclusion_config():
         except Exception as e:
             logger.error(f'Failed to load exclusion config: {e}')
     return defaults
+
+
+def _seed_exclusion_config():
+    """首次运行时用打包内置模板播种分流规则配置（不含敏感信息）。"""
+    if EXCLUSION_CONFIG_FILE.exists():
+        return
+    try:
+        import shutil
+        if getattr(__import__('sys'), 'frozen', False):
+            tpl = Path(__import__('sys')._MEIPASS) / 'config' / 'warp_exclusion_config.json'
+        else:
+            tpl = Path(__file__).resolve().parent / 'config' / 'warp_exclusion_config.json'
+        if tpl.exists():
+            shutil.copyfile(tpl, EXCLUSION_CONFIG_FILE)
+            logger.info('Exclusion config seeded from bundled template')
+    except Exception as e:
+        logger.debug(f'Seed exclusion config failed: {e}')
 
 
 def save_exclusion_config(cfg):

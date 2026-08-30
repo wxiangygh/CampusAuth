@@ -9,6 +9,7 @@ a = Analysis(
         ('settings.html', '.'),
         ('app.ico', '.'),
         ('frontend/dist', 'frontend/dist'),
+        ('config', 'config'),
     ],
     hiddenimports=[
         'warp_exclusion', 'traffic_monitor',

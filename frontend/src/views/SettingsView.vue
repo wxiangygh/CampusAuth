@@ -8,6 +8,24 @@ import { ui } from '../ui'
 // ===== 应用信息（版本 / 安装位置）=====
 const appInfo = ref({ version: '', install_dir: '', exe: '' })
 
+// 更改更新安装位置：调用 Windows 资源管理器目录选择对话框
+async function browseInstallDir() {
+  try {
+    const picked = await api().browse_directory('选择更新安装位置', appInfo.value.install_dir)
+    if (!picked) return
+    const result = await api().set_install_dir(picked)
+    if (result && result.success === false) {
+      ui.alert(result.message || '目录不可用', '提示', 'warning')
+      return
+    }
+    appInfo.value = { ...appInfo.value, install_dir: result.install_dir, exe: result.exe || '' }
+    ui.toast('安装位置已更新', 'success')
+  } catch (e) {
+    console.error('browseInstallDir failed:', e)
+    ui.alert('选择目录失败：' + e.message, '错误', 'error')
+  }
+}
+
 // ===== 按钮绑定工作流 =====
 const workflows = ref([])
 
@@ -300,8 +318,9 @@ onBeforeUnmount(() => {
         <div class="about-item">
           <span class="about-label">安装位置</span>
           <span class="about-value path" :title="appInfo.install_dir">{{ appInfo.install_dir || '—' }}</span>
+          <n-button size="tiny" secondary @click="browseInstallDir">更改</n-button>
         </div>
-        <div class="about-tip">更新时会覆盖安装到上述位置，配置文件始终保留</div>
+        <div class="about-tip">更新时会覆盖安装到上述位置（可自定义目录），仅替换程序文件，配置文件始终保留</div>
       </div>
     </section>
   </div>

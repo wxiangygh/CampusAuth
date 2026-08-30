@@ -5,7 +5,7 @@ from pathlib import Path
 
 from core import updater
 from core.updater import (check_for_update, is_newer, parse_release,
-                          resolve_install_dir, version_key)
+                          resolve_install_dir, validate_install_dir, version_key)
 from core.version import __version__
 
 
@@ -118,6 +118,41 @@ class InstallDirTests(unittest.TestCase):
     def test_invalid_record_falls_back(self):
         resolved = resolve_install_dir('/definitely/not/a/real/path')
         self.assertTrue(resolved.is_dir())
+
+
+class ValidateInstallDirTests(unittest.TestCase):
+    def test_empty_choice_is_rejected(self):
+        for bad in ('', '   ', None):
+            ok, message = validate_install_dir(bad)
+            self.assertFalse(ok)
+            self.assertTrue(message)
+
+    def test_existing_directory_is_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ok, message = validate_install_dir(tmp)
+            self.assertTrue(ok, message)
+            self.assertEqual(Path(message), Path(tmp))
+
+    def test_missing_directory_is_created(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / 'nested' / 'install'
+            ok, message = validate_install_dir(target)
+            self.assertTrue(ok, message)
+            self.assertTrue(target.is_dir())
+
+    def test_file_path_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / 'not-a-dir.txt'
+            target.write_text('x', encoding='utf-8')
+            ok, _ = validate_install_dir(target)
+            self.assertFalse(ok)
+
+    def test_malformed_path_never_raises(self):
+        # 非法字符/保留名/超长路径等输入必须被捕获并给出说明，不能抛未处理异常
+        for bad in ('C:\\a<>|b', '\\\\?\\Bogus\\<bad>', 'C:\\CON', '   ', 'x' * 500):
+            ok, message = validate_install_dir(bad)
+            self.assertIsInstance(ok, bool)
+            self.assertIsInstance(message, str)
 
 
 if __name__ == '__main__':

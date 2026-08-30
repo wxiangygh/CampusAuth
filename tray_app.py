@@ -50,7 +50,7 @@ from core.config import configure_config, get_config_store, DEFAULT_AUTH_WORKFLO
 from core.app_state import app_state
 from core.updater import (UpdateDownloader, check_for_update as _check_for_update,
                           cleanup_temp_files, install_update as _install_update,
-                          resolve_install_dir)
+                          resolve_install_dir, validate_install_dir)
 from core.version import __version__
 from core.status import network_status
 from core.auth_workflow import (
@@ -951,6 +951,67 @@ class ApiBridge:
         except Exception as e:
             logger.error(f"browse_folder failed: {e}")
             return ''
+
+    def browse_directory(self, title='选择目录', initial_dir=''):
+        """打开 Windows 资源管理器文件夹选择对话框（WinForms FolderBrowserDialog）。
+
+        与 browse_folder（文件选择）互补：这里返回用户选中的目录路径，取消返回空串。
+        """
+        logger.info(f"browse_directory called: title={title}")
+        try:
+            escaped_title = str(title).replace("'", "''")
+            escaped_initial = str(initial_dir or '').replace("'", "''")
+            initial_clause = f"$d.SelectedPath = '{escaped_initial}'; " if escaped_initial else ''
+            ps_script = (
+                "Add-Type -AssemblyName System.Windows.Forms; "
+                "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
+                f"$d.Description = '{escaped_title}'; "
+                "$d.ShowNewFolderButton = $true; "
+                f"{initial_clause}"
+                "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) "
+                "{ Write-Output $d.SelectedPath } else { Write-Output '' }"
+            )
+            tmp_ps = os.path.join(tempfile.gettempdir(),
+                                  f'cauth_browse_dir_{os.getpid()}.ps1')
+            with open(tmp_ps, 'w', encoding='utf-8') as f:
+                f.write(ps_script)
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 0
+            result = subprocess.run(
+                ['powershell', '-ExecutionPolicy', 'Bypass', '-File', tmp_ps],
+                capture_output=True, text=True, encoding='utf-8', errors='ignore',
+                timeout=180, startupinfo=si, creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            try:
+                os.remove(tmp_ps)
+            except Exception:
+                pass
+            path = result.stdout.strip() if result.returncode == 0 else ''
+            logger.info(f"browse_directory: selected={path!r}, rc={result.returncode}")
+            return path
+        except subprocess.TimeoutExpired:
+            logger.info("browse_directory: timed out")
+            return ''
+        except Exception as e:
+            logger.error(f"browse_directory failed: {e}")
+            return ''
+
+    def set_install_dir(self, path):
+        """更改后续更新的安装目录（只记录位置，不移动当前 exe）。"""
+        try:
+            ok, message = validate_install_dir(path)
+            if not ok:
+                logger.warning(f"set_install_dir rejected: {message}")
+                return {'success': False, 'message': message}
+            global INSTALL_DIR
+            CONFIG_STORE.patch({'install_dir': message})
+            INSTALL_DIR = Path(message)
+            logger.info(f"[updater] 安装目录已更新为 {message}")
+            return {'success': True, 'message': message, 'install_dir': message}
+        except Exception as exc:
+            logger.exception('set_install_dir failed')
+            return {'success': False, 'message': str(exc)}
 
     def refresh_startup_task(self):
         logger.info("refresh_startup_task called")

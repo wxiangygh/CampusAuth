@@ -294,6 +294,29 @@ def install_update(new_exe: str | Path, install_dir: str | Path,
         return {'success': False, 'message': str(exc)}
 
 
+def validate_install_dir(candidate: str | Path) -> tuple[bool, str]:
+    """校验一个目录是否可作为更新安装目录。
+
+    返回 (是否可用, 说明)。要求：非空、是目录（不存在时尝试创建）、可写。
+    """
+    text = str(candidate or '').strip()
+    if not text:
+        return False, '未选择目录'
+    path = Path(text)
+    try:
+        if not path.exists():
+            path.mkdir(parents=True, exist_ok=True)
+        if not path.is_dir():
+            return False, '选择的路径不是目录'
+        if not os.access(path, os.W_OK):
+            return False, f'没有写入权限：{path}'
+    except PermissionError:
+        return False, f'没有写入权限：{path}'
+    except OSError as exc:
+        return False, f'目录不可用：{exc}'
+    return True, str(path)
+
+
 def resolve_install_dir(recorded: str | None = None) -> Path:
     """确定安装目录：优先使用记录的首次安装位置，失效时回退到当前 exe 所在目录。"""
     if recorded:

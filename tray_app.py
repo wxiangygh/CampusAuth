@@ -440,8 +440,11 @@ class ApiBridge:
         except Exception:
             pass
         install_dir = resolve_install_dir(CONFIG_STORE.get('install_dir'))
-        restart = not bool(CONFIG_STORE.get('silent_startup'))
-        outcome = _install_update(result['file'], install_dir, restart=restart)
+        # 更新后一律重启。此前这里写成"静默启动模式不重启"是错的：silent_startup
+        # 只决定开机自启时是否显示窗口，并不表示用户希望更新后应用不再起来——
+        # 那样会让静默模式用户更新完就卡在没有进程、也没有界面的状态。
+        # 重启时不带 --silent，因此会像普通启动一样弹出主窗口，便于确认更新结果。
+        outcome = _install_update(result['file'], install_dir, restart=True)
         if not outcome.get('success'):
             self._update_downloader._set(status='error', pct=0,
                                          message=f"安装失败：{outcome.get('message')}",

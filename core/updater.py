@@ -231,6 +231,7 @@ def _updater_script(new_exe: Path, install_dir: Path, pid: int, restart: bool) -
         'setlocal',
         f'set "SRC={new_exe}"',
         f'set "DST={destination}"',
+        f'set "APPDIR={install_dir}"',
         f'set "PID={pid}"',
         '',
         ':wait',
@@ -246,7 +247,14 @@ def _updater_script(new_exe: Path, install_dir: Path, pid: int, restart: bool) -
         'if errorlevel 1 copy /Y "%SRC%" "%DST%" >nul',
     ]
     if restart:
-        lines.append('start "" "%DST%"')
+        # 先切到 exe 所在目录再启动：脚本本身躺在 %TEMP% 下，直接 start 会让新进程
+        # 把临时目录当成工作目录。
+        # 刻意不带 --silent：静默启动只影响开机自启那一次，更新后的重启应当像普通
+        # 启动一样弹出主窗口，让用户能立刻看到更新结果。
+        lines += [
+            'cd /d "%APPDIR%"',
+            'start "" "%DST%"',
+        ]
     lines += [
         ':cleanup',
         'if exist "%SRC%" del /F /Q "%SRC%" >nul',

@@ -47,11 +47,11 @@ from core.startup import (
     _update_tray_status, elevate_if_needed, hide_console, _build_schtasks_tr,
 )
 from core.config import configure_config, get_config_store, DEFAULT_AUTH_WORKFLOW
-from core.app_state import app_st
+from core.app_state import app_state
 from core.updater import (UpdateDownloader, check_for_update as _check_for_update,
                           cleanup_temp_files, install_update as _install_update,
                           resolve_install_dir)
-from core.version import __version__ate
+from core.version import __version__
 from core.status import network_status
 from core.auth_workflow import (
     run_workflow_by_id, validate_auth_workflow, workflow_catalog,

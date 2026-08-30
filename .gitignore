@@ -10,6 +10,9 @@ config.py
 !core/config.py
 tray_config.json
 warp_exclusion_config.json
+# 例外：config/ 下的脱敏配置模板（不含账号密码，供开箱即用）
+!config/tray_config.json
+!config/warp_exclusion_config.json
 
 # 临时文件
 *.log

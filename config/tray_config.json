@@ -1,0 +1,423 @@
+{
+  "username": "",
+  "password": "",
+  "wifi_name": "",
+  "auto_auth": false,
+  "auto_startup": false,
+  "auto_restore": false,
+  "auto_enable_ipv4": false,
+  "auth_total_timeout": 90,
+  "portal_ip": "10.21.221.98",
+  "portal_port": "801",
+  "warp_cli_path": "C:\\Program Files\\Cloudflare\\Cloudflare WARP\\warp-cli.exe",
+  "silent_startup": false,
+  "window_x": null,
+  "window_y": null,
+  "window": null,
+  "ui_prefs": {
+    "page_size": 20,
+    "traffic_subview": "canvas",
+    "network_detail_collapsed": false,
+    "active_tab": "home",
+    "theme": "system"
+  },
+  "active_workflow_id": "default_auth",
+  "workflows": {
+    "default_auth": {
+      "id": "default_auth",
+      "name": "完整校园网认证",
+      "description": "从 WiFi 检查、Portal 认证、IPv6 准备到 WARP 连接的完整流程。",
+      "built_in": true,
+      "tray_menu": true,
+      "steps": [
+        {
+          "id": "ensure_wifi",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 10,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "detect_warp_state",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 4,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "disconnect_warp",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 8,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "enable_ipv4",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 8,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "portal_login",
+          "enabled": true,
+          "retries": 1,
+          "timeout": 8,
+          "retry_delay": 1.5,
+          "continue_on_error": false
+        },
+        {
+          "id": "configure_ipv6_dns",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 5,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "disable_ipv4",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 8,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "wait_public_ipv6",
+          "enabled": true,
+          "retries": 1,
+          "timeout": 15,
+          "retry_delay": 2,
+          "continue_on_error": false
+        },
+        {
+          "id": "set_warp_endpoint_ipv6",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 5,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "set_warp_masque",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 5,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "start_warp_service",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 8,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "connect_warp",
+          "enabled": true,
+          "retries": 1,
+          "timeout": 15,
+          "retry_delay": 2,
+          "continue_on_error": false
+        },
+        {
+          "id": "reset_warp_masque",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 5,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "reset_warp_endpoint_ipv6",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 5,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "enable_ipv4",
+          "enabled": false,
+          "retries": 0,
+          "timeout": 8,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "reset_ipv6_dns",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 5,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "refresh_status",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 4,
+          "retry_delay": 1,
+          "continue_on_error": false
+        }
+      ],
+      "customized": false
+    },
+    "portal_reauth": {
+      "id": "portal_reauth",
+      "name": "注销并重新认证",
+      "description": "先注销校园网 Portal，再执行完整认证流程。",
+      "built_in": true,
+      "tray_menu": true,
+      "steps": [
+        {
+          "id": "portal_logout",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 6,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "ensure_wifi",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 10,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "detect_warp_state",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 4,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "disconnect_warp",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 8,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "enable_ipv4",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 8,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "portal_login",
+          "enabled": true,
+          "retries": 1,
+          "timeout": 8,
+          "retry_delay": 1.5,
+          "continue_on_error": false
+        },
+        {
+          "id": "configure_ipv6_dns",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 5,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "disable_ipv4",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 8,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "wait_public_ipv6",
+          "enabled": true,
+          "retries": 1,
+          "timeout": 15,
+          "retry_delay": 2.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "set_warp_endpoint_ipv6",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 5,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "set_warp_masque",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 5,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "start_warp_service",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 8,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "connect_warp",
+          "enabled": true,
+          "retries": 1,
+          "timeout": 15,
+          "retry_delay": 2.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "reset_warp_masque",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 5,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "reset_warp_endpoint_ipv6",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 5,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "enable_ipv4",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 8,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "reset_ipv6_dns",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 5,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "refresh_status",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 4,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        }
+      ],
+      "customized": false
+    },
+    "portal_logout": {
+      "id": "portal_logout",
+      "name": "注销校园网",
+      "description": "仅执行 Portal 注销，可与其他节点自由组合。",
+      "built_in": true,
+      "tray_menu": true,
+      "steps": [
+        {
+          "id": "portal_logout",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 6,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        }
+      ],
+      "customized": false
+    },
+    "restart_warp": {
+      "id": "restart_warp",
+      "name": "重启 Cloudflare WARP",
+      "description": "独立重启 CloudflareWARP 服务并重新连接 WARP。",
+      "built_in": true,
+      "tray_menu": true,
+      "steps": [
+        {
+          "id": "restart_warp_service",
+          "enabled": true,
+          "retries": 1,
+          "timeout": 12,
+          "retry_delay": 1.5,
+          "continue_on_error": false
+        },
+        {
+          "id": "connect_warp",
+          "enabled": true,
+          "retries": 1,
+          "timeout": 15,
+          "retry_delay": 2.0,
+          "continue_on_error": false
+        },
+        {
+          "id": "refresh_status",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 4,
+          "retry_delay": 1.0,
+          "continue_on_error": false
+        }
+      ],
+      "customized": false
+    },
+    "custom_workflow_3": {
+      "id": "custom_workflow_3",
+      "name": "校园网简单认证",
+      "description": "用户自定义工作流",
+      "built_in": false,
+      "tray_menu": true,
+      "steps": [
+        {
+          "id": "ensure_wifi",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 10,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "enable_ipv4",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 8,
+          "retry_delay": 1,
+          "continue_on_error": false
+        },
+        {
+          "id": "portal_login",
+          "enabled": true,
+          "retries": 1,
+          "timeout": 8,
+          "retry_delay": 1.5,
+          "continue_on_error": false
+        },
+        {
+          "id": "refresh_status",
+          "enabled": true,
+          "retries": 0,
+          "timeout": 4,
+          "retry_delay": 1,
+          "continue_on_error": false
+        }
+      ],
+      "customized": false
+    }
+  },
+  "auth_button_workflow": "default_auth",
+  "restore_button_workflow": ""
+}

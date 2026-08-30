@@ -404,15 +404,26 @@ function stopUpdatePolling() {
   }
 }
 
+// 这几种 reason 表示"请求没打通"，而不是"确实没有新版本"，需要重试
+const UPDATE_CHECK_FAILURES = ['network', 'timeout', 'error']
+
+/**
+ * 检查更新。返回是否成功拿到检测结果：
+ * - true ：确实拿到了 GitHub 的响应（可能是有新版本，也可能已是最新）
+ * - false：请求没打通（无网络 / 超时 / 限流 / 接口异常），调用方可以据此安排重试
+ */
 export async function checkForUpdate() {
   const a = api()
-  if (!a) return
+  if (!a) return false
   try {
     const result = await a.check_for_update()
     if (result && result.available && result.latest) openUpdate(result.latest)
+    if (!result || UPDATE_CHECK_FAILURES.includes(result.reason)) return false
+    return true
   } catch (e) {
     // 检测失败静默处理，不影响正常使用
     console.debug('check_for_update failed:', e)
+    return false
   }
 }
 

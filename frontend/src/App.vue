@@ -32,8 +32,30 @@ watch(
   }
 )
 
-// 启动时自动检测更新（受设置页"自动检测更新"开关控制；失败静默）
+// 启动时自动检测更新（受设置页"自动检测更新"开关控制）。
+// GitHub 请求常会失败（校园网认证前无网络、接口限流等），所以失败后按 1 分钟
+// 间隔重试；一旦检测成功、或开关被关闭，立即停止重试。
+const UPDATE_RETRY_MS = 60 * 1000
 let _updateChecked = false
+let _updateRetryTimer = null
+
+function stopUpdateRetry() {
+  if (_updateRetryTimer) {
+    clearTimeout(_updateRetryTimer)
+    _updateRetryTimer = null
+  }
+}
+
+async function runUpdateCheck() {
+  // 每次都重新读开关，避免关掉开关后仍跑完这一轮
+  if (store.form.auto_check_update === false) return
+  const ok = await checkForUpdate()
+  if (!ok && store.form.auto_check_update !== false) {
+    stopUpdateRetry()
+    _updateRetryTimer = setTimeout(() => runUpdateCheck(), UPDATE_RETRY_MS)
+  }
+}
+
 watch(
   () => store.configLoaded,
   (loaded) => {
@@ -41,9 +63,22 @@ watch(
     _updateChecked = true
     if (store.form.auto_check_update === false) return
     // 延迟执行，避免与启动阶段的网络探测/状态刷新抢占
-    setTimeout(() => checkForUpdate(), 2500)
+    setTimeout(() => runUpdateCheck(), 2500)
   },
   { immediate: true }
+)
+
+// 开关切换：关闭时马上停掉已排上的重试，重新打开时立刻补一次检测
+watch(
+  () => store.form.auto_check_update,
+  (enabled) => {
+    if (!store.configLoaded) return
+    if (enabled === false) {
+      stopUpdateRetry()
+      return
+    }
+    runUpdateCheck()
+  }
 )
 
 // ===== frameless 窗口拖拽缩放（JS mousemove 驱动）=====

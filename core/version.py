@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-__version__ = '1.2.4'
+__version__ = '1.2.5'
 
 APP_NAME = 'CampusAuth'
 EXE_NAME = 'CampusAuth.exe'

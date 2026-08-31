@@ -111,6 +111,8 @@ DEFAULT_CONFIG = {
     "warp_cli_path": "", "silent_startup": False,
     # 启动时自动检测 GitHub Releases 更新
     "auto_check_update": True,
+    # 按运行数据自动调优各工作流节点的超时与重试设置
+    "auto_tune_workflow": False,
     # 首次运行记录的安装目录，后续更新始终覆盖安装到同一目录
     "install_dir": None,
     "window_x": None, "window_y": None, "window": None, "ui_prefs": None,

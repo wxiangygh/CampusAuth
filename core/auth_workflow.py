@@ -588,10 +588,13 @@ def _publish(event):
 def run_auth_workflow(config=None, workflow=None, workflow_id=None):
     config = config or get_config()
     workflow_name = '自定义工作流'
+    workflow_key = None  # 能确定工作流身份时才记录统计
     if workflow_id is not None or workflow is None:
-        definition = resolve_workflow(config, workflow_id or config.get('active_workflow_id'))
+        selected = workflow_id or config.get('active_workflow_id')
+        definition = resolve_workflow(config, selected)
         workflow = definition.get('steps') or DEFAULT_AUTH_WORKFLOW
         workflow_name = definition.get('name', workflow_name)
+        workflow_key = definition.get('id') or selected
     elif isinstance(workflow, dict):
         workflow_name = workflow.get('name', workflow_name)
         workflow = workflow.get('steps', DEFAULT_AUTH_WORKFLOW)
@@ -608,6 +611,8 @@ def run_auth_workflow(config=None, workflow=None, workflow_id=None):
     except ValueError as exc:
         app_state.update_operation(kind='auth', status='error', message=str(exc))
         return False, f'工作流配置无效：{exc}'
+    if workflow_key:
+        _record_step_stats(workflow_key, result, config)
     final_status = 'success' if result.success else ('cancelled' if result.code == 'cancelled' else 'error')
     app_state.update_operation(kind='auth', status=final_status,
                                message=result.message,
@@ -620,6 +625,63 @@ def run_auth_workflow(config=None, workflow=None, workflow_id=None):
     except Exception:
         logger.exception('Could not refresh status after workflow')
     return result.success, result.message
+
+
+def _record_step_stats(workflow_key: str, result, config: dict) -> None:
+    """记录每个节点的耗时/重试样本；开启自动调优时把建议值写回工作流配置。"""
+    # 用户取消的运行整体不作为样本：中断前后各节点的耗时/成败都失真，
+    # 喂给调优算法会让超时越调越大、重试越调越多
+    if result.code == 'cancelled':
+        return
+    try:
+        from core.workflow_tuning import get_tuning_store
+        store = get_tuning_store()
+    except Exception:
+        return
+    for step_id, info in (result.step_stats or {}).items():
+        if not info.get('executed', True):
+            continue  # 因取消/总时限被跳过的节点没有真实执行数据
+        try:
+            store.record(workflow_key, step_id, info.get('elapsed', 0.0),
+                         info.get('retries', 0), bool(info.get('success')),
+                         timeout=info.get('timeout', 0.0))
+        except Exception:
+            logger.exception('[tuning] 记录节点统计失败: %s', step_id)
+    if not config.get('auto_tune_workflow'):
+        return
+    try:
+        _apply_auto_tune(workflow_key)
+    except Exception:
+        logger.exception('[tuning] 应用自动调优失败')
+
+
+def _apply_auto_tune(workflow_id: str) -> None:
+    """把调优建议写回该工作流的 steps；内置工作流需要标记 customized 才能持久化。"""
+    import copy as _copy
+
+    from core.config import get_config_store
+    from core.workflow_tuning import get_tuning_store
+
+    config_store = get_config_store()
+    snapshot = config_store.snapshot()
+    workflows = snapshot.get('workflows') or {}
+    definition = workflows.get(workflow_id)
+    if not definition:
+        return
+    steps = _copy.deepcopy(definition.get('steps') or [])
+    if not get_tuning_store().apply_to_workflow(workflow_id, steps):
+        return
+    updated = _copy.deepcopy(definition)
+    updated['steps'] = steps
+    if updated.get('built_in'):
+        updated['customized'] = True
+    new_workflows = _copy.deepcopy(workflows)
+    new_workflows[workflow_id] = updated
+    config_store.patch({'workflows': new_workflows})
+    changes = [f"{step['id']}(timeout={step['timeout']}, retries={step['retries']})"
+               for step in steps]
+    logger.info('[tuning] 已按运行数据自动调整工作流 %s：%s', workflow_id,
+                '; '.join(changes))
 
 
 def run_workflow_by_id(workflow_id: str, config=None):

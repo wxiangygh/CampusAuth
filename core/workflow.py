@@ -55,6 +55,11 @@ class WorkflowResult:
     failed_step: str | None = None
     elapsed: float = 0.0
     completed_steps: tuple[str, ...] = ()
+    # 每个执行过的节点的运行数据：{step_id: {'elapsed': 各次尝试耗时之和,
+    # 'retries': 实际重试次数, 'success': 是否成功, 'timeout': 该节点超时配置,
+    # 'executed': 是否真实执行（取消/总时限中止时，未执行的节点为占位记录）}}
+    # 供运行结束后记录统计、自动调优使用
+    step_stats: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)
 
 
 class WorkflowContext:
@@ -121,25 +126,37 @@ class WorkflowRunner:
         steps = [step for step in self.validate(raw_steps) if step.enabled]
         started = time.monotonic()
         completed: list[str] = []
+        stats: dict[str, dict[str, Any]] = {}
         total = len(steps)
         for index, step in enumerate(steps, 1):
+            # 尚未执行就被取消/超过总时限的节点也留占位记录（executed: False），
+            # 保证每次运行的结果都能完整反映各节点状态；调优侧会跳过这类样本
             if context.overall_deadline is not None and time.monotonic() >= context.overall_deadline:
+                stats.setdefault(step.id, {'elapsed': 0.0, 'retries': 0, 'success': False,
+                                           'timeout': step.timeout, 'executed': False})
                 context.rollback()
                 return WorkflowResult(False, '工作流超过总时限，已执行回滚',
                                       'workflow_timeout', step.id,
-                                      time.monotonic() - started, tuple(completed))
+                                      time.monotonic() - started, tuple(completed),
+                                      step_stats=stats)
             if context.cancelled():
+                stats.setdefault(step.id, {'elapsed': 0.0, 'retries': 0, 'success': False,
+                                           'timeout': step.timeout, 'executed': False})
                 context.rollback()
                 return WorkflowResult(False, "已取消", "cancelled", step.id,
-                                      time.monotonic() - started, tuple(completed))
+                                      time.monotonic() - started, tuple(completed),
+                                      step_stats=stats)
             action = self.actions[step.id]
             last = StepResult.fail("步骤未执行")
+            step_elapsed = 0.0
+            step_attempts = 0
             for attempt in range(1, step.retries + 2):
                 context.current_step, context.current_attempt = step, attempt
                 context.deadline = time.monotonic() + step.timeout
                 context.publish({"type": "step", "status": "running", "step": index,
                                  "total": total, "step_id": step.id, "attempt": attempt,
                                  "message": self.catalog[step.id]["name"]})
+                attempt_started = time.monotonic()
                 try:
                     last = action(context, step)
                     if not isinstance(last, StepResult):
@@ -148,6 +165,9 @@ class WorkflowRunner:
                     logger.exception("Workflow step crashed: %s", step.id)
                     last = StepResult.fail(f"{self.catalog[step.id]['name']}异常: {exc}",
                                            code="exception", retryable=True)
+                # 只累计 action 实际执行时间，重试等待不计入节点耗时
+                step_elapsed += time.monotonic() - attempt_started
+                step_attempts = attempt
                 if last.success:
                     completed.append(step.id)
                     context.publish({"type": "step", "status": "success", "step": index,
@@ -163,6 +183,11 @@ class WorkflowRunner:
                 if not _wait(delay, context.cancelled):
                     last = StepResult.fail("已取消", code="cancelled")
                     break
+            stats[step.id] = {'elapsed': step_elapsed,
+                              'retries': step_attempts - 1,
+                              'success': last.success,
+                              'timeout': step.timeout,
+                              'executed': True}
             if not last.success:
                 if step.continue_on_error:
                     completed.append(step.id)
@@ -172,10 +197,12 @@ class WorkflowRunner:
                                  "total": total, "step_id": step.id, "message": last.message,
                                  "code": last.code, "details": last.details})
                 return WorkflowResult(False, last.message, last.code, step.id,
-                                      time.monotonic() - started, tuple(completed))
+                                      time.monotonic() - started, tuple(completed),
+                                      step_stats=stats)
         context.clear_rollbacks()
         return WorkflowResult(True, success_message, "ok", None,
-                              time.monotonic() - started, tuple(completed))
+                              time.monotonic() - started, tuple(completed),
+                              step_stats=stats)
 
 
 def _wait(seconds: float, cancelled: Callable[[], bool]) -> bool:

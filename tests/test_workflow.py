@@ -68,3 +68,63 @@ class WorkflowTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class StepStatsTests(unittest.TestCase):
+    """runner 收集的节点耗时/重试数据（自动调优的数据源）。"""
+
+    def test_stats_record_elapsed_retries_and_timeout(self):
+        def flaky(context, step):
+            if context.current_attempt == 1:
+                return StepResult.fail('temporary', retryable=True)
+            return StepResult.ok('ok')
+
+        runner = WorkflowRunner({
+            'first': flaky,
+            'finalize': lambda c, s: StepResult.ok('done'),
+        }, CATALOG)
+        result = runner.run([
+            {'id': 'first', 'retries': 1, 'retry_delay': 0, 'timeout': 7},
+            {'id': 'finalize', 'timeout': 5},
+        ], WorkflowContext(config={}, cancelled=lambda: False))
+        self.assertTrue(result.success)
+        self.assertEqual(result.step_stats['first']['retries'], 1)
+        self.assertEqual(result.step_stats['first']['timeout'], 7)
+        self.assertTrue(result.step_stats['first']['success'])
+        self.assertTrue(result.step_stats['first']['executed'])
+        self.assertGreaterEqual(result.step_stats['first']['elapsed'], 0.0)
+        self.assertEqual(result.step_stats['finalize']['retries'], 0)
+
+    def test_stats_present_on_failure(self):
+        runner = WorkflowRunner({'first': lambda c, s: StepResult.fail('nope')}, CATALOG)
+        result = runner.run([{'id': 'first', 'timeout': 3}],
+                            WorkflowContext(config={}, cancelled=lambda: False))
+        self.assertFalse(result.success)
+        self.assertFalse(result.step_stats['first']['success'])
+
+    def test_stats_present_on_cancel(self):
+        runner = WorkflowRunner({'first': lambda c, s: StepResult.fail('nope')},
+                                 CATALOG)
+        result = runner.run([{'id': 'first'}],
+                            WorkflowContext(config={}, cancelled=lambda: True))
+        self.assertFalse(result.success)
+        self.assertIn('first', result.step_stats)
+        # 未真实执行的占位记录：供前端完整展示，但调优侧会跳过
+        self.assertFalse(result.step_stats['first']['executed'])
+        self.assertEqual(result.step_stats['first']['elapsed'], 0.0)
+
+    def test_overall_timeout_leaves_placeholder_for_pending_step(self):
+        import time as _time
+
+        def slow(context, step):
+            _time.sleep(0.05)
+            return StepResult.ok('ok')
+
+        runner = WorkflowRunner({'first': slow, 'second': slow}, CATALOG)
+        context = WorkflowContext(config={}, cancelled=lambda: False)
+        # 构造参数有 1 秒下限，直接覆写截止时间模拟总时限即将耗尽
+        context.overall_deadline = _time.monotonic() + 0.02
+        result = runner.run([{'id': 'first'}, {'id': 'second'}], context)
+        self.assertEqual(result.code, 'workflow_timeout')
+        self.assertTrue(result.step_stats['first']['executed'])
+        self.assertFalse(result.step_stats['second']['executed'])

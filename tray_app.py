@@ -110,6 +110,11 @@ seed_default_configs()
 CONFIG_STORE = configure_config(CONFIG_FILE)
 CONFIG = CONFIG_STORE.snapshot()
 
+# 工作流节点计时统计（自动调优数据源），与配置文件同目录
+from core.workflow_tuning import configure_tuning  # noqa: E402
+
+TUNING_STORE = configure_tuning(SCRIPT_DIR / 'workflow_tuning.json')
+
 
 def record_install_dir():
     """记录首次安装目录，后续更新始终覆盖安装到该位置。"""
@@ -645,7 +650,7 @@ class ApiBridge:
             'warp_cli_path', 'silent_startup', 'portal_ip', 'portal_port',
             'auto_enable_ipv4', 'auth_total_timeout', 'auth_workflow',
             'auth_button_workflow', 'restore_button_workflow',
-            'auto_check_update',
+            'auto_check_update', 'auto_tune_workflow',
         }
         changes = {key: value for key, value in (form_data or {}).items() if key in allowed}
         old_config = CONFIG_STORE.snapshot()
@@ -682,6 +687,28 @@ class ApiBridge:
             'workflow': workflow.get('steps', DEFAULT_AUTH_WORKFLOW),
             'revision': config.get('_revision'),
         }
+
+    def get_workflow_stats(self, workflow_id=None):
+        """节点运行统计与调优建议（工作流页稳定度可视化用）。"""
+        config = CONFIG_STORE.snapshot()
+        workflow_id = workflow_id or config.get('active_workflow_id', 'default_auth')
+        return {
+            'workflow_id': workflow_id,
+            'auto_tune': bool(config.get('auto_tune_workflow')),
+            'steps': TUNING_STORE.workflow_stats(workflow_id),
+        }
+
+    def set_workflow_auto_tune(self, enabled):
+        """开关「自动调优」：按运行数据自动调整各节点的超时与重试。"""
+        try:
+            enabled = bool(enabled)
+            saved = CONFIG_STORE.patch({'auto_tune_workflow': enabled})
+            logger.info('[tuning] 自动调优已%s', '开启' if enabled else '关闭')
+            return {'success': True, 'auto_tune': enabled,
+                    'revision': saved.get('_revision')}
+        except Exception as exc:
+            logger.exception('set_workflow_auto_tune failed')
+            return {'success': False, 'message': str(exc)}
 
     def list_workflows(self):
         return {'workflows': self._workflow_snapshot(),

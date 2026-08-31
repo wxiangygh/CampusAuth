@@ -193,6 +193,14 @@ def _ensure_wifi(context: WorkflowContext, step: StepSpec) -> StepResult:
 
 
 def _detect_warp_state(context: WorkflowContext, step: StepSpec) -> StepResult:
+    if context.data.get('strict_full_run'):
+        # 严格模式：不做"WARP 已连接就跳过准备步骤"的优化，完整重走认证流程。
+        # 调用方（手动点击认证、开机与 WiFi 事件守卫）已经判定本次需要认证；
+        # 若此处再根据连接状态跳过，上次连接失败回滚后残留的
+        # "IPv4 未禁用 + WARP 经 IPv4 连接"状态将永远得不到修复
+        # （2026-09-01 日志中该状态就一路沿用下来）。
+        context.data['already_connected'] = False
+        return StepResult.ok('严格模式：完整重走认证流程')
     connected = is_warp_connected()
     context.data['already_connected'] = connected
     return StepResult.ok('WARP 已连接，将跳过重复准备步骤' if connected else 'WARP 未连接，继续完整流程')
@@ -214,7 +222,7 @@ def _prepare_network(context: WorkflowContext, step: StepSpec) -> StepResult:
     interface_name, error = _interface(context)
     if error:
         return error
-    if is_warp_connected():
+    if is_warp_connected() and not context.data.get('strict_full_run'):
         context.data['already_connected'] = True
         return StepResult.ok('WARP 已连接，跳过重复认证')
     disconnect_warp(full=False, timeout=_command_timeout(context, 5))
@@ -471,6 +479,13 @@ def _connect_warp(context: WorkflowContext, step: StepSpec) -> StepResult:
     if result.success:
         context.data['warp_connected'] = True
         return StepResult.ok(result.message, attempts=result.attempts, elapsed=result.elapsed)
+    # 连接失败：中止可能仍在后台建立的连接。否则随后的回滚会恢复 IPv4
+    # 端点并重新启用 IPv4，WARP 会在几秒后经 IPv4 连上，留下
+    # "IPv4 开启 + WARP 走 IPv4"的脏状态（2026-09-01 日志即此情形）
+    warp_cli = context.data.get('warp_cli') or get_warp_cli()
+    if warp_cli:
+        run_command([warp_cli, 'disconnect'], shell=False,
+                    timeout=_command_timeout(context, 5))
     return StepResult.fail(result.message, code=result.code, retryable=result.retryable,
                            attempts=result.attempts, elapsed=result.elapsed,
                            status_output=result.status_output[:200])
@@ -585,7 +600,13 @@ def _publish(event):
                         event.get('message', ''), frontend_status, 'auth')
 
 
-def run_auth_workflow(config=None, workflow=None, workflow_id=None):
+def run_auth_workflow(config=None, workflow=None, workflow_id=None, strict=True):
+    """执行认证工作流。
+
+    strict（默认 True）：严格重走完整流程，不因"WARP 已连接"而跳过准备步骤。
+    是否需要认证由调用方判断（手动点击、开机与 WiFi 事件守卫），
+    一旦调用本函数就应把认证真正做完整，避免残留状态被反复沿用。
+    """
     config = config or get_config()
     workflow_name = '自定义工作流'
     workflow_key = None  # 能确定工作流身份时才记录统计
@@ -606,6 +627,7 @@ def run_auth_workflow(config=None, workflow=None, workflow_id=None):
                               cancelled=core.state._auth_cancelled.is_set,
                               publish=_publish,
                               overall_timeout=config.get('auth_total_timeout', 90))
+    context.data['strict_full_run'] = bool(strict)
     try:
         result = RUNNER.run(workflow, context, success_message=f'{workflow_name}完成')
     except ValueError as exc:
@@ -698,5 +720,5 @@ def apply_auto_tune(workflow_id: str) -> list[dict]:
     return changes
 
 
-def run_workflow_by_id(workflow_id: str, config=None):
-    return run_auth_workflow(config=config, workflow_id=workflow_id)
+def run_workflow_by_id(workflow_id: str, config=None, strict=True):
+    return run_auth_workflow(config=config, workflow_id=workflow_id, strict=strict)

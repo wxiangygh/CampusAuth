@@ -91,6 +91,23 @@ def enable_ipv4(interface_name, timeout=15):
     return False
 
 
+def is_ipv4_enabled(interface_name, timeout=8):
+    """检测接口 IPv4（ms_tcpip）绑定是否启用。
+
+    检测失败时按"已启用"处理：宁可重走完整认证流程，也不要把
+    "WARP 经 IPv4 连接"的脏状态误判为流程已完成。
+    """
+    logger.debug(f"is_ipv4_enabled: interface={interface_name!r}")
+    ps_cmd = f'(Get-NetAdapterBinding -Name "{interface_name}" -ComponentID ms_tcpip).Enabled'
+    code, output, err = run_command(['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps_cmd],
+                                    shell=False, timeout=timeout)
+    text = (output or '').strip().lower()
+    if code == 0 and text in ('true', 'false'):
+        return text == 'true'
+    logger.warning(f"is_ipv4_enabled: detection failed (code={code}, err={err[:120]!r}), assuming enabled")
+    return True
+
+
 def portal_login(config=None, timeout=8):
     """Perform one bounded portal login attempt.
 

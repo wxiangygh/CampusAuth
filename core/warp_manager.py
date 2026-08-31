@@ -290,6 +290,7 @@ def connect_warp_result(force_restart=False, timeout=25, max_attempts=1):
         run_command([warp_cli, 'connect'], shell=False, timeout=command_timeout(5))
 
         poll_delay = 0.5
+        connect_reissued = False
         while time.monotonic() < deadline:
             if not _sleep(min(poll_delay, max(0, deadline - time.monotonic()))):
                 return WarpConnectResult(False, 'cancelled', '已取消', attempts=attempt,
@@ -303,8 +304,14 @@ def connect_warp_result(force_restart=False, timeout=25, max_attempts=1):
             if status.code == 'registration_required':
                 status.elapsed = time.monotonic() - started
                 return status
-            if status.code == 'manual_disconnection':
-                break
+            if status.code == 'manual_disconnection' and not connect_reissued:
+                # 服务刚启动时，connect 已发出但状态仍会短暂停留在"手动断开"。
+                # 补发一次连接命令后继续等待，而不是立即放弃本轮（2026-09-01
+                # 日志中 WARP 正是在放弃后几秒才真正连上）。
+                connect_reissued = True
+                run_command([warp_cli, 'enable-wifi'], shell=False, timeout=command_timeout(5))
+                run_command([warp_cli, 'enable-ethernet'], shell=False, timeout=command_timeout(5))
+                run_command([warp_cli, 'connect'], shell=False, timeout=command_timeout(5))
             poll_delay = min(poll_delay * 1.5, 2.0)
         if attempt < max_attempts and time.monotonic() < deadline:
             run_command('net stop "CloudflareWARP"', timeout=command_timeout(8))

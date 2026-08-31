@@ -106,6 +106,23 @@ def signal_wifi_event():
     return False
 
 
+def ipv4_matches_final_state(cfg=None):
+    """WARP 已连接时，判断 WiFi 接口 IPv4 开关是否与设计终态一致。
+
+    流程正常结束后 IPv4 的期望状态由 auto_enable_ipv4 决定：配置为 False 时
+    IPv4 应保持禁用，此时若仍处于启用状态，说明是上次连接失败回滚后残留的
+    "WARP 经 IPv4 连接"状态，需要重跑完整认证修复。
+    无法获取接口名时按一致处理，避免无谓重认证。
+    """
+    interface_name = get_wifi_interface_name()
+    if not interface_name:
+        return True
+    from core.auth import is_ipv4_enabled
+    config = cfg if cfg is not None else get_config()
+    expect_ipv4 = bool(config.get('auto_enable_ipv4', True))
+    return is_ipv4_enabled(interface_name) == expect_ipv4
+
+
 def wifi_event_monitor():
     """WiFi 事件监视线程"""
     try:
@@ -144,19 +161,12 @@ def wifi_event_monitor():
                         logger.info("No target WiFi configured, skipping")
                         continue
                     if is_warp_connected():
-                        # 检查 IPv4 是否已禁用
-                        interface_name = get_wifi_interface_name()
-                        if interface_name:
-                            ps_cmd = f'(Get-NetAdapterBinding -Name "{interface_name}" -ComponentID ms_tcpip).Enabled'
-                            code, output, _ = run_command(['powershell', '-Command', ps_cmd], shell=False)
-                            if 'False' in output:
-                                logger.info("WARP connected and IPv4 disabled, skipping auto-auth")
-                                update_tray_icon(True, 'WARP已连接')
-                                continue
-                            else:
-                                logger.info("WARP connected but IPv4 still enabled, will re-auth to fix")
+                        # WARP 已连接时还要看 IPv4 是否处于流程终态，
+                        # 否则是上次失败回滚后的残留状态，需要重跑认证修复
+                        if not ipv4_matches_final_state(cfg):
+                            logger.info("WARP connected but IPv4 not in final state, will re-auth to fix")
                         else:
-                            logger.info("WARP connected, skipping auto-auth (cannot check IPv4)")
+                            logger.info("WARP connected and IPv4 in final state, skipping auto-auth")
                             update_tray_icon(True, 'WARP已连接')
                             continue
                     if _auth_lock.acquire(blocking=False):
@@ -225,7 +235,7 @@ def check_startup_wifi_and_auth():
         _update_tray_status()
         return
     # 先快速检测一次WARP状态，避免阻塞启动
-    if is_warp_connected():
+    if is_warp_connected() and ipv4_matches_final_state(cfg):
         logger.info("WARP already connected on startup, skipping auto-auth")
         update_tray_icon(True, 'WARP已连接')
         return

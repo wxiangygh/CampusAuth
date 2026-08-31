@@ -34,24 +34,43 @@ watch(
 
 // 启动时自动检测更新（受设置页"自动检测更新"开关控制）。
 // GitHub 请求常会失败（校园网认证前无网络、接口限流等），所以失败后按 1 分钟
-// 间隔重试；一旦检测成功、或开关被关闭，立即停止重试。
+// 间隔重试；检测成功后改为每 6 小时复查一次——否则程序长时间运行时，
+// 期间发布的新版本永远检测不到（只记得启动那一刻的检测结果）。
 const UPDATE_RETRY_MS = 60 * 1000
+const UPDATE_RECHECK_MS = 6 * 60 * 60 * 1000
 let _updateChecked = false
 let _updateRetryTimer = null
+let _updateRecheckTimer = null
 
-function stopUpdateRetry() {
+function stopUpdateTimers() {
   if (_updateRetryTimer) {
     clearTimeout(_updateRetryTimer)
     _updateRetryTimer = null
   }
+  if (_updateRecheckTimer) {
+    clearTimeout(_updateRecheckTimer)
+    _updateRecheckTimer = null
+  }
+}
+
+function scheduleRecheck() {
+  if (_updateRecheckTimer) clearTimeout(_updateRecheckTimer)
+  _updateRecheckTimer = setTimeout(() => runUpdateCheck(), UPDATE_RECHECK_MS)
 }
 
 async function runUpdateCheck() {
   // 每次都重新读开关，避免关掉开关后仍跑完这一轮
   if (store.form.auto_check_update === false) return
+  // 更新弹窗打开或正在下载时不打扰：跳过本轮，等下一个周期
+  if (store.update.visible || store.update.busy) {
+    scheduleRecheck()
+    return
+  }
   const ok = await checkForUpdate()
-  if (!ok && store.form.auto_check_update !== false) {
-    stopUpdateRetry()
+  if (ok) {
+    scheduleRecheck()
+  } else if (store.form.auto_check_update !== false) {
+    if (_updateRetryTimer) clearTimeout(_updateRetryTimer)
     _updateRetryTimer = setTimeout(() => runUpdateCheck(), UPDATE_RETRY_MS)
   }
 }
@@ -68,13 +87,13 @@ watch(
   { immediate: true }
 )
 
-// 开关切换：关闭时马上停掉已排上的重试，重新打开时立刻补一次检测
+// 开关切换：关闭时马上停掉已排上的重试与周期复查，重新打开时立刻补一次检测
 watch(
   () => store.form.auto_check_update,
   (enabled) => {
     if (!store.configLoaded) return
     if (enabled === false) {
-      stopUpdateRetry()
+      stopUpdateTimers()
       return
     }
     runUpdateCheck()

@@ -1,12 +1,39 @@
 <script setup>
 import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { NButton, NInput, NAutoComplete, NSwitch, NInputGroup, NSelect } from 'naive-ui'
-import { store, doAutoSave } from '../store'
+import { store, doAutoSave, openUpdate } from '../store'
 import { api } from '../bridge'
 import { ui } from '../ui'
 
 // ===== 应用信息（版本 / 安装位置）=====
 const appInfo = ref({ version: '', install_dir: '', exe: '' })
+
+// ===== 手动检查更新 =====
+// 自动检测只在启动与周期复查时跑，这里给用户一个随时可点的入口。
+const checkingUpdate = ref(false)
+
+async function manualCheckUpdate() {
+  if (checkingUpdate.value) return
+  checkingUpdate.value = true
+  try {
+    const result = await api().check_for_update()
+    if (result && result.available && result.latest) {
+      openUpdate(result.latest)
+      return
+    }
+    if (result && result.reason === 'up_to_date') {
+      ui.toast('已是最新版本', 'success')
+    } else if (result && result.reason === 'no_asset') {
+      ui.toast('最新 Release 暂未附带安装包，请稍后再试', 'warning')
+    } else {
+      ui.toast('检查更新失败：网络不可达或接口限流，请稍后重试', 'warning')
+    }
+  } catch (e) {
+    ui.toast('检查更新失败：' + e.message, 'error')
+  } finally {
+    checkingUpdate.value = false
+  }
+}
 
 // 更改更新安装位置：调用 Windows 资源管理器目录选择对话框
 async function browseInstallDir() {
@@ -306,7 +333,7 @@ onBeforeUnmount(() => {
             <span class="toggle-title">自动检测更新</span>
             <n-switch v-model:value="store.form.auto_check_update" size="small" />
           </div>
-          <div class="toggle-tip">启动时静默检查 GitHub 新版本</div>
+          <div class="toggle-tip">启动时及运行期间每 6 小时静默检查 GitHub 新版本</div>
         </div>
       </div>
 
@@ -314,6 +341,7 @@ onBeforeUnmount(() => {
         <div class="about-item">
           <span class="about-label">当前版本</span>
           <span class="about-value">v{{ appInfo.version || '—' }}</span>
+          <n-button size="tiny" secondary :loading="checkingUpdate" @click="manualCheckUpdate">检查更新</n-button>
         </div>
         <div class="about-item">
           <span class="about-label">安装位置</span>

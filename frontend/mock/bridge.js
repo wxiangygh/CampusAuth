@@ -161,13 +161,35 @@ const api = {
     delay(Object.fromEntries((ips || []).map((ip) => [ip, ip.startsWith('2') ? 'ipv6.example.net' : 'resolved.example.net'])), 300),
   set_connections_route: (items) =>
     delay({ results: (items || []).map((it) => ({ hostname: it.hostname, remote_ip: it.remote_ip, success: true })) }),
+
+  // ===== 应用更新（设置页"检查更新"按钮验证用）=====
+  get_app_info: () => delay({
+    version: '1.2.5',
+    install_dir: 'D:\\Apps\\CampusAuth',
+    exe: 'D:\\Apps\\CampusAuth\\CampusAuth.exe',
+  }),
+  check_for_update: () => delay({
+    available: true,
+    current: '1.2.5',
+    reason: 'ok',
+    latest: {
+      version: '1.2.6',
+      tag: 'v1.2.6',
+      name: 'CampusAuth v1.2.6',
+      notes: '- 更新检测改为运行期间每 6 小时复查，新版本发布后无需重启即可发现\n- 设置页新增「检查更新」按钮，可随时手动检测',
+      published_at: new Date().toISOString(),
+      html_url: 'https://github.com/wxiangygh/CampusAuth/releases/tag/v1.2.6',
+      download_url: 'https://example.invalid/CampusAuth.exe',
+      size: 30000000,
+    },
+  }),
 }
 
 // 其他视图（设置 / WARP / 流量）不是预览重点，统一空实现保持控制台干净
 const NOOP_STUBS = [
   'get_exclusion_config', 'save_exclusion_config', 'get_warp_ranges', 'save_warp_ranges',
   'load_config', 'save_config', 'get_startup_status', 'set_auto_startup',
-  'get_app_info', 'list_workflows', 'check_for_update', 'get_traffic_stats',
+  'list_workflows', 'get_traffic_stats',
   'get_traffic_history', 'reset_traffic_stats', 'get_warp_status', 'warp_action',
 ]
 for (const name of NOOP_STUBS) {

@@ -650,13 +650,16 @@ def _record_step_stats(workflow_key: str, result, config: dict) -> None:
     if not config.get('auto_tune_workflow'):
         return
     try:
-        _apply_auto_tune(workflow_key)
+        apply_auto_tune(workflow_key)
     except Exception:
         logger.exception('[tuning] 应用自动调优失败')
 
 
-def _apply_auto_tune(workflow_id: str) -> None:
-    """把调优建议写回该工作流的 steps；内置工作流需要标记 customized 才能持久化。"""
+def apply_auto_tune(workflow_id: str) -> list[dict]:
+    """把调优建议写回该工作流的 steps；内置工作流需要标记 customized 才能持久化。
+
+    返回变更明细列表（每项含节点 id 与超时/重试的前后值），无建议时返回空列表。
+    """
     import copy as _copy
 
     from core.config import get_config_store
@@ -667,10 +670,13 @@ def _apply_auto_tune(workflow_id: str) -> None:
     workflows = snapshot.get('workflows') or {}
     definition = workflows.get(workflow_id)
     if not definition:
-        return
+        return []
     steps = _copy.deepcopy(definition.get('steps') or [])
+    before = {str(step.get('id', '')): (float(step.get('timeout', 15) or 15),
+                                        int(step.get('retries', 0) or 0))
+              for step in steps}
     if not get_tuning_store().apply_to_workflow(workflow_id, steps):
-        return
+        return []
     updated = _copy.deepcopy(definition)
     updated['steps'] = steps
     if updated.get('built_in'):
@@ -678,10 +684,18 @@ def _apply_auto_tune(workflow_id: str) -> None:
     new_workflows = _copy.deepcopy(workflows)
     new_workflows[workflow_id] = updated
     config_store.patch({'workflows': new_workflows})
-    changes = [f"{step['id']}(timeout={step['timeout']}, retries={step['retries']})"
-               for step in steps]
+    changes = []
+    for step in steps:
+        step_id = str(step.get('id', ''))
+        old_timeout, old_retries = before.get(step_id, (step['timeout'], step['retries']))
+        if step['timeout'] != old_timeout or step['retries'] != old_retries:
+            changes.append({'id': step_id,
+                            'timeout_from': old_timeout, 'timeout': step['timeout'],
+                            'retries_from': old_retries, 'retries': step['retries']})
     logger.info('[tuning] 已按运行数据自动调整工作流 %s：%s', workflow_id,
-                '; '.join(changes))
+                '; '.join(f"{c['id']}(timeout {c['timeout_from']}→{c['timeout']}, "
+                           f"retries {c['retries_from']}→{c['retries']})" for c in changes))
+    return changes
 
 
 def run_workflow_by_id(workflow_id: str, config=None):

@@ -111,6 +111,27 @@ const api = {
     autoTune = !!enabled
     return delay({ success: true, auto_tune: autoTune, revision: ++revision })
   },
+  apply_workflow_tuning: (id) => {
+    const wfId = id || activeId
+    const wf = workflows.find((item) => item.id === wfId)
+    const stats = STATS[wfId] || {}
+    const changes = []
+    for (const step of wf?.steps || []) {
+      const st = stats[step.id]
+      if (!st) continue
+      const t = st.suggested_timeout != null && st.suggested_timeout !== step.timeout
+      const r = st.suggested_retries != null && st.suggested_retries !== step.retries
+      if (!t && !r) continue
+      changes.push({
+        id: step.id,
+        timeout_from: step.timeout ?? 15, timeout: t ? st.suggested_timeout : (step.timeout ?? 15),
+        retries_from: step.retries ?? 0, retries: r ? st.suggested_retries : (step.retries ?? 0),
+      })
+      if (t) step.timeout = st.suggested_timeout
+      if (r) step.retries = st.suggested_retries
+    }
+    return delay({ success: true, workflow_id: wfId, changed: changes.length > 0, changes, revision: ++revision })
+  },
   auto_save_form: () => delay({ success: true, revision: ++revision }),
   check_network_status: () => delay({ status: 'idle' }),
   get_network_detail: () => delay(null),

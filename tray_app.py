@@ -54,7 +54,7 @@ from core.updater import (UpdateDownloader, check_for_update as _check_for_updat
 from core.version import __version__
 from core.status import network_status
 from core.auth_workflow import (
-    run_workflow_by_id, validate_auth_workflow, workflow_catalog,
+    apply_auto_tune, run_workflow_by_id, validate_auth_workflow, workflow_catalog,
 )
 
 
@@ -709,6 +709,19 @@ class ApiBridge:
         except Exception as exc:
             logger.exception('set_workflow_auto_tune failed')
             return {'success': False, 'message': str(exc)}
+
+    def apply_workflow_tuning(self, workflow_id=None):
+        """一键应用：把当前已有的调优建议立即写回该工作流配置，返回变更明细。"""
+        config = CONFIG_STORE.snapshot()
+        workflow_id = workflow_id or config.get('active_workflow_id', 'default_auth')
+        try:
+            changes = apply_auto_tune(workflow_id)
+        except Exception as exc:
+            logger.exception('apply_workflow_tuning failed')
+            return {'success': False, 'message': str(exc)}
+        return {'success': True, 'workflow_id': workflow_id,
+                'changed': bool(changes), 'changes': changes,
+                'revision': CONFIG_STORE.snapshot().get('_revision')}
 
     def list_workflows(self):
         return {'workflows': self._workflow_snapshot(),

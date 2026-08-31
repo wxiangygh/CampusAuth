@@ -191,5 +191,54 @@ class RecordStepStatsTests(unittest.TestCase):
         self.assertNotIn('b', stats)
 
 
+class ApplyAutoTuneTests(unittest.TestCase):
+    """auth_workflow.apply_auto_tune 的一键应用契约（运行后自动应用共用）。"""
+
+    def setUp(self):
+        temp = Path(tempfile.mkdtemp())
+        from core.config import configure_config
+        from core.workflow_tuning import configure_tuning
+        self.tuning = configure_tuning(temp / 'tuning.json')
+        self.config = configure_config(temp / 'config.json')
+        # built_in 由配置规范化的 fallback 决定，必须用真实内置工作流测试
+        wf = self.config.snapshot()['workflows']['default_auth']
+        self.step_id = wf['steps'][0]['id']
+        self.old_timeout = float(wf['steps'][0]['timeout'])
+        self.old_retries = int(wf['steps'][0]['retries'])
+
+    def test_returns_change_summary_and_persists(self):
+        from core.auth_workflow import apply_auto_tune
+        # 3 次快速成功 → 超时建议显著小于默认值；再补 2 次失败（失败率 2/5）→ 重试建议增大
+        for _ in range(3):
+            self.tuning.record('default_auth', self.step_id, 1.0, 0, True,
+                               timeout=self.old_timeout)
+        for _ in range(2):
+            self.tuning.record('default_auth', self.step_id, 1.0, 0, False,
+                               timeout=self.old_timeout)
+        changes = apply_auto_tune('default_auth')
+        self.assertEqual(len(changes), 1)
+        c = changes[0]
+        self.assertEqual(c['id'], self.step_id)
+        self.assertEqual(c['timeout_from'], self.old_timeout)
+        self.assertLess(c['timeout'], self.old_timeout)
+        self.assertEqual(c['retries_from'], self.old_retries)
+        self.assertGreaterEqual(c['retries'], 1)
+        saved = self.config.snapshot()['workflows']['default_auth']
+        step = next(s for s in saved['steps'] if s['id'] == self.step_id)
+        self.assertEqual(step['timeout'], c['timeout'])
+        self.assertEqual(step['retries'], c['retries'])
+        self.assertTrue(saved.get('customized'))  # 内置工作流被调整后需标记以持久化
+
+    def test_without_samples_returns_empty_and_keeps_config(self):
+        from core.auth_workflow import apply_auto_tune
+        before = self.config.snapshot()['workflows']['default_auth']
+        self.assertEqual(apply_auto_tune('default_auth'), [])
+        self.assertEqual(self.config.snapshot()['workflows']['default_auth'], before)
+
+    def test_unknown_workflow_returns_empty(self):
+        from core.auth_workflow import apply_auto_tune
+        self.assertEqual(apply_auto_tune('not_exist'), [])
+
+
 if __name__ == '__main__':
     unittest.main()

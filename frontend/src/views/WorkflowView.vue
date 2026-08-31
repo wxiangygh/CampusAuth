@@ -47,14 +47,8 @@ const workflowOptions = computed(() => {
   )
 })
 
-// 关闭自动调优时，若后端有调优建议则允许一键应用到编辑器草稿
-const hasSuggestions = computed(() => {
-  if (autoTune.value) return false
-  return workflow.value.steps.some((step) => {
-    const st = stepStats.value[step.id]
-    return !!st && (st.suggested_timeout != null || st.suggested_retries != null)
-  })
-})
+// 一键应用调优建议的加载态
+const applyingTune = ref(false)
 
 function setMessage(msg, isError = false) {
   message.value = msg || ''
@@ -207,23 +201,34 @@ async function onAutoTuneUpdate(enabled) {
   }
 }
 
-function applySuggestions() {
-  let count = 0
-  for (const step of workflow.value.steps) {
-    const st = stepStats.value[step.id]
-    if (!st) continue
-    if (st.suggested_timeout != null && Number(step.timeout) !== st.suggested_timeout) {
-      step.timeout = st.suggested_timeout
-      count++
+// 一键应用：把当前已有的调优建议立即写回该工作流配置（无需再手动保存）
+async function applyTuning() {
+  if (!currentId.value || applyingTune.value) return
+  applyingTune.value = true
+  try {
+    const result = await api().apply_workflow_tuning(currentId.value)
+    if (result.success === false) return setMessage(result.message || '应用失败', true)
+    if (result.revision) store.configRevision = result.revision
+    const changes = result.changes || []
+    if (!changes.length) {
+      setMessage(
+        '暂无可应用的调优建议：每个节点需累计运行 ≥3 次（超时建议）/ ≥5 次（重试建议）才会产生建议，或与当前值差异过小无需调整'
+      )
+      await refreshStats()
+      return
     }
-    if (st.suggested_retries != null && Number(step.retries) !== st.suggested_retries) {
-      step.retries = st.suggested_retries
-      count++
-    }
+    await refreshStats()
+    if (!dirty.value) await syncWorkflowDefinitions()
+    const stepName = (id) => catalog.value.get(id)?.name || id
+    const desc = changes
+      .map((c) => `${stepName(c.id)}：超时 ${c.timeout_from}→${c.timeout}s、重试 ${c.retries_from}→${c.retries} 次`)
+      .join('；')
+    setMessage(`已应用 ${changes.length} 项调优：${desc}`)
+  } catch (e) {
+    setMessage('应用调优失败：' + e.message, true)
+  } finally {
+    applyingTune.value = false
   }
-  if (!count) return setMessage('当前没有需要应用的调优建议')
-  dirty.value = true
-  setMessage(`已把 ${count} 项调优建议写入编辑器，点击「保存」后生效`)
 }
 
 // ===== 步骤编辑 =====
@@ -495,7 +500,7 @@ watch(
               超时 = 平滑平均耗时 + 4 × 平均偏差，另加 25% 余量；<br />
               重试按几何分布模型取「达到 95% 累计成功率」所需的最少次数。
             </n-tooltip>
-            自动整定，兼顾快速与安全冗余。
+            自动整定。每个节点累计运行 ≥3 次产生超时建议、≥5 次产生重试建议；开启后每次运行结束自动应用，也可随时点右侧按钮一键应用。
           </span>
         </div>
         <div class="wf-tune-right">
@@ -512,9 +517,15 @@ watch(
             重试意味着节点本身不稳定，权重高于耗时；<br />
             颜色越绿表示耗时越短、重试越少。
           </n-tooltip>
-          <n-button v-if="hasSuggestions" size="small" secondary @click="applySuggestions">
-            应用调优建议
-          </n-button>
+          <n-tooltip v-if="currentId" trigger="hover">
+            <template #trigger>
+              <n-button size="small" secondary :loading="applyingTune" @click="applyTuning">
+                一键应用调优
+              </n-button>
+            </template>
+            把当前已有的调优建议立即写回该工作流（即时生效，无需保存）。<br />
+            样本不足的节点（运行 &lt;3 次 / &lt;5 次）不会产生建议。
+          </n-tooltip>
         </div>
       </div>
 

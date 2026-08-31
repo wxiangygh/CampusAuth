@@ -58,7 +58,6 @@ export const store = reactive({
 
   // UI 偏好
   pageSize: 20,
-  trafficSubview: 'list',
 })
 
 let _lastStateRevision = 0

@@ -7,11 +7,11 @@
     --bg-panel: #131316;
     --bg-elevated: #1A1A1E;
     --bg-hover: #202025;
-    --border: rgba(255, 255, 255, 0.07);
-    --border-strong: rgba(255, 255, 255, 0.13);
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.16);
     --text-primary: #E8E8EA;
-    --text-secondary: #9B9BA1;
-    --text-tertiary: #6B6B72;
+    --text-secondary: #A3A3AA;
+    --text-tertiary: #86868F;
     --accent: #E8E8EA;
     --accent-hover: #FFFFFF;
     --accent-dim: rgba(255, 255, 255, 0.09);
@@ -19,13 +19,6 @@
     --error: #EF4444;
     --warning: #F59E0B;
     --info: #3B82F6;
-    /* 流量 6 类颜色（功能性数据可视化配色，非主题强调色） */
-    --c-ipv4: #3b82f6;
-    --c-ipv6: #22C55E;
-    --c-ipv4-warp: #F59E0B;
-    --c-ipv4-warp-ipv6: #EAB308;
-    --c-ipv6-warp: #EF4444;
-    --c-ipv6-warp-ipv4: #A855F7;
     --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     --font-mono: 'Cascadia Code', Consolas, 'JetBrains Mono', monospace;
 }
@@ -38,8 +31,8 @@
     --border: rgba(0, 0, 0, 0.09);
     --border-strong: rgba(0, 0, 0, 0.17);
     --text-primary: #1A1A1C;
-    --text-secondary: #5A5A61;
-    --text-tertiary: #9A9AA1;
+    --text-secondary: #52525A;
+    --text-tertiary: #75757E;
     --accent: #111113;
     --accent-hover: #2A2A2E;
     --accent-dim: rgba(17, 17, 19, 0.07);

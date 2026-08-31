@@ -1,32 +1,37 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { NButton, NInput, NSwitch, NCheckbox, NTag } from 'naive-ui'
+import { NButton, NInput, NSwitch, NCheckbox } from 'naive-ui'
 import { api } from '../bridge'
 import { store } from '../store'
 import { ui } from '../ui'
-import { accentHex, accentRGBA } from '../theme'
 
-// ===== 6 类路由配置 =====
-const ROUTE_CONFIG = {
-  ipv4: { color: '#3b82f6', label: 'IPv4 直连' },
-  ipv6: { color: '#22C55E', label: 'IPv6 直连' },
-  ipv4_warp: { color: '#F59E0B', label: 'WARP[v4]→v4' },
-  ipv4_warp_ipv6: { color: '#EAB308', label: 'WARP[v4]→v6' },
-  ipv6_warp: { color: '#EF4444', label: 'WARP[v6]→v6' },
-  ipv6_warp_ipv4: { color: '#A855F7', label: 'WARP[v6]→v4' },
+// 6 类路由：标签即语义，不再依赖颜色区分（单色设计）
+const ROUTE_ORDER = ['ipv4', 'ipv6', 'ipv4_warp', 'ipv4_warp_ipv6', 'ipv6_warp', 'ipv6_warp_ipv4']
+const ROUTE_LABEL = {
+  ipv4: 'IPv4 直连',
+  ipv6: 'IPv6 直连',
+  ipv4_warp: 'WARP[v4]→v4',
+  ipv4_warp_ipv6: 'WARP[v4]→v6',
+  ipv6_warp: 'WARP[v6]→v6',
+  ipv6_warp_ipv4: 'WARP[v6]→v4',
 }
 
 const traffic = reactive({
-  subview: 'list',
   conns: [],
   stats: {},
   warpUnderlay: 'ipv4',
   cumulativeMode: false,
   autoRefresh: true,
-  searchList: '',
-  searchCanvas: '',
+  search: '',
   loadingFast: false,
+  applying: false,
 })
+
+const ROUTE_ACTION_LABEL = {
+  ipv4: 'IPv4 直连',
+  ipv6: 'IPv6 直连',
+  warp: '不直连（走 WARP）',
+}
 
 const cumulativeConns = reactive(new Map())
 const selectedConns = reactive(new Set())
@@ -35,6 +40,19 @@ const collapsedGroups = reactive(new Set())
 let loadingSlow = false
 let autoTimer = null
 let refreshTimer = null
+
+// 操作条相对列表列（.traffic-view）水平居中，而非整个窗口（侧边栏存在时二者中心不同）
+const trafficViewRef = ref(null)
+const barLeft = ref('50%')
+let barObserver = null
+
+function updateBarCenter() {
+  const el = trafficViewRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  if (!rect.width) return
+  barLeft.value = `${Math.round(rect.left + rect.width / 2)}px`
+}
 
 function connId(c) {
   return `${c.process}|${c.remote_ip}|${c.remote_port}`
@@ -63,7 +81,6 @@ async function refreshFast() {
       for (const c of traffic.conns) cumulativeConns.set(connId(c), c)
     }
     pruneSelection()
-    drawCanvas()
   } catch (e) {
     ui.toast('获取失败: ' + e, 'error')
   } finally {
@@ -93,7 +110,6 @@ async function refreshSlow() {
         if (c.hostname) cumulativeConns.set(connId(c), c)
       }
     }
-    if (updated) drawCanvas()
   } catch (e) {
     console.warn('refreshSlow failed:', e)
   } finally {
@@ -102,7 +118,7 @@ async function refreshSlow() {
 }
 
 function pruneSelection() {
-  const visible = new Set(filteredCanvasConns.value.map((c) => connId(c)))
+  const visible = new Set(filteredConns.value.map((c) => connId(c)))
   const toRemove = []
   for (const id of selectedConns) {
     if (!visible.has(id)) toRemove.push(id)
@@ -131,46 +147,15 @@ function refreshDebounced(delay) {
   }, delay)
 }
 
-// ===== 列表视图 =====
-const groupedListView = computed(() => {
-  let conns = traffic.conns
-  const kw = traffic.searchList.trim().toLowerCase()
-  if (kw) {
-    conns = conns.filter(
-      (c) =>
-        (c.process || '').toLowerCase().includes(kw) ||
-        (c.remote_ip || '').toLowerCase().includes(kw) ||
-        (c.hostname || '').toLowerCase().includes(kw)
-    )
-  }
-  const groups = {}
-  for (const c of conns) {
-    const key = c.process || 'unknown'
-    ;(groups[key] ||= []).push(c)
-  }
-  return Object.keys(groups)
-    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
-    .map((name) => ({ name, items: groups[name] }))
-})
-
-const statCards = computed(() =>
-  Object.entries(ROUTE_CONFIG).map(([key, cfg]) => ({
-    key,
-    color: cfg.color,
-    label: cfg.label,
-    count: traffic.stats[key] || 0,
-  }))
+// ===== 概览 =====
+const totalCount = computed(() =>
+  ROUTE_ORDER.reduce((sum, key) => sum + (traffic.stats[key] || 0), 0)
 )
 
-// ===== 画布视图 =====
-const filteredCanvasConns = computed(() => {
-  let conns
-  if (traffic.cumulativeMode) {
-    conns = Array.from(cumulativeConns.values())
-  } else {
-    conns = traffic.conns
-  }
-  const kw = traffic.searchCanvas.trim().toLowerCase()
+// ===== 连接列表 =====
+const filteredConns = computed(() => {
+  let conns = traffic.cumulativeMode ? Array.from(cumulativeConns.values()) : traffic.conns
+  const kw = traffic.search.trim().toLowerCase()
   if (kw) {
     conns = conns.filter(
       (c) =>
@@ -182,13 +167,15 @@ const filteredCanvasConns = computed(() => {
   return conns
 })
 
-const groupedCanvasList = computed(() => {
+const groupedConns = computed(() => {
   const groups = {}
-  for (const c of filteredCanvasConns.value) {
-    const proc = c.process || 'unknown'
-    ;(groups[proc] ||= []).push(c)
+  for (const c of filteredConns.value) {
+    const key = c.process || 'unknown'
+    ;(groups[key] ||= []).push(c)
   }
-  return Object.entries(groups).map(([name, items]) => ({ name, items }))
+  return Object.keys(groups)
+    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+    .map((name) => ({ name, items: groups[name] }))
 })
 
 function toggleGroupCollapse(proc) {
@@ -202,20 +189,20 @@ function toggleConn(id, checked) {
 }
 
 function toggleGroup(proc, checked) {
-  const items = filteredCanvasConns.value.filter((c) => (c.process || 'unknown') === proc)
+  const items = filteredConns.value.filter((c) => (c.process || 'unknown') === proc)
   for (const c of items) {
     if (checked) selectedConns.add(connId(c))
     else selectedConns.delete(connId(c))
   }
 }
 
-const allCanvasSelected = computed(
-  () => filteredCanvasConns.value.length > 0 && filteredCanvasConns.value.every((c) => selectedConns.has(connId(c)))
+const allSelected = computed(
+  () => filteredConns.value.length > 0 && filteredConns.value.every((c) => selectedConns.has(connId(c)))
 )
 
 function toggleSelectAll(checked) {
   if (checked) {
-    for (const c of filteredCanvasConns.value) selectedConns.add(connId(c))
+    for (const c of filteredConns.value) selectedConns.add(connId(c))
   } else {
     selectedConns.clear()
   }
@@ -238,7 +225,7 @@ function toggleCumulative(enabled) {
 
 // 根据路由选择推断修改后的 route_type（与后端分类逻辑一致）
 function inferRouteType(route, conn) {
-  const isIpv6 = ':' in (conn.remote_ip || '') || conn.is_ipv6
+  const isIpv6 = (conn.remote_ip || '').includes(':') || conn.is_ipv6
   if (route === 'ipv4') return 'ipv4'
   if (route === 'ipv6') return 'ipv6'
   if (traffic.warpUnderlay === 'ipv6') return isIpv6 ? 'ipv6_warp' : 'ipv6_warp_ipv4'
@@ -246,18 +233,26 @@ function inferRouteType(route, conn) {
 }
 
 async function setRoute(route) {
-  if (selectedConns.size === 0 || !api()) return
-  const items = []
-  const connById = {}
+  if (selectedConns.size === 0 || traffic.applying) return
+  const conns = []
   for (const id of selectedConns) {
-    const c = filteredCanvasConns.value.find((cc) => connId(cc) === id)
-    if (c) {
-      items.push({ hostname: c.hostname || '', remote_ip: c.remote_ip })
-      connById[id] = c
-    }
+    const c = filteredConns.value.find((cc) => connId(cc) === id)
+    if (c) conns.push(c)
   }
-  if (!items.length) return
-  const routeLabel = route === 'warp' ? '不直连(WARP)' : route === 'ipv6' ? 'IPv6 直连' : 'IPv4 直连'
+  if (!conns.length) return
+  return applyRoute(conns, route)
+}
+
+async function applyRoute(conns, route) {
+  if (!conns.length || !api()) return
+  traffic.applying = true
+  const items = []
+  const connIndex = []
+  for (const c of conns) {
+    items.push({ hostname: c.hostname || '', remote_ip: c.remote_ip })
+    connIndex.push(c)
+  }
+  const routeLabel = ROUTE_ACTION_LABEL[route] || route
   ui.toast(`正在设置 ${items.length} 个连接为 ${routeLabel}...`)
   try {
     const result = await api().set_connections_route(items, route)
@@ -266,19 +261,18 @@ async function setRoute(route) {
     let failCount = 0
     const failMessages = []
     for (const r of results) {
-      const matchedId = Object.keys(connById).find((id) => {
-        const c = connById[id]
-        return (c.hostname || '') === r.hostname && c.remote_ip === r.remote_ip
-      })
+      const matched = connIndex.find(
+        (c) => (c.hostname || '') === r.hostname && c.remote_ip === r.remote_ip
+      )
       if (r.success) {
         successCount++
         // 乐观更新：仅对成功的连接更新类型
-        if (matchedId && traffic.cumulativeMode) {
-          const c = cumulativeConns.get(matchedId)
+        if (matched && traffic.cumulativeMode) {
+          const c = cumulativeConns.get(connId(matched))
           if (c) {
             c.route_type = inferRouteType(route, c)
             c.is_warp = route === 'warp'
-            cumulativeConns.set(matchedId, c)
+            cumulativeConns.set(connId(matched), c)
           }
         }
       } else {
@@ -296,375 +290,21 @@ async function setRoute(route) {
     if (failCount === 0) clearSelection()
   } catch (e) {
     ui.toast('设置失败: ' + e, 'error')
+  } finally {
+    traffic.applying = false
   }
-}
-
-// ===== Canvas 绘制 =====
-const canvasRef = ref(null)
-let ctx = null
-let nodes = {}
-let gridCanvas = null
-let canvasAnimId = null
-
-function resizeCanvas() {
-  if (!canvasRef.value) return
-  ctx = canvasRef.value.getContext('2d')
-  const dpr = window.devicePixelRatio || 1
-  const rect = canvasRef.value.parentElement.getBoundingClientRect()
-  if (rect.width === 0 || rect.height === 0) return
-  canvasRef.value.width = rect.width * dpr
-  canvasRef.value.height = rect.height * dpr
-  canvasRef.value.style.width = rect.width + 'px'
-  canvasRef.value.style.height = rect.height + 'px'
-  ctx.scale(dpr, dpr)
-  computeNodes(rect.width, rect.height)
-  buildGridCanvas(rect.width, rect.height)
-}
-
-function computeNodes(w, h) {
-  const cx = w * 0.08
-  const cy = h * 0.5
-  const tunnelX = w * 0.35
-  const tunnelW = 90
-  const tunnelH = 230
-  const tunnelRight = tunnelX + tunnelW / 2
-  const tunnelTop = cy - tunnelH / 2
-  const tunnelBottom = cy + tunnelH / 2
-  const typeX = w * 0.82
-  const typeSpacing = Math.min(h * 0.12, 55)
-  const typeStartY = cy - typeSpacing * 2.5
-  const directOffset = 18
-  const warpCountSpacing = (tunnelH - 50) / 3
-  const warpCountStartY = cy - warpCountSpacing * 1.5
-
-  nodes = {
-    local: { x: cx, y: cy, label: '本机', color: '#A3A3A3' },
-    tunnel: { x: tunnelX, y: cy, w: tunnelW, h: tunnelH, label: 'WARP 隧道', color: accentHex() },
-    type_ipv4: { x: typeX, y: typeStartY, label: 'IPv4 直连', color: '#3b82f6', isType: true, routeType: 'ipv4' },
-    type_ipv6: { x: typeX, y: typeStartY + typeSpacing, label: 'IPv6 直连', color: '#22C55E', isType: true, routeType: 'ipv6' },
-    type_ipv4_warp: { x: typeX, y: typeStartY + typeSpacing * 2, label: 'WARP[v4]→v4', color: '#F59E0B', isType: true, routeType: 'ipv4_warp' },
-    type_ipv4_warp_ipv6: { x: typeX, y: typeStartY + typeSpacing * 3, label: 'WARP[v4]→v6', color: '#EAB308', isType: true, routeType: 'ipv4_warp_ipv6' },
-    type_ipv6_warp: { x: typeX, y: typeStartY + typeSpacing * 4, label: 'WARP[v6]→v6', color: '#EF4444', isType: true, routeType: 'ipv6_warp' },
-    type_ipv6_warp_ipv4: { x: typeX, y: typeStartY + typeSpacing * 5, label: 'WARP[v6]→v4', color: '#A855F7', isType: true, routeType: 'ipv6_warp_ipv4' },
-    count_ipv4: { x: tunnelRight + directOffset, y: tunnelTop - directOffset, color: '#3b82f6', isCount: true, routeType: 'ipv4' },
-    count_ipv6: { x: tunnelRight + directOffset, y: tunnelBottom + directOffset, color: '#22C55E', isCount: true, routeType: 'ipv6' },
-    count_ipv4_warp: { x: tunnelX, y: warpCountStartY, color: '#F59E0B', isCount: true, inTunnel: true, routeType: 'ipv4_warp' },
-    count_ipv4_warp_ipv6: { x: tunnelX, y: warpCountStartY + warpCountSpacing, color: '#EAB308', isCount: true, inTunnel: true, routeType: 'ipv4_warp_ipv6' },
-    count_ipv6_warp: { x: tunnelX, y: warpCountStartY + warpCountSpacing * 2, color: '#EF4444', isCount: true, inTunnel: true, routeType: 'ipv6_warp' },
-    count_ipv6_warp_ipv4: { x: tunnelX, y: warpCountStartY + warpCountSpacing * 3, color: '#A855F7', isCount: true, inTunnel: true, routeType: 'ipv6_warp_ipv4' },
-  }
-}
-
-function getPathPoints(routeType) {
-  const local = nodes.local
-  const countNode = nodes['count_' + routeType]
-  const typeNode = nodes['type_' + routeType]
-  if (!local || !countNode || !typeNode) return null
-  return [
-    { x: local.x, y: local.y },
-    { x: countNode.x, y: countNode.y },
-    { x: typeNode.x, y: typeNode.y },
-  ]
-}
-
-function pathPoint(points, t) {
-  if (points.length < 2) return points[0]
-  const segs = []
-  let totalLen = 0
-  for (let i = 0; i < points.length - 1; i++) {
-    const dx = points[i + 1].x - points[i].x
-    const dy = points[i + 1].y - points[i].y
-    const len = Math.sqrt(dx * dx + dy * dy)
-    segs.push(len)
-    totalLen += len
-  }
-  const target = t * totalLen
-  let acc = 0
-  for (let i = 0; i < segs.length; i++) {
-    if (acc + segs[i] >= target) {
-      const localT = segs[i] > 0 ? (target - acc) / segs[i] : 0
-      return {
-        x: (1 - localT) * points[i].x + localT * points[i + 1].x,
-        y: (1 - localT) * points[i].y + localT * points[i + 1].y,
-      }
-    }
-    acc += segs[i]
-  }
-  return points[points.length - 1]
-}
-
-function roundRect(c, x, y, w, h, r) {
-  c.beginPath()
-  c.moveTo(x + r, y)
-  c.lineTo(x + w - r, y)
-  c.quadraticCurveTo(x + w, y, x + w, y + r)
-  c.lineTo(x + w, y + h - r)
-  c.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
-  c.lineTo(x + r, y + h)
-  c.quadraticCurveTo(x, y + h, x, y + h - r)
-  c.lineTo(x, y + r)
-  c.quadraticCurveTo(x, y, x + r, y)
-  c.closePath()
-}
-
-function drawTunnel(node) {
-  const x = node.x - node.w / 2
-  const y = node.y - node.h / 2
-  ctx.fillStyle = accentRGBA(0.06)
-  roundRect(ctx, x, y, node.w, node.h, 12)
-  ctx.fill()
-  ctx.strokeStyle = node.color
-  ctx.lineWidth = 1.5
-  ctx.setLineDash([4, 3])
-  roundRect(ctx, x, y, node.w, node.h, 12)
-  ctx.stroke()
-  ctx.setLineDash([])
-  ctx.fillStyle = node.color
-  ctx.font = '600 10px sans-serif'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText(node.label, node.x, y - 10)
-  ctx.fillStyle = '#A3A3A3'
-  ctx.font = '500 8px sans-serif'
-  ctx.fillText(traffic.warpUnderlay === 'ipv6' ? '(IPv6)' : '(IPv4)', node.x, y - 22)
-}
-
-function drawPortNode(node) {
-  const w = 44
-  const h = 30
-  const x = node.x - w / 2
-  const y = node.y - h / 2
-  ctx.fillStyle = node.color + '22'
-  roundRect(ctx, x, y, w, h, 5)
-  ctx.fill()
-  ctx.strokeStyle = node.color
-  ctx.lineWidth = 1.5
-  roundRect(ctx, x, y, w, h, 5)
-  ctx.stroke()
-  ctx.fillStyle = 'rgba(0,0,0,0.5)'
-  ctx.beginPath()
-  ctx.moveTo(x + 8, y + 7)
-  ctx.lineTo(x + w - 8, y + 7)
-  ctx.lineTo(x + w - 11, y + h - 7)
-  ctx.lineTo(x + 11, y + h - 7)
-  ctx.closePath()
-  ctx.fill()
-  ctx.strokeStyle = node.color
-  ctx.lineWidth = 1
-  const pinCount = 4
-  const pinStart = x + 13
-  const pinEnd = x + w - 13
-  const pinSpacing = (pinEnd - pinStart) / (pinCount - 1)
-  for (let i = 0; i < pinCount; i++) {
-    const px = pinStart + i * pinSpacing
-    ctx.beginPath()
-    ctx.moveTo(px, y + 10)
-    ctx.lineTo(px, y + h - 10)
-    ctx.stroke()
-  }
-  ctx.fillStyle = node.color
-  ctx.font = '600 9px sans-serif'
-  ctx.textAlign = 'right'
-  ctx.textBaseline = 'middle'
-  ctx.fillText(node.label, x - 6, node.y)
-}
-
-function drawCountNode(node) {
-  const count = traffic.stats[node.routeType] || 0
-  const r = count > 0 ? 14 : 10
-  ctx.fillStyle = node.color + (count > 0 ? '44' : '15')
-  ctx.beginPath()
-  ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.strokeStyle = node.color
-  ctx.lineWidth = count > 0 ? 1.5 : 1
-  ctx.beginPath()
-  ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
-  ctx.stroke()
-  if (count > 0) {
-    ctx.fillStyle = node.color
-    ctx.font = '700 11px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(count.toString(), node.x, node.y)
-  }
-}
-
-function drawLocalNode() {
-  const n = nodes.local
-  const pulse = Math.sin(Date.now() / 1000) * 0.3 + 0.7
-  ctx.fillStyle = accentRGBA(0.12)
-  ctx.beginPath()
-  ctx.arc(n.x, n.y, 26, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = accentRGBA(0.25)
-  ctx.beginPath()
-  ctx.arc(n.x, n.y, 18, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.strokeStyle = accentHex()
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.arc(n.x, n.y, 18, 0, Math.PI * 2)
-  ctx.stroke()
-  ctx.fillStyle = '#FFFFFF'
-  ctx.font = '700 10px sans-serif'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText(n.label, n.x, n.y)
-  const total =
-    (traffic.stats.ipv4 || 0) +
-    (traffic.stats.ipv6 || 0) +
-    (traffic.stats.ipv4_warp || 0) +
-    (traffic.stats.ipv4_warp_ipv6 || 0) +
-    (traffic.stats.ipv6_warp || 0) +
-    (traffic.stats.ipv6_warp_ipv4 || 0)
-  ctx.fillStyle = '#A3A3A3'
-  ctx.font = '500 8px sans-serif'
-  ctx.fillText(total + ' 连接', n.x, n.y + 32)
-}
-
-function drawPath(routeType) {
-  const points = getPathPoints(routeType)
-  if (!points) return
-  const color = ROUTE_CONFIG[routeType].color
-  const count = traffic.stats[routeType] || 0
-  ctx.strokeStyle = count > 0 ? color + '55' : color + '15'
-  ctx.lineWidth = count > 0 ? 2 : 1
-  ctx.beginPath()
-  ctx.moveTo(points[0].x, points[0].y)
-  for (let i = 1; i < points.length; i++) {
-    ctx.lineTo(points[i].x, points[i].y)
-  }
-  ctx.stroke()
-}
-
-function drawParticles() {
-  for (const rt of Object.keys(ROUTE_CONFIG)) {
-    const count = traffic.stats[rt] || 0
-    if (count === 0) continue
-    const points = getPathPoints(rt)
-    if (!points) continue
-    const color = ROUTE_CONFIG[rt].color
-    const particleCount = Math.min(count, 4)
-    const speed = 0.002 + count * 0.0003
-    for (let i = 0; i < particleCount; i++) {
-      const t = (Date.now() * speed + i / particleCount) % 1
-      const pos = pathPoint(points, t)
-      const trailLen = 3
-      for (let j = 0; j < trailLen; j++) {
-        const tt = Math.max(0, t - j * 0.025)
-        const tp = pathPoint(points, tt)
-        const alpha = (1 - j / trailLen) * 0.5
-        ctx.fillStyle = color + Math.floor(alpha * 255).toString(16).padStart(2, '0')
-        ctx.beginPath()
-        ctx.arc(tp.x, tp.y, 2 - j * 0.4, 0, Math.PI * 2)
-        ctx.fill()
-      }
-      ctx.fillStyle = color
-      ctx.beginPath()
-      ctx.arc(pos.x, pos.y, 2.5, 0, Math.PI * 2)
-      ctx.fill()
-    }
-  }
-}
-
-function buildGridCanvas(w, h) {
-  gridCanvas = document.createElement('canvas')
-  const dpr = window.devicePixelRatio || 1
-  gridCanvas.width = w * dpr
-  gridCanvas.height = h * dpr
-  const gctx = gridCanvas.getContext('2d')
-  gctx.scale(dpr, dpr)
-  gctx.strokeStyle = 'rgba(255,255,255,0.02)'
-  gctx.lineWidth = 1
-  for (let x = 0; x < w; x += 40) {
-    gctx.beginPath()
-    gctx.moveTo(x, 0)
-    gctx.lineTo(x, h)
-    gctx.stroke()
-  }
-  for (let y = 0; y < h; y += 40) {
-    gctx.beginPath()
-    gctx.moveTo(0, y)
-    gctx.lineTo(w, y)
-    gctx.stroke()
-  }
-}
-
-function drawCanvas() {
-  if (!canvasRef.value || !ctx) return
-  const rect = canvasRef.value.parentElement.getBoundingClientRect()
-  if (rect.width === 0 || rect.height === 0) return
-  // 节点布局未就绪（如首次进入画布视图前）时跳过绘制
-  if (!nodes.local || !nodes.tunnel) return
-  ctx.clearRect(0, 0, rect.width, rect.height)
-  if (gridCanvas) {
-    ctx.drawImage(gridCanvas, 0, 0, rect.width, rect.height)
-  }
-  for (const rt of Object.keys(ROUTE_CONFIG)) drawPath(rt)
-  drawParticles()
-  drawLocalNode()
-  {
-    drawTunnel(nodes.tunnel)
-    drawCountNode(nodes.count_ipv4_warp)
-    drawCountNode(nodes.count_ipv4_warp_ipv6)
-    drawCountNode(nodes.count_ipv6_warp)
-    drawCountNode(nodes.count_ipv6_warp_ipv4)
-    drawCountNode(nodes.count_ipv4)
-    drawCountNode(nodes.count_ipv6)
-    drawPortNode(nodes.type_ipv4)
-    drawPortNode(nodes.type_ipv6)
-    drawPortNode(nodes.type_ipv4_warp)
-    drawPortNode(nodes.type_ipv4_warp_ipv6)
-    drawPortNode(nodes.type_ipv6_warp)
-    drawPortNode(nodes.type_ipv6_warp_ipv4)
-  }
-}
-
-function startCanvasAnimation() {
-  const loop = () => {
-    drawCanvas()
-    canvasAnimId = requestAnimationFrame(loop)
-  }
-  canvasAnimId = requestAnimationFrame(loop)
-}
-
-function pauseCanvas() {
-  if (canvasAnimId) {
-    cancelAnimationFrame(canvasAnimId)
-    canvasAnimId = null
-  }
-}
-
-async function resumeCanvas() {
-  if (traffic.subview === 'canvas' && store.activeTab === 'traffic' && !canvasAnimId) {
-    // 等待 v-show 切换完成后 canvas 才有实际尺寸
-    await nextTick()
-    resizeCanvas()
-    startCanvasAnimation()
-  }
-}
-
-function showSubview(name) {
-  traffic.subview = name
-  if (name === 'list') {
-    pauseCanvas()
-  } else {
-    resumeCanvas()
-  }
-  api()?.save_ui_prefs({ traffic_subview: name })?.catch(() => {})
 }
 
 // ===== 生命周期与联动 =====
 watch(
   () => store.activeTab,
-  (name) => {
+  async (name) => {
     if (name === 'traffic') {
       if (traffic.autoRefresh) startAutoRefresh()
-      resumeCanvas()
+      await nextTick()
+      updateBarCenter()
     } else {
       stopAutoRefresh()
-      pauseCanvas()
     }
   }
 )
@@ -681,235 +321,388 @@ watch(
   () => store.apiReady,
   async (ready) => {
     if (!ready) return
-    traffic.subview = store.trafficSubview || 'list'
     await nextTick()
-    if (traffic.subview === 'canvas' && store.activeTab === 'traffic') resumeCanvas()
     await refreshFast()
     refreshSlow()
   },
   { immediate: true }
 )
 
-function onWindowResize() {
-  resizeCanvas()
-}
-
 onMounted(() => {
-  window.addEventListener('resize', onWindowResize)
+  if (store.activeTab === 'traffic' && traffic.autoRefresh) startAutoRefresh()
+  updateBarCenter()
+  window.addEventListener('resize', updateBarCenter)
+  if (trafficViewRef.value && typeof ResizeObserver !== 'undefined') {
+    barObserver = new ResizeObserver(updateBarCenter)
+    barObserver.observe(trafficViewRef.value)
+  }
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', onWindowResize)
   stopAutoRefresh()
-  pauseCanvas()
   if (refreshTimer) clearTimeout(refreshTimer)
+  window.removeEventListener('resize', updateBarCenter)
+  if (barObserver) barObserver.disconnect()
 })
 </script>
 
 <template>
-  <div class="traffic-view">
-    <!-- 子视图切换 -->
-    <div class="subview-bar">
-      <button class="subview-btn" :class="{ active: traffic.subview === 'list' }" @click="showSubview('list')">列表视图
-      </button>
-      <button class="subview-btn" :class="{ active: traffic.subview === 'canvas' }" @click="showSubview('canvas')">画布动画
-      </button>
+  <div ref="trafficViewRef" class="traffic-view">
+    <!-- 页头 -->
+    <div class="tv-head">
+      <div class="tv-head-left">
+        <h2 class="tv-title">流量监控</h2>
+        <span class="tv-sub">活动 TCP 连接与路由分类</span>
+      </div>
+      <div class="tv-head-right">
+        <span class="tv-chip">WARP 底层 {{ traffic.warpUnderlay === 'ipv6' ? 'IPv6' : 'IPv4' }}</span>
+        <span class="tv-chip mono">{{ totalCount }} 连接</span>
+      </div>
     </div>
 
-    <!-- 列表视图 -->
-    <div v-show="traffic.subview === 'list'" class="traffic-subview">
-      <div class="tv-header">
-        网络流量监控
-        <span class="warp-info">WARP 底层: {{ traffic.warpUnderlay === 'ipv6' ? 'IPv6' : 'IPv4' }}</span>
-      </div>
-      <div class="loading-bar" :class="{ active: traffic.loadingFast }"></div>
-
-      <div class="stats-grid">
-        <div v-for="card in statCards" :key="card.key" class="stat-card">
-          <div class="stat-count" :style="{ color: card.color }">{{ card.count }}</div>
-          <div class="stat-label">
-            <span class="stat-dot" :style="{ background: card.color }"></span>{{ card.label }}
+    <!-- 路由流向概览（单色示意） -->
+    <section class="tv-card flow-card">
+      <div class="flow-schematic">
+        <div class="flow-endpoint">
+          <div class="flow-node">
+            <span class="flow-node-title">本机</span>
+            <span class="flow-node-num mono">{{ totalCount }}</span>
+          </div>
+        </div>
+        <div class="flow-lines" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="flow-tunnel">
+          <div class="flow-tunnel-title">
+            WARP 隧道
+            <span class="flow-tunnel-sub mono">{{ traffic.warpUnderlay === 'ipv6' ? 'IPv6' : 'IPv4' }}</span>
+          </div>
+          <div class="flow-route" v-for="key in ['ipv4_warp', 'ipv4_warp_ipv6', 'ipv6_warp', 'ipv6_warp_ipv4']"
+            :key="key" :class="{ active: (traffic.stats[key] || 0) > 0 }">
+            <span class="flow-route-label">{{ ROUTE_LABEL[key] }}</span>
+            <i class="flow-route-line"></i>
+            <span class="flow-route-num mono">{{ traffic.stats[key] || 0 }}</span>
+          </div>
+        </div>
+        <div class="flow-lines" aria-hidden="true"><i></i><i></i></div>
+        <div class="flow-direct">
+          <div class="flow-direct-caption">直连</div>
+          <div class="flow-route" v-for="key in ['ipv4', 'ipv6']" :key="key"
+            :class="{ active: (traffic.stats[key] || 0) > 0 }">
+            <span class="flow-route-label">{{ ROUTE_LABEL[key] }}</span>
+            <i class="flow-route-line"></i>
+            <span class="flow-route-num mono">{{ traffic.stats[key] || 0 }}</span>
           </div>
         </div>
       </div>
+    </section>
 
-      <div class="toolbar">
-        <n-input v-model:value="traffic.searchList" size="small" placeholder="搜索进程名/域名/IP..." style="max-width: 260px"
-          clearable />
-        <label class="auto-label">
-          <n-switch v-model:value="traffic.autoRefresh" size="small" />
-          自动刷新
-        </label>
-        <n-button size="small" :loading="traffic.loadingFast" @click="refreshFast()">刷新</n-button>
+    <!-- 工具栏 -->
+    <div class="tv-toolbar">
+      <n-checkbox :checked="allSelected" @update:checked="toggleSelectAll">全选</n-checkbox>
+      <n-input v-model:value="traffic.search" size="small" placeholder="搜索进程名 / 域名 / IP" clearable
+        style="width: min(280px, 100%)" />
+      <label class="tv-switch">
+        <n-switch :value="traffic.cumulativeMode" size="small" @update:value="toggleCumulative" />
+        累计展示
+      </label>
+      <label class="tv-switch">
+        <n-switch v-model:value="traffic.autoRefresh" size="small" />
+        自动刷新
+      </label>
+      <div class="tv-toolbar-spacer"></div>
+      <n-button quaternary circle size="small" class="refresh-btn" title="刷新" @click="refreshFast()">
+        <svg class="refresh-icon" :class="{ spinning: traffic.loadingFast }" viewBox="0 0 24 24" fill="none"
+          aria-hidden="true">
+          <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M21 3v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round" />
+          <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M8 16H3v5" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round" />
+        </svg>
+      </n-button>
+    </div>
+    <div class="loading-bar" :class="{ active: traffic.loadingFast }"></div>
+
+    <!-- 连接分组列表 -->
+    <section class="conn-panel">
+      <div v-if="!groupedConns.length" class="empty-hint">
+        {{ traffic.cumulativeMode ? '暂无累计连接' : '暂无活动连接' }}
       </div>
-
-      <div class="conn-list">
-        <div v-if="!groupedListView.length" class="empty-hint">暂无活动 TCP 连接</div>
-        <div v-for="group in groupedListView" :key="group.name" class="conn-group">
-          <div class="conn-group-header">
-            {{ group.name }}
-            <span class="conn-group-count">{{ group.items.length }}</span>
-          </div>
-          <div v-for="(c, i) in group.items" :key="i" class="conn-item">
-            <span class="conn-process">{{ c.process }}</span>
+      <div v-for="group in groupedConns" :key="group.name" class="proc-group"
+        :class="{ collapsed: collapsedGroups.has(group.name) }">
+        <div class="proc-group-header" @click="toggleGroupCollapse(group.name)">
+          <svg class="collapse-icon" viewBox="0 0 10 10">
+            <path d="M2 3 L5 7 L8 3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"
+              stroke-linejoin="round" />
+          </svg>
+          <n-checkbox :checked="group.items.every((c) => selectedConns.has(connId(c)))"
+            :style="{ opacity: group.items.some((c) => selectedConns.has(connId(c))) && !group.items.every((c) => selectedConns.has(connId(c))) ? 0.5 : 1 }"
+            @click.stop @update:checked="(v) => toggleGroup(group.name, v)" />
+          <span class="proc-name">{{ group.name }}</span>
+          <span class="proc-count">{{ group.items.length }}</span>
+        </div>
+        <div class="proc-group-body">
+          <div v-for="(c, i) in group.items" :key="i" class="conn-row"
+            :class="{ selected: selectedConns.has(connId(c)) }"
+            @click="toggleConn(connId(c), !selectedConns.has(connId(c)))">
+            <n-checkbox :checked="selectedConns.has(connId(c))" @click.stop
+              @update:checked="(v) => toggleConn(connId(c), v)" />
             <span class="conn-host">
               <span class="conn-hostname">{{ c.hostname || '(无域名)' }}</span>
               <span class="conn-ip mono">{{ c.remote_ip }}:{{ c.remote_port }}</span>
             </span>
-            <span class="conn-badge" :style="{
-              color: (ROUTE_CONFIG[c.route_type] || ROUTE_CONFIG['ipv4']).color,
-              background: (ROUTE_CONFIG[c.route_type] || ROUTE_CONFIG['ipv4']).color + '1e',
-            }">{{ (ROUTE_CONFIG[c.route_type] || ROUTE_CONFIG['ipv4']).label }}</span>
+            <span class="conn-tag">{{ ROUTE_LABEL[c.route_type] || ROUTE_LABEL.ipv4 }}</span>
           </div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- 画布视图 -->
-    <div v-show="traffic.subview === 'canvas'" class="traffic-subview">
-      <div class="canvas-wrap">
-        <canvas ref="canvasRef" class="flow-canvas"></canvas>
-        <div class="top-stats">
-          <div v-for="card in statCards" :key="card.key" class="stat-pill">
-            <span class="stat-dot" :style="{ background: card.color }"></span>
-            <span class="stat-num" :style="{ color: card.color }">{{ card.count }}</span>
-            <span class="stat-label">{{ card.label }}</span>
-          </div>
-        </div>
+    <!-- 选中操作条（悬浮固定在窗口底部，相对列表列居中） -->
+    <!-- defer：.app-shell 由同一组件树渲染，初次挂载时尚未入文档，延迟解析目标避免 Teleport 失效 -->
+    <Teleport defer to=".app-shell">
+      <div class="action-bar" :style="{ left: barLeft }"
+        :class="{ show: selectedConns.size > 0 && store.activeTab === 'traffic' }">
+        <span class="selected-count">已选 {{ selectedConns.size }} 项</span>
+        <n-button size="tiny" :disabled="traffic.applying" @click="setRoute('ipv4')">IPv4 直连</n-button>
+        <n-button size="tiny" :disabled="traffic.applying" @click="setRoute('ipv6')">IPv6 直连</n-button>
+        <n-button size="tiny" secondary :disabled="traffic.applying" @click="setRoute('warp')">不直连 (WARP)</n-button>
+        <n-button size="tiny" quaternary :disabled="traffic.applying" @click="clearSelection()">取消选择</n-button>
       </div>
-
-      <div class="bottom-panel">
-        <div class="panel-header">
-          <div class="panel-header-left">
-            <n-checkbox :checked="allCanvasSelected" @update:checked="toggleSelectAll" title="全选" />
-            <span class="panel-title">
-              活动连接
-              <span class="warp-info">WARP 底层: {{ traffic.warpUnderlay === 'ipv6' ? 'IPv6' : 'IPv4' }}</span>
-            </span>
-          </div>
-          <div class="panel-controls">
-            <n-input v-model:value="traffic.searchCanvas" size="small" placeholder="搜索域名/IP/进程..." style="width: 200px"
-              clearable />
-            <label class="auto-label">
-              <n-switch :value="traffic.cumulativeMode" size="small" @update:value="toggleCumulative" />
-              累计展示
-            </label>
-            <label class="auto-label">
-              <n-switch v-model:value="traffic.autoRefresh" size="small" />
-              自动刷新
-            </label>
-          </div>
-        </div>
-
-        <div class="action-bar" :class="{ show: selectedConns.size > 0 }">
-          <span class="selected-count">已选 {{ selectedConns.size }} 项</span>
-          <n-button size="tiny" @click="setRoute('ipv4')">IPv4 直连</n-button>
-          <n-button size="tiny" @click="setRoute('ipv6')">IPv6 直连</n-button>
-          <n-button size="tiny" type="warning" secondary @click="setRoute('warp')">不直连(WARP)</n-button>
-          <n-button size="tiny" quaternary @click="clearSelection()">取消选择</n-button>
-        </div>
-
-        <div class="conn-list">
-          <div v-if="!filteredCanvasConns.length" class="empty-hint">
-            {{ traffic.cumulativeMode ? '暂无累计连接' : '暂无活动连接' }}
-          </div>
-          <div v-for="group in groupedCanvasList" :key="group.name" class="proc-group"
-            :class="{ collapsed: collapsedGroups.has(group.name) }">
-            <div class="proc-group-header" @click="toggleGroupCollapse(group.name)">
-              <svg class="collapse-icon" viewBox="0 0 10 10">
-                <path d="M2 3 L5 7 L8 3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"
-                  stroke-linejoin="round" />
-              </svg>
-              <n-checkbox :checked="group.items.every((c) => selectedConns.has(connId(c)))"
-                :style="{ opacity: group.items.some((c) => selectedConns.has(connId(c))) && !group.items.every((c) => selectedConns.has(connId(c))) ? 0.5 : 1 }"
-                @click.stop @update:checked="(v) => toggleGroup(group.name, v)" />
-              <span class="proc-name">{{ group.name }}</span>
-              <span class="proc-count">{{ group.items.length }}</span>
-            </div>
-            <div class="proc-group-body">
-              <div v-for="(c, i) in group.items" :key="i" class="conn-row"
-                :class="{ selected: selectedConns.has(connId(c)) }" @click="toggleConn(connId(c), !selectedConns.has(connId(c)))">
-                <n-checkbox :checked="selectedConns.has(connId(c))" @click.stop
-                  @update:checked="(v) => toggleConn(connId(c), v)" />
-                <span class="conn-host">
-                  <span class="conn-hostname">{{ c.hostname || '(无域名)' }}</span>
-                  <span class="conn-ip mono">{{ c.remote_ip }}:{{ c.remote_port }}</span>
-                </span>
-                <span class="conn-badge" :style="{
-                  color: (ROUTE_CONFIG[c.route_type] || ROUTE_CONFIG['ipv4']).color,
-                  background: (ROUTE_CONFIG[c.route_type] || ROUTE_CONFIG['ipv4']).color + '1e',
-                }">{{ (ROUTE_CONFIG[c.route_type] || ROUTE_CONFIG['ipv4']).label }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
 .traffic-view {
-  padding: 16px 22px 24px;
-  max-width: 1180px;
+  padding: clamp(14px, 2cqi, 26px);
+  container-type: inline-size;
+  max-width: 1080px;
   margin: 0 auto;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.subview-bar {
-  display: flex;
-  gap: 2px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 3px;
-  width: fit-content;
+.mono {
+  font-family: var(--font-mono);
 }
 
-.subview-btn {
-  padding: 6px 18px;
+/* ===== 页头 ===== */
+.tv-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tv-head-left {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.tv-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.2px;
+}
+
+.tv-sub {
   font-size: 12px;
   color: var(--text-tertiary);
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s;
 }
 
-.subview-btn:hover {
+.tv-head-right {
+  display: flex;
+  gap: 8px;
+}
+
+.tv-chip {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 12px;
+}
+
+/* ===== 路由流向概览 ===== */
+.tv-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.flow-card {
+  padding: 16px 18px;
+}
+
+.flow-schematic {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+}
+
+.flow-endpoint {
+  display: flex;
+  align-items: center;
+}
+
+.flow-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg-elevated);
+  flex-shrink: 0;
+}
+
+.flow-node-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.flow-node-num {
+  font-size: 20px;
+  font-weight: 700;
   color: var(--text-primary);
 }
 
-.subview-btn.active {
-  color: var(--accent);
-  background: var(--accent-dim);
+.flow-lines {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  align-self: stretch;
+  min-width: 22px;
 }
 
-.tv-header {
+.flow-lines i {
+  display: block;
+  height: 1px;
+  background: var(--border-strong);
+}
+
+.flow-tunnel,
+.flow-direct {
+  flex: 1;
+  min-width: 0;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.flow-direct {
+  border-style: solid;
+  border-color: var(--border);
+  max-width: 300px;
+}
+
+.flow-tunnel-title {
   font-size: 12px;
+  font-weight: 600;
   color: var(--text-secondary);
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.warp-info {
+.flow-tunnel-sub {
   font-size: 11px;
+  font-weight: 500;
   color: var(--text-tertiary);
   background: var(--bg-elevated);
-  padding: 2px 8px;
+  padding: 1px 8px;
   border-radius: 4px;
+}
+
+.flow-direct-caption {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.flow-route {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  opacity: 0.55;
+}
+
+.flow-route.active {
+  opacity: 1;
+}
+
+.flow-route-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.flow-route.active .flow-route-label {
+  color: var(--text-primary);
+}
+
+.flow-route-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  min-width: 12px;
+}
+
+.flow-route.active .flow-route-line {
+  background: var(--border-strong);
+}
+
+.flow-route-num {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  min-width: 2ch;
+  text-align: right;
+}
+
+/* ===== 工具栏 ===== */
+.tv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.tv-switch {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tv-toolbar-spacer {
+  flex: 1;
 }
 
 .loading-bar {
   height: 2px;
   border-radius: 1px;
-  background: transparent;
   overflow: hidden;
   position: relative;
+  margin-top: -6px;
 }
 
 .loading-bar.active {
@@ -935,103 +728,109 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 统计卡片 */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 10px;
-}
-
-.stat-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 13px 14px;
-}
-
-.stat-count {
-  font-size: 22px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-}
-
-.stat-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 5px;
-  font-size: 11px;
-  color: var(--text-tertiary);
-  white-space: nowrap;
-}
-
-.stat-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.auto-label {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-/* 连接列表 */
-.conn-list {
+/* ===== 连接列表 ===== */
+.conn-panel {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.conn-group {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.conn-group-header {
-  padding: 9px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  background: var(--bg-elevated);
-  display: flex;
-  align-items: center;
   gap: 8px;
 }
 
-.conn-group-count {
-  font-size: 10px;
+.empty-hint {
+  padding: 40px 0;
+  text-align: center;
+  font-size: 13px;
   color: var(--text-tertiary);
   background: var(--bg-panel);
-  padding: 1px 7px;
-  border-radius: 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 12px;
 }
 
-.conn-item,
+.proc-group {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.proc-group-header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px;
+  background: var(--bg-elevated);
+  cursor: pointer;
+  user-select: none;
+  flex-wrap: wrap;
+}
+
+.proc-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* 刷新按钮：纯图标、无底色，与主题背景融为一体；加载时图标自旋，尺寸不变 */
+.refresh-btn {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.refresh-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.refresh-icon.spinning {
+  animation: refresh-spin 0.9s linear infinite;
+}
+
+@keyframes refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.collapse-icon {
+  width: 10px;
+  height: 10px;
+  color: var(--text-tertiary);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.proc-group.collapsed .collapse-icon {
+  transform: rotate(-90deg);
+}
+
+.proc-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.proc-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--bg-panel);
+  padding: 1px 8px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+}
+
+.proc-group.collapsed .proc-group-body {
+  display: none;
+}
+
 .conn-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 14px;
+  padding: 9px 14px;
   border-top: 1px solid var(--border);
+  cursor: pointer;
   transition: background 0.15s;
 }
 
-.conn-item:hover,
 .conn-row:hover {
   background: var(--bg-hover);
 }
@@ -1040,26 +839,16 @@ onBeforeUnmount(() => {
   background: var(--accent-dim);
 }
 
-.conn-process {
-  font-size: 12px;
-  font-weight: 500;
-  min-width: 90px;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .conn-host {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 
 .conn-hostname {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -1067,185 +856,91 @@ onBeforeUnmount(() => {
 }
 
 .conn-ip {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.conn-badge {
-  font-size: 10px;
+.conn-tag {
+  font-size: 11px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
   padding: 2px 8px;
-  border-radius: 4px;
   white-space: nowrap;
   flex-shrink: 0;
 }
 
-/* 画布 */
-.canvas-wrap {
-  position: relative;
-  height: 400px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
+.conn-row.selected .conn-tag {
+  border-color: var(--accent);
+  color: var(--text-primary);
 }
 
-.flow-canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.top-stats {
-  position: absolute;
-  top: 10px;
-  left: 12px;
-  right: 12px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  pointer-events: none;
-}
-
-.stat-pill {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(19, 19, 22, 0.85);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 4px 12px;
-  font-size: 11px;
-}
-
-.stat-num {
-  font-weight: 700;
-  font-family: var(--font-mono);
-}
-
-/* 底部面板 */
-.bottom-panel {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px 14px;
-  background: var(--bg-elevated);
-}
-
-.panel-header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.panel-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.panel-controls {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
+/* ===== 选中操作条（悬浮固定在窗口底部） ===== */
 .action-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translate(-50%, 14px);
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
-  background: var(--accent-dim);
-  border-top: 1px solid var(--border-strong);
-  border-bottom: 1px solid var(--border-strong);
-  max-height: 0;
-  overflow: hidden;
-  padding-top: 0;
-  padding-bottom: 0;
-  transition: all 0.25s ease;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 9px 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 100;
 }
 
 .action-bar.show {
-  max-height: 60px;
-  padding-top: 8px;
-  padding-bottom: 8px;
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
 }
 
 .selected-count {
   font-size: 12px;
-  color: var(--accent);
+  color: var(--text-primary);
   font-weight: 600;
   margin-right: 4px;
 }
 
-.bottom-panel .conn-list {
-  padding: 8px 10px 10px;
-}
+/* ===== 窄容器：概览纵向堆叠 ===== */
+@container (max-width: 820px) {
+  .flow-schematic {
+    flex-direction: column;
+  }
 
-.proc-group {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
+  .flow-endpoint {
+    justify-content: center;
+  }
 
-.proc-group-header {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 12px;
-  background: var(--bg-elevated);
-  cursor: pointer;
-  user-select: none;
-}
+  .flow-node {
+    width: 76px;
+    height: 76px;
+  }
 
-.collapse-icon {
-  width: 10px;
-  height: 10px;
-  color: var(--text-tertiary);
-  transition: transform 0.2s;
-}
+  .flow-lines {
+    flex-direction: row;
+    justify-content: space-evenly;
+    align-self: auto;
+    min-width: 0;
+    height: 18px;
+  }
 
-.proc-group.collapsed .collapse-icon {
-  transform: rotate(-90deg);
-}
+  .flow-lines i {
+    width: 1px;
+    height: 100%;
+  }
 
-.proc-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.proc-count {
-  font-size: 10px;
-  color: var(--text-tertiary);
-  background: var(--bg-panel);
-  padding: 1px 7px;
-  border-radius: 8px;
-}
-
-.proc-group-body {
-  display: block;
-}
-
-.proc-group.collapsed .proc-group-body {
-  display: none;
-}
-
-.conn-row {
-  cursor: pointer;
+  .flow-direct {
+    max-width: none;
+  }
 }
 </style>

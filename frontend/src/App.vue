@@ -192,11 +192,13 @@ onMounted(async () => {
   })
   geometryTimer = setInterval(persistWindowGeometry, 2000)
 
-  // dev server 预览（http 协议）无 pywebview，跳过等待直接渲染 UI
+  // dev server 预览（http 协议）无 pywebview；若注入了 mock 桥
+  // （frontend/mock/bridge.js，仅 serve 模式）则照常走初始化流程，方便无 Python 调 UI
   const isDevServer = location.protocol.startsWith('http')
   if (isDevServer) {
     store.initDone = true
-    return
+    const mocked = await waitForApi(600).catch(() => false)
+    if (!mocked) return
   }
   try {
     await waitForApi(15000)
@@ -204,7 +206,6 @@ onMounted(async () => {
     try {
       const prefs = await bridgeApi().get_ui_prefs()
       if (prefs.page_size) store.pageSize = prefs.page_size
-      if (['list', 'canvas'].includes(prefs.traffic_subview)) store.trafficSubview = prefs.traffic_subview
       store.detailUserCollapsed = !!prefs.network_detail_collapsed
       if (['home', 'workflow', 'warp', 'traffic', 'settings'].includes(prefs.active_tab)) {
         store.activeTab = prefs.active_tab

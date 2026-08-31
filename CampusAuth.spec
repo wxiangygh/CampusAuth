@@ -22,7 +22,10 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # 以下包并非本应用依赖（源码无引用、不在 requirements，历史发布产物也不含它们）；
+    # 环境中若安装了会被依赖分析连带打包（如 numpy 的 ~24MB OpenBLAS、cryptography 的 ~9MB _rust），
+    # 显式排除以保持产物体积
+    excludes=['numpy', 'cryptography', 'httpx', 'anyio', 'sortedcontainers'],
     noarchive=False,
     optimize=0,
 )

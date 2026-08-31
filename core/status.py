@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 
 from core.app_state import app_state
+from core.auth import is_ipv4_enabled
 from core.command import run_command
 from core.network import _check_internet, get_wifi_interface_name
 from core.warp_manager import probe_warp_status
@@ -19,10 +20,10 @@ def probe_network_status() -> dict:
     warp = probe_warp_status(timeout=3)
     warp_connected = warp.success
     interface_name = get_wifi_interface_name() or "WLAN"
-    command = f'(Get-NetAdapterBinding -Name "{interface_name}" -ComponentID ms_tcpip).Enabled'
-    code, output, error = run_command(
-        ['powershell', '-NoProfile', '-Command', command], shell=False, timeout=3)
-    ipv4_disabled = code == 0 and 'False' in output
+    # 复用 auth.is_ipv4_enabled（timeout=8、严格解析）。此前这里内联
+    # timeout=3 的探测在本机 PowerShell 冷启动约 5s，必然超时，导致
+    # IPv4 已禁用却被误报为"同时可用"（partial）。
+    ipv4_disabled = not is_ipv4_enabled(interface_name)
     if not warp_connected and ipv4_disabled:
         adapter_command = ('Get-NetAdapter -Name *WARP* | Where-Object { $_.Status -eq "Up" } '
                            '| Select-Object -First 1 -ExpandProperty Name')
@@ -35,7 +36,6 @@ def probe_network_status() -> dict:
         'warp_code': warp.code,
         'ipv4_disabled': ipv4_disabled,
         'interface': interface_name,
-        'probe_error': error.strip()[:160] if error else '',
     }
     if warp_connected and ipv4_disabled:
         return {'status': 'connected', 'message': 'WARP已连接，IPv4已禁用', **details}

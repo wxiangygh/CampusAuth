@@ -53,6 +53,7 @@ from core.updater import (UpdateDownloader, check_for_update as _check_for_updat
                           resolve_install_dir, validate_install_dir)
 from core.version import __version__
 from core.status import network_status
+from core.reconnect_watchdog import start_watchdog, stop_watchdog
 from core.auth_workflow import (
     apply_auto_tune, run_workflow_by_id, validate_auth_workflow, workflow_catalog,
 )
@@ -569,6 +570,11 @@ class ApiBridge:
         elif old_needed:
             cleanup_wifi_event()
             unregister_wifi_event_task()
+        # WARP 自动重连看门狗：随开关启停
+        if new_config.get('warp_auto_reconnect'):
+            start_watchdog()
+        else:
+            stop_watchdog()
     def save_config(self, config):
         changes = dict(config or {})
         expected_revision = changes.pop('_revision', None)
@@ -651,6 +657,7 @@ class ApiBridge:
             'auto_enable_ipv4', 'auth_total_timeout', 'auth_workflow',
             'auth_button_workflow', 'restore_button_workflow',
             'auto_check_update', 'auto_tune_workflow',
+            'warp_auto_reconnect', 'warp_reconnect_delay',
         }
         changes = {key: value for key, value in (form_data or {}).items() if key in allowed}
         old_config = CONFIG_STORE.snapshot()
@@ -1626,6 +1633,7 @@ class TrayApp:
                     logger.debug(f"request_exit: destroy {win_attr} failed: {e}")
                 setattr(self, win_attr, None)
         cleanup_wifi_event()
+        stop_watchdog()
         if self.icon:
             try:
                 self.icon.stop()
@@ -1897,6 +1905,8 @@ class TrayApp:
                     _update_tray_status()
             else:
                 _update_tray_status()
+            if cfg.get('warp_auto_reconnect'):
+                start_watchdog()
             self._init_done = True
 
         if self._silent:

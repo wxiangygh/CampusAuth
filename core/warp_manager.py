@@ -83,6 +83,9 @@ def disconnect_warp(full=True, timeout=12):
     Returns:
         bool: 操作是否成功完成（未被取消）。
     """
+    # 记录主动断开：自动重连看门狗据此跳过"用户主动断开"场景，
+    # 避免刚点完"恢复网络"又被看门狗立刻拉回 WARP。
+    core.state.mark_warp_manual_disconnect()
     warp_cli = get_warp_cli()
     if warp_cli:
         code, output, _ = run_command([warp_cli, 'status'], shell=False, timeout=min(timeout, 4))
@@ -291,6 +294,7 @@ def connect_warp_result(force_restart=False, timeout=25, max_attempts=1):
         status.attempts = attempt
         if status.success:
             status.elapsed = time.monotonic() - started
+            core.state.clear_warp_manual_disconnect()
             return status
         if status.code == 'registration_required':
             status.elapsed = time.monotonic() - started
@@ -311,6 +315,7 @@ def connect_warp_result(force_restart=False, timeout=25, max_attempts=1):
             last = status
             if status.success:
                 status.elapsed = time.monotonic() - started
+                core.state.clear_warp_manual_disconnect()
                 return status
             if status.code == 'registration_required':
                 status.elapsed = time.monotonic() - started

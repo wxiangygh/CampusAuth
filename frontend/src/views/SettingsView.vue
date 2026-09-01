@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
-import { NButton, NInput, NAutoComplete, NSwitch, NInputGroup, NSelect } from 'naive-ui'
+import { NButton, NInput, NAutoComplete, NSwitch, NInputGroup, NSelect, NInputNumber } from 'naive-ui'
 import { store, doAutoSave, openUpdate } from '../store'
 import { api } from '../bridge'
 import { ui } from '../ui'
@@ -113,11 +113,21 @@ watch(
 
 // 开关：立即保存
 watch(
-  () => [store.form.auto_auth, store.form.auto_restore, store.form.auto_check_update],
+  () => [store.form.auto_auth, store.form.auto_restore, store.form.auto_check_update, store.form.warp_auto_reconnect],
   () => {
     if (!store.configLoaded) return
     clearTimeout(autoSaveTimer)
     doAutoSave()
+  }
+)
+
+// 重连阈值：数字输入，防抖 500ms 保存
+watch(
+  () => store.form.warp_reconnect_delay,
+  () => {
+    if (!store.configLoaded) return
+    clearTimeout(autoSaveTimer)
+    autoSaveTimer = setTimeout(() => doAutoSave(), 500)
   }
 )
 
@@ -181,6 +191,8 @@ async function initSettings() {
     f.silent_startup = config.silent_startup || false
     f.auto_check_update = config.auto_check_update !== false
     f.auth_total_timeout = config.auth_total_timeout || 90
+    f.warp_auto_reconnect = config.warp_auto_reconnect || false
+    f.warp_reconnect_delay = config.warp_reconnect_delay || 20
     f.auth_button_workflow = config.auth_button_workflow || 'default_auth'
     f.restore_button_workflow = config.restore_button_workflow || ''
     store.configRevision = config._revision || 0
@@ -334,6 +346,20 @@ onBeforeUnmount(() => {
             <n-switch v-model:value="store.form.auto_check_update" size="small" />
           </div>
           <div class="toggle-tip">启动时及运行期间每 6 小时静默检查 GitHub 新版本</div>
+        </div>
+        <div class="toggle-card">
+          <div class="toggle-head">
+            <span class="toggle-title">自动重连</span>
+            <n-switch v-model:value="store.form.warp_auto_reconnect" size="small" />
+          </div>
+          <div class="toggle-tip">WARP 意外断开后自动重连（主动断开不触发）</div>
+        </div>
+        <div class="toggle-card">
+          <div class="toggle-head">
+            <span class="toggle-title">重连阈值</span>
+            <n-input-number v-model:value="store.form.warp_reconnect_delay" :min="5" :max="300" size="small" style="width: 92px" />
+          </div>
+          <div class="toggle-tip">断开持续超过该秒数才判定为意外断开</div>
         </div>
       </div>
 

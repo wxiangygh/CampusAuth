@@ -32,6 +32,9 @@ export const store = reactive({
     auto_startup: false,
     auto_check_update: true,
     auth_total_timeout: 90,
+    // WARP 意外断开自动重连（仅对非主动断开生效）
+    warp_auto_reconnect: false,
+    warp_reconnect_delay: 20,
     // 主页按钮绑定的工作流：'' = 恢复按钮使用内置恢复逻辑
     auth_button_workflow: 'default_auth',
     restore_button_workflow: '',
@@ -349,6 +352,8 @@ export function collectFormConfig() {
     silent_startup: !!f.silent_startup,
     auto_check_update: f.auto_check_update !== false,
     auth_total_timeout: Number(f.auth_total_timeout || 90),
+    warp_auto_reconnect: !!f.warp_auto_reconnect,
+    warp_reconnect_delay: Number(f.warp_reconnect_delay || 20),
     auth_button_workflow: String(f.auth_button_workflow || 'default_auth'),
     restore_button_workflow: String(f.restore_button_workflow || ''),
   }

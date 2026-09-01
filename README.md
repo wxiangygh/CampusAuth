@@ -1,6 +1,9 @@
 # CampusAuth - 校园网认证助手
 
 Windows 托盘应用，提供校园网自动认证、WARP 排除管理、流量监控等功能。
+<img width="1511" height="961" alt="image" src="https://github.com/user-attachments/assets/8127e35c-1d8e-42ce-8a42-50cf63a9b59c" />
+<img width="1511" height="961" alt="image" src="https://github.com/user-attachments/assets/69ab23c7-418d-4150-8c00-732d1dec4efa" />
+<img width="1511" height="961" alt="image" src="https://github.com/user-attachments/assets/7aca09ac-76f1-4256-a03a-0415124d2f70" />
 
 ## 功能
 

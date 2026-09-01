@@ -9,7 +9,8 @@ from core.app_state import app_state
 from core.command import run_command
 from core.config import (
     DEFAULT_AUTH_WORKFLOW, DEFAULT_PORTAL_LOGOUT_WORKFLOW,
-    DEFAULT_REAUTH_WORKFLOW, DEFAULT_RESTART_WARP_WORKFLOW, get_config,
+    DEFAULT_REAUTH_WORKFLOW, DEFAULT_RESTART_WARP_WORKFLOW,
+    DEFAULT_RESTORE_WORKFLOW, get_config,
 )
 from core.network import get_wifi_interface_name, has_public_ipv6, is_warp_connected
 from core.warp_manager import (
@@ -99,6 +100,11 @@ WORKFLOW_CATALOG = {
     'reset_warp_masque': {
         'name': '重置 WARP 隧道协议',
         'description': '恢复 Cloudflare WARP 默认隧道协议。',
+        'group': 'Cloudflare WARP',
+    },
+    'warp_underlay_unpin': {
+        'name': '移除 WARP 底层 IPv6 pin',
+        'description': '删除 CampusAuth_WARPv6Underlay 防火墙规则，恢复 WARP 端点自由选择。',
         'group': 'Cloudflare WARP',
     },
     'start_warp_service': {
@@ -406,6 +412,26 @@ def _reset_warp_masque_action(context: WorkflowContext, step: StepSpec) -> StepR
     return StepResult.ok('WARP 隧道协议已重置')
 
 
+def _warp_underlay_unpin_action(context: WorkflowContext, step: StepSpec) -> StepResult:
+    """恢复正常模式时移除 WARP 底层 IPv6 pin（防火墙程序级规则）。
+
+    经工作流执行的恢复（restore_button_workflow 绑定）必须走这一步，
+    否则日后 WARP 再次连接时仍被强制锁定在 IPv6 端点上。
+    """
+    try:
+        from warp_exclusion import remove_warp_underlay_ipv6_pin, is_warp_underlay_pinned
+        if not is_warp_underlay_pinned():
+            return StepResult.ok('WARP 底层 pin 不存在，无需移除')
+        ok, msg = remove_warp_underlay_ipv6_pin()
+        if not ok:
+            return StepResult.fail(f'移除 WARP 底层 pin 失败：{msg}',
+                                   code='warp_unpin_failed', retryable=True)
+        return StepResult.ok('WARP 底层 IPv6 pin 已移除')
+    except Exception as exc:
+        logger.warning(f'warp_underlay_unpin error: {exc}')
+        return StepResult.ok('WARP 底层 pin 状态未知，已跳过')
+
+
 def _query_service(context: WorkflowContext):
     return run_command('sc query "CloudflareWARP"', timeout=_command_timeout(context, 5))
 
@@ -424,6 +450,11 @@ def _control_warp_service(context: WorkflowContext, action: str) -> StepResult:
         if code != 0:
             return StepResult.fail(f'Cloudflare WARP 服务停止失败：{(error or output).strip()[:140]}',
                                    code='warp_service_stop_failed', retryable=True)
+        if action == 'stop':
+            # 与 disconnect_warp(full=True) 对齐：恢复正常模式后
+            # WARP 不应再随系统自启；start/restart 分支会重新设回 auto
+            run_command('sc config "CloudflareWARP" start= disabled',
+                        timeout=_command_timeout(context, 5))
         if not _wait(context, 0.8):
             return StepResult.fail('已取消', code='cancelled')
     if action in {'start', 'restart'}:
@@ -540,7 +571,8 @@ for _catalog_entry in WORKFLOW_CATALOG.values():
     _catalog_entry.setdefault('default_retries', 0)
     _catalog_entry.setdefault('default_retry_delay', 1.0)
 for _default_workflow in (DEFAULT_AUTH_WORKFLOW, DEFAULT_PORTAL_LOGOUT_WORKFLOW,
-                          DEFAULT_REAUTH_WORKFLOW, DEFAULT_RESTART_WARP_WORKFLOW):
+                          DEFAULT_REAUTH_WORKFLOW, DEFAULT_RESTART_WARP_WORKFLOW,
+                          DEFAULT_RESTORE_WORKFLOW):
     for _default_step in _default_workflow:
         _catalog_entry = WORKFLOW_CATALOG.get(_default_step['id'])
         if _catalog_entry:
@@ -566,6 +598,7 @@ ACTIONS = {
     'reset_warp_endpoint_ipv6': _reset_warp_endpoint_action,
     'set_warp_masque': _set_warp_masque_action,
     'reset_warp_masque': _reset_warp_masque_action,
+    'warp_underlay_unpin': _warp_underlay_unpin_action,
     'start_warp_service': _start_warp_service,
     'stop_warp_service': _stop_warp_service,
     'restart_warp_service': _restart_warp_service,

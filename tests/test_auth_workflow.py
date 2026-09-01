@@ -18,6 +18,18 @@ class AuthWorkflowCatalogTests(unittest.TestCase):
             self.assertIn(node_id, ACTIONS)
             self.assertIn(node_id, WORKFLOW_CATALOG)
 
+    def test_restore_network_workflow_is_editable_builtin(self):
+        # 恢复网络工作流必须作为内置工作流存在且可编辑（2026-09-01）
+        builtin = _builtin_workflows()
+        self.assertIn('restore_network', builtin)
+        self.assertTrue(builtin['restore_network']['built_in'])
+        step_ids = [step['id'] for step in builtin['restore_network']['steps']]
+        for expected in ('disconnect_warp', 'stop_warp_service', 'warp_underlay_unpin',
+                         'enable_ipv4', 'reset_ipv6_dns', 'refresh_status'):
+            self.assertIn(expected, step_ids)
+        self.assertIn('warp_underlay_unpin', ACTIONS)
+        self.assertIn('warp_underlay_unpin', WORKFLOW_CATALOG)
+
     def test_builtin_workflows_validate(self):
         for workflow in _builtin_workflows().values():
             steps = validate_auth_workflow(workflow['steps'])

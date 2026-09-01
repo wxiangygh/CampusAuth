@@ -65,6 +65,18 @@ DEFAULT_RESTART_WARP_WORKFLOW = [
     _step("refresh_status", timeout=4),
 ]
 
+# 恢复正常网络模式：断开 WARP、停止其服务并解除底层 IPv6 pin，
+# 重新启用校园网 IPv4 直连。与主页「恢复网络」按钮绑定的
+# restore_button_workflow 配合使用（空串时走内置 run_restore_task）。
+DEFAULT_RESTORE_WORKFLOW = [
+    _step("disconnect_warp", timeout=8),
+    _step("stop_warp_service", timeout=8),
+    _step("warp_underlay_unpin", timeout=8),
+    _step("enable_ipv4", timeout=8),
+    _step("reset_ipv6_dns", timeout=5),
+    _step("refresh_status", timeout=4),
+]
+
 
 def _builtin_workflows() -> dict[str, dict[str, Any]]:
     return {
@@ -99,6 +111,15 @@ def _builtin_workflows() -> dict[str, dict[str, Any]]:
             "built_in": True,
             "tray_menu": True,
             "steps": copy.deepcopy(DEFAULT_RESTART_WARP_WORKFLOW),
+        },
+        "restore_network": {
+            "id": "restore_network",
+            "name": "恢复网络（IPv4 直连）",
+            "description": "断开 WARP 并停止其服务、解除底层 IPv6 pin，"
+                           "恢复校园网 IPv4 直连。可在设置页绑定到「恢复网络」按钮。",
+            "built_in": True,
+            "tray_menu": True,
+            "steps": copy.deepcopy(DEFAULT_RESTORE_WORKFLOW),
         },
     }
 

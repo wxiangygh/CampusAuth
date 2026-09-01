@@ -231,6 +231,17 @@ def probe_warp_status(warp_cli=None, timeout=4):
     if 'no network' in lower:
         return WarpConnectResult(False, 'no_network',
                                  'WARP 暂未检测到可用网络', True, status_output=text)
+    if 'dns lookup failed' in lower:
+        # CF_DNS_LOOKUP_FAILURE：WARP 通过其内置 DNS 代理（DoH，端点
+        # cloudflare-dns.com @ 162.159.36.1/46.1 等）解析域名失败。2026-09-01
+        # 实测校园网（CMCC）会封锁对知名公共 DoH 服务器 IP 的 TCP 443，
+        # 导致 WARP 连通性检查全部失败。此为网络环境限制，重试无益。
+        return WarpConnectResult(False, 'dns_lookup_failed',
+                                 'WARP DNS 解析失败（CF_DNS_LOOKUP_FAILURE）：当前网络可能封锁了 '
+                                 'Cloudflare DoH 服务器（1.1.1.1 / 162.159.36.x）的 443 端口，'
+                                 'WARP 无法通过其内置 DNS 代理解析域名。本机配置无异常，'
+                                 '请更换网络环境或稍后重试',
+                                 False, status_output=text)
     if 'unable' in lower or code != 0:
         detail = text[:180] if text else f'warp-cli 返回码 {code}'
         return WarpConnectResult(False, 'cli_error', f'WARP 状态检查失败：{detail}', True,
@@ -302,6 +313,9 @@ def connect_warp_result(force_restart=False, timeout=25, max_attempts=1):
                 status.elapsed = time.monotonic() - started
                 return status
             if status.code == 'registration_required':
+                status.elapsed = time.monotonic() - started
+                return status
+            if status.code == 'dns_lookup_failed':
                 status.elapsed = time.monotonic() - started
                 return status
             if status.code == 'manual_disconnection' and not connect_reissued:

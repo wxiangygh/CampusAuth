@@ -24,6 +24,18 @@ class WarpStatusTests(unittest.TestCase):
         self.assertEqual(result.code, 'no_network')
         self.assertTrue(result.retryable)
 
+    def test_dns_lookup_failed_is_specific_and_not_retryable(self):
+        # 复现 2026-09-01 故障：校园网封锁 Cloudflare DoH 服务器（1.1.1.1、
+        # 162.159.36.x）的 TCP 443 后，WARP 连通性检查报
+        # CF_DNS_LOOKUP_FAILURE。应给出精确诊断而非笼统的 cli_error。
+        text = ('Status update: Unable\n'
+                'Reason: Connectivity check failed due to DNS Lookup Failed')
+        with patch('core.warp_manager.run_command', return_value=(0, text, '')):
+            result = probe_warp_status('warp-cli')
+        self.assertEqual(result.code, 'dns_lookup_failed')
+        self.assertFalse(result.retryable)
+        self.assertIn('DoH', result.message)
+
 
 class ConnectWarpTests(unittest.TestCase):
     def _scripted_run_command(self, statuses, commands):
@@ -66,6 +78,22 @@ class ConnectWarpTests(unittest.TestCase):
              patch('core.warp_manager.run_command', side_effect=fake):
             result = connect_warp_result(timeout=2, max_attempts=1)
         self.assertFalse(result.success)
+
+    def test_dns_lookup_failure_returns_promptly_after_connect(self):
+        # 校园网封锁 DoH 导致的 CF_DNS_LOOKUP_FAILURE 是环境性故障，
+        # connect 发出后若状态仍是 DNS Lookup Failed 应立即返回明确错误，
+        # 不应把整个超时预算耗在注定失败的重试上。
+        commands = []
+        dns_text = ('Status update: Unable\n'
+                    'Reason: Connectivity check failed due to DNS Lookup Failed')
+        fake = self._scripted_run_command([dns_text, dns_text], commands)
+        with patch('core.warp_manager.get_warp_cli', return_value='warp-cli'), \
+             patch('core.warp_manager.run_command', side_effect=fake):
+            result = connect_warp_result(timeout=30, max_attempts=1)
+        self.assertFalse(result.success)
+        self.assertEqual(result.code, 'dns_lookup_failed')
+        # connect 命令确实发出过（初始探测的失败不阻止发起连接）
+        self.assertIn('warp-cli connect', commands)
 
 
 if __name__ == '__main__':

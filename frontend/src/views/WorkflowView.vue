@@ -16,6 +16,8 @@ const selectedStep = ref('')
 const inited = ref(false)
 // 编辑器草稿是否有未保存改动（自动调优回写配置后只在"干净"时同步回显）
 const dirty = ref(false)
+// 保存/复制进行中：防止双击连发创建出重复副本
+const saving = ref(false)
 
 // ===== 计时统计 / 自动调优 =====
 // {step_id: {runs, avg_elapsed, avg_retries, score, suggested_timeout, suggested_retries}}
@@ -312,6 +314,8 @@ function applyResult(result, successMessage) {
 
 async function save() {
   if (!currentId.value) return saveAs()
+  if (saving.value) return
+  saving.value = true
   setMessage('正在保存...')
   try {
     // 名称与步骤一并提交：修复"改名后点保存，名称未持久化"的问题
@@ -319,19 +323,25 @@ async function save() {
     applyResult(result)
   } catch (e) {
     setMessage('保存失败：' + e.message, true)
+  } finally {
+    saving.value = false
   }
 }
 
 async function saveAs() {
+  if (saving.value) return
   const name = String(workflow.value.name || '').trim()
   if (!name) return setMessage('请输入工作流名称', true)
   const tray = workflow.value.tray_menu !== false
+  saving.value = true
   setMessage('正在保存为独立工作流...')
   try {
     const result = await api().save_workflow_as(name, workflow.value.steps, tray)
     applyResult(result)
   } catch (e) {
     setMessage('保存失败：' + e.message, true)
+  } finally {
+    saving.value = false
   }
 }
 
@@ -339,14 +349,18 @@ async function saveAs() {
 // 参考 Figma/Notion 的 Duplicate 模式：一键创建副本并自动选中，
 // 聚焦名称输入框并全选，用户改个名字即可保存使用。
 // 复制的是编辑器中的当前内容（所见即所得，含未保存的修改）。
+// saving 防抖：双击"复制"会连发两次 save_workflow_as，凭空多出
+// 一个同名副本（副本 id 会加后缀，配置里出现两条一模一样的条目）。
 const nameInputRef = ref(null)
 
 async function duplicateWorkflow() {
+  if (saving.value) return
   const name = String(workflow.value.name || '').trim()
   if (!name) return setMessage('请先输入工作流名称', true)
   if (!workflow.value.steps.length) return setMessage('暂无节点可复制', true)
   const copyName = `${name} 副本`
   const tray = workflow.value.tray_menu !== false
+  saving.value = true
   setMessage('正在复制工作流...')
   try {
     const result = await api().save_workflow_as(copyName, workflow.value.steps, tray)
@@ -363,6 +377,8 @@ async function duplicateWorkflow() {
     }
   } catch (e) {
     setMessage('复制失败：' + e.message, true)
+  } finally {
+    saving.value = false
   }
 }
 
@@ -476,10 +492,10 @@ watch(
         <n-select v-model:value="selectedStep" :options="stepOptions" filterable placeholder="选择节点类型"
           class="we-step-picker" />
         <n-button @click="addSelectedStep">添加节点</n-button>
-        <n-button @click="duplicateWorkflow" title="复制当前工作流为副本，可在此基础上修改">复制</n-button>
+        <n-button @click="duplicateWorkflow" :disabled="saving" title="复制当前工作流为副本，可在此基础上修改">复制</n-button>
         <n-button @click="newWorkflow">新建</n-button>
-        <n-button @click="saveAs">另存为独立功能</n-button>
-        <n-button type="primary" @click="save">保存</n-button>
+        <n-button @click="saveAs" :disabled="saving">另存为独立功能</n-button>
+        <n-button type="primary" @click="save" :disabled="saving">保存</n-button>
         <n-button @click="reset">恢复内置</n-button>
         <n-button type="error" secondary @click="removeWorkflow">删除</n-button>
       </div>

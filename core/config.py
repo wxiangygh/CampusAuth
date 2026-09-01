@@ -271,8 +271,13 @@ def _merge_defaults(raw: dict[str, Any], *, auth_workflow_is_source: bool | None
 
 
 def workflow_id_from_name(name: str) -> str:
-    """Create a stable, filesystem/tray-safe custom workflow id."""
-    value = re.sub(r"[^0-9a-zA-Z_\-]+", "_", str(name).strip()).strip("_").lower()
+    """Create a stable, filesystem/tray-safe custom workflow id.
+
+    保留中文等 unicode 词字符（\\w 含 CJK）：此前把非 ASCII 全部替换成
+    下划线，导致所有纯中文名都坍缩成同一个 id（custom_workflow），
+    只能靠 _2/_3 后缀区分，语义全无且易误删。空白/符号仍替换为下划线。
+    """
+    value = re.sub(r"[\W]+", "_", str(name).strip(), flags=re.UNICODE).strip("_")
     return value[:40] or "custom_workflow"
 
 

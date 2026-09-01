@@ -73,6 +73,83 @@ def _is_valid_domain(domain):
     return True
 
 
+# ---------------------------------------------------------------------------
+# 域名归一化与子域通配
+# ---------------------------------------------------------------------------
+# warp-cli 的 split tunnel 域名排除是**精确匹配**：`tunnel host add goofish.com`
+# 只覆盖 goofish.com 本身，不覆盖 www.goofish.com / h5api.m.goofish.com 等子域。
+# 必须额外写入 `*.goofish.com` 通配条目才能排除整个域名。
+# （2026-09-01 实测：只加 goofish.com 时 Find-NetRoute 显示
+#  203.119.169.227 -> WLAN，43.109.70.190(www) -> CloudflareWARP；
+#  补上 *.goofish.com 后 www 也变成 WLAN。）
+WILDCARD_PREFIX = '*.'
+
+
+def normalize_domain_input(raw):
+    """把用户粘贴的内容归一化为纯域名。
+
+    支持：https://www.goofish.com/ 、http://x.com:8080/path?q=1#frag 、
+          *.example.com 、EXAMPLE.COM. 、user@host
+    返回小写、去端口、去路径、去尾点的域名；无效输入返回空串。
+    """
+    if raw is None:
+        return ''
+    value = str(raw).strip().strip('"\'')
+    if not value:
+        return ''
+    value = value.split('#', 1)[0].split('?', 1)[0]
+    if '//' in value:
+        value = value.split('//', 1)[1]
+    value = value.split('/', 1)[0]
+    if '@' in value:
+        value = value.rsplit('@', 1)[1]
+    # 只有一个冒号时按 host:port 处理（IPv6 地址有多个冒号，保持原样）
+    if value.count(':') == 1:
+        value = value.rsplit(':', 1)[0]
+    return value.strip().rstrip('.').lower()
+
+
+def wildcard_host(host):
+    """返回域名的通配子域形式：example.com -> *.example.com"""
+    host = (host or '').strip().lower().rstrip('.')
+    if not host:
+        return ''
+    if host.startswith(WILDCARD_PREFIX):
+        return host
+    if host.startswith('.'):
+        host = host[1:]
+    return WILDCARD_PREFIX + host
+
+
+def base_host(host):
+    """去掉通配前缀：*.example.com -> example.com"""
+    host = (host or '').strip().lower().rstrip('.')
+    return host[2:] if host.startswith(WILDCARD_PREFIX) else host
+
+
+def flush_dns_cache():
+    """刷新系统 DNS 缓存。
+
+    WARP 的域名排除不是静态路由表，而是"观察到一次 DNS 查询后才下发绕行路由"。
+    所以改完排除规则必须清缓存，否则浏览器沿用旧解析结果、长连接继续走 WARP。
+
+    用 ipconfig /flushdns 而不是 PowerShell 的 Clear-DnsClientCache ——
+    本机 PowerShell 冷启动约 5s，PowerShell 方案每次调用都要多等好几秒。
+    """
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+        subprocess.run('ipconfig /flushdns', shell=True, timeout=8,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       startupinfo=startupinfo,
+                       creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        return True
+    except Exception as e:
+        logger.debug(f'flush dns cache failed: {e}')
+        return False
+
+
 def get_dns_cache_domains():
     """通过 PowerShell Get-DnsClientCache 获取DNS缓存中的所有域名"""
     ps_cmd = 'Get-DnsClientCache | Select-Object -ExpandProperty Name | Sort-Object -Unique'
@@ -297,7 +374,7 @@ def _add_ipv6_hosts_entry(domain, ipv6_addr):
     if code == 0:
         logger.info(f'Hosts entry added: {entry_line}')
         # 清空 DNS 缓存，让新条目立即生效
-        run_command_simple(['powershell', '-Command', 'Clear-DnsClientCache'], shell=False, timeout=5)
+        flush_dns_cache()
         return True, 'hosts 条目已添加'
     else:
         logger.error(f'Failed to copy hosts file: {err or output}')
@@ -353,7 +430,7 @@ def _remove_ipv6_hosts_entry(domain):
 
     if code == 0:
         logger.info(f'Hosts entry removed for {domain}')
-        run_command_simple(['powershell', '-Command', 'Clear-DnsClientCache'], shell=False, timeout=5)
+        flush_dns_cache()
         return True, 'hosts 条目已移除'
     else:
         return False, f'复制 hosts 失败: {err or output}'
@@ -491,12 +568,128 @@ def _remove_all_ipv4_firewall_blocks():
     return True
 
 
+def _list_ipv6_route_firewall_domains():
+    """列出存在 CampusAuth_IPv6Route_* 防火墙规则的域名（用于推断 IPv6 路由）。
+    返回域名集合；查询失败时返回空集合（调用方按 IPv4 路由处理，副作用最小）。
+    """
+    ps_cmd = ('Get-NetFirewallRule -DisplayName "CampusAuth_IPv6Route_*" '
+              '-ErrorAction SilentlyContinue | Select-Object -ExpandProperty DisplayName')
+    code, output, _ = run_command_simple(['powershell', '-Command', ps_cmd], timeout=15)
+    domains = set()
+    if code != 0 or not output:
+        return domains
+    prefix = 'CampusAuth_IPv6Route_'
+    for line in output.split('\n'):
+        name = line.strip()
+        if name.startswith(prefix):
+            domains.add(name[len(prefix):].lower())
+    return domains
+
+
+# ---------------------------------------------------------------------------
+# WARP 底层 IPv6 常驻 pin（程序级防火墙规则）
+# ---------------------------------------------------------------------------
+# 问题：WARP 连接后应用会恢复 conf.json 的 IPv4 端点，此后 WARP 自行重连时
+# （网络变化、掉线重连等）一旦 WLAN 的 IPv4 处于启用状态，端点选择会偏好
+# IPv4，底层就从 IPv6 切到 IPv4——所有 WARP 流量变成校园网 IPv4 流量，
+# 且校园网到 Cloudflare 的 IPv4 通路不稳定，表现为"Cloudflare 经常断开"。
+# （2026-09-01 用户实测：开启 IPv4 后底层自动从 IPv6 切成 IPv4。）
+# 方案：对 warp-svc.exe 添加程序级出站阻止规则，屏蔽 Cloudflare 端点的
+# IPv4 地址段，WARP 只能使用 IPv6 端点。规则只作用于 warp-svc.exe，
+# 不影响其他程序（DoH/API 走 104.16.x，不在屏蔽段内，不受影响）。
+
+WARP_UNDERLAY_PIN_RULE = 'CampusAuth_WARPv6Underlay'
+# Cloudflare WARP 端点 IPv4 段：162.158.0.0/15 覆盖 162.159.192-198（当前
+# conf.json 端点为 162.159.198.2，engage 域名的 A 记录在该段内轮换），
+# 188.114.96.0/20 覆盖 188.114.96-99 备用端点段。
+WARP_ENDPOINT_IPV4_RANGES = ('162.158.0.0/15', '188.114.96.0/20')
+
+
+def _find_warp_svc_path():
+    """查找 warp-svc.exe 路径（防火墙程序级规则需要完整路径）"""
+    for p in (r'C:\Program Files\Cloudflare\Cloudflare WARP\warp-svc.exe',
+              r'C:\Program Files (x86)\Cloudflare\Cloudflare WARP\warp-svc.exe'):
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def is_warp_underlay_pinned():
+    """检查 WARP 底层 IPv6 pin 防火墙规则是否存在"""
+    code, output, _ = run_command_simple([
+        'powershell', '-Command',
+        f'if (Get-NetFirewallRule -DisplayName "{WARP_UNDERLAY_PIN_RULE}" '
+        f'-ErrorAction SilentlyContinue) {{ "yes" }} else {{ "no" }}'
+    ], timeout=15)
+    return code == 0 and output.strip().lower() == 'yes'
+
+
+def ensure_warp_underlay_ipv6_pin():
+    """创建 WARP 底层 IPv6 pin 防火墙规则（幂等）。返回 (success, message)"""
+    svc = _find_warp_svc_path()
+    if not svc:
+        return False, 'warp-svc.exe 未找到'
+    remote_addrs = ','.join(WARP_ENDPOINT_IPV4_RANGES)
+    # 先删后建，保证 RemoteAddress/Program 与当前定义一致
+    run_command_simple(['powershell', '-Command',
+        f'Remove-NetFirewallRule -DisplayName "{WARP_UNDERLAY_PIN_RULE}" -ErrorAction SilentlyContinue'],
+        timeout=15)
+    code, output, err = run_command_simple([
+        'powershell', '-Command',
+        f'New-NetFirewallRule -DisplayName "{WARP_UNDERLAY_PIN_RULE}" '
+        f'-Direction Outbound -Action Block -Program "{svc}" '
+        f'-RemoteAddress {remote_addrs} -Profile Any'
+    ], timeout=15)
+    if code == 0:
+        logger.info(f'WARP underlay IPv6 pin added (program={svc}, blocked={remote_addrs})')
+        return True, 'WARP 底层已固定为 IPv6'
+    msg = (output + err).strip()[:200]
+    if 'Access is denied' in msg or '拒绝访问' in msg:
+        code2, _, err2 = run_command_simple([
+            'powershell', '-Command',
+            f'Start-Process powershell -Verb RunAs -Wait -ArgumentList '
+            f'"-Command", "New-NetFirewallRule -DisplayName \\"{WARP_UNDERLAY_PIN_RULE}\\" '
+            f'-Direction Outbound -Action Block -Program \\"{svc}\\" '
+            f'-RemoteAddress {remote_addrs} -Profile Any"'
+        ], timeout=30)
+        if code2 == 0:
+            logger.info('WARP underlay IPv6 pin added (elevated)')
+            return True, 'WARP 底层已固定为 IPv6（提权）'
+        msg = (msg + ' ' + (err2 or '').strip())[:200]
+    logger.warning(f'Failed to add WARP underlay pin: {msg}')
+    return False, f'WARP 底层 IPv6 pin 添加失败: {msg}'
+
+
+def remove_warp_underlay_ipv6_pin():
+    """移除 WARP 底层 IPv6 pin 防火墙规则。返回 (success, message)"""
+    code, output, err = run_command_simple([
+        'powershell', '-Command',
+        f'Remove-NetFirewallRule -DisplayName "{WARP_UNDERLAY_PIN_RULE}" -ErrorAction SilentlyContinue'
+    ], timeout=15)
+    if code == 0:
+        logger.info('WARP underlay IPv6 pin removed')
+        return True, 'WARP 底层 IPv6 pin 已移除'
+    msg = (output + err).strip()[:200]
+    if 'Access is denied' in msg or '拒绝访问' in msg:
+        code2, _, _ = run_command_simple([
+            'powershell', '-Command',
+            f'Start-Process powershell -Verb RunAs -Wait -ArgumentList '
+            f'"-Command", "Remove-NetFirewallRule -DisplayName \\"{WARP_UNDERLAY_PIN_RULE}\\" '
+            f'-ErrorAction SilentlyContinue"'
+        ], timeout=30)
+        if code2 == 0:
+            logger.info('WARP underlay IPv6 pin removed (elevated)')
+            return True, 'WARP 底层 IPv6 pin 已移除（提权）'
+    logger.warning(f'Failed to remove WARP underlay pin: {msg}')
+    return False, f'移除失败: {msg}'
+
+
 def warp_add_host(host, route='ipv6'):
     """添加域名排除规则。
     route='ipv6': tunnel host add + DNS fallback + IPv6 CIDR 排除 + 防火墙阻止 IPv4。
                   域名排除 WARP（IPv4/IPv6 都不走 WARP），
                   防火墙阻止 IPv4 → 浏览器只能走 IPv6 → 校园网 IPv6 直连。
-    route='ipv4': tunnel host add。
+    route='ipv4': tunnel host add + DNS fallback。
                   域名排除 WARP，走校园网 IPv4 直连。
     返回 (success, message, blocked_ipv4)
     """
@@ -506,17 +699,40 @@ def warp_add_host(host, route='ipv6'):
 
     blocked_ipv4 = []
 
-    # 两种路由都用 tunnel host add，确保域名排除 WARP（不走 WARP）
-    code, output, err = run_command_simple([warp_cli, 'tunnel', 'host', 'add', host], shell=False)
-    if code == 0:
-        logger.info(f'WARP add host {host}: success')
-    else:
+    # 两种路由都用 tunnel host add，确保域名排除 WARP（不走 WARP）。
+    # tunnel host 是精确匹配，必须再补一条 *.host 通配规则才能覆盖子域，
+    # 否则浏览器访问 www.host 时依然走 WARP。
+    add_targets = [host]
+    wildcard = wildcard_host(host)
+    if wildcard and wildcard != host:
+        add_targets.append(wildcard)
+
+    for target in add_targets:
+        code, output, err = run_command_simple([warp_cli, 'tunnel', 'host', 'add', target], shell=False)
+        if code == 0:
+            logger.info(f'WARP add host {target}: success')
+            continue
         msg = (output + err).strip()[:200]
         if 'already' in msg.lower() or '已存在' in msg:
-            logger.info(f'WARP add host {host}: already exists')
-        else:
-            logger.warning(f'WARP add host {host}: failed, {msg}')
+            logger.info(f'WARP add host {target}: already exists')
+            continue
+        logger.warning(f'WARP add host {target}: failed, {msg}')
+        # 根域名写不进去才算失败；通配条目失败不阻断（子域只是覆盖面变窄）
+        if target == host:
             return False, f'添加失败: {msg}', []
+        logger.warning(f'Subdomain wildcard {target} rejected by warp-cli, '
+                       f'{host} 的子域不会被排除')
+
+    # 两种路由都加 DNS fallback：域名既已排除 WARP，连接走校园网直连，
+    # DNS 也必须走本地解析，否则 WARP DoH 会把 CDN 域名解析到海外节点
+    # （2026-09-01 实测：goofish.com 经 WARP DNS 解析到 43.109.70.x 海外
+    # 阿里云节点，经本地 DNS 解析到 155.102.180.x 国内节点），
+    # 直连海外节点慢且易被判为"排除无效"。
+    code, output, err = run_command_simple([warp_cli, 'dns', 'fallback', 'add', host], shell=False)
+    if code == 0:
+        logger.info(f'WARP add dns fallback {host} ({route} route): success')
+    else:
+        logger.debug(f'WARP add dns fallback {host}: {(output+err).strip()[:100]}')
 
     if route == 'ipv6':
         # IPv6 路由额外操作：
@@ -530,20 +746,11 @@ def warp_add_host(host, route='ipv6'):
             # 原因：WARP 排除的流量会绕过 Windows 防火墙，防火墙阻止 IPv4 无效
             # 所以只能降级为 IPv4 路由（走校园网 IPv4 直连）
             logger.warning(f'{host} has no AAAA records, cannot use IPv6 route, falling back to IPv4')
-            # 仍然添加 DNS fallback（可能有助于未来获得 IPv6）
-            code, output, err = run_command_simple([warp_cli, 'dns', 'fallback', 'add', host], shell=False)
-            if code == 0:
-                logger.info(f'WARP add dns fallback {host} (no AAAA, fallback added): success')
+            flush_dns_cache()
             return True, f'域名 {host} 无 IPv6 地址，已自动改为 IPv4 直连模式（WARP 排除+IPv4 直连）', []
 
-        # 1. DNS fallback：让 DNS 走校园网本地解析（获取校园 IPv6 地址）
-        code, output, err = run_command_simple([warp_cli, 'dns', 'fallback', 'add', host], shell=False)
-        if code == 0:
-            logger.info(f'WARP add dns fallback {host} (ipv6 route): success')
-        else:
-            logger.debug(f'WARP add dns fallback {host}: {(output+err).strip()[:100]}')
-
-        # 2. IPv6 CIDR 排除：让 IPv6 流量走校园网直连
+        # 1. IPv6 CIDR 排除：让 IPv6 流量走校园网直连
+        # （DNS fallback 已在上方对两种路由统一添加）
         for cidr in ipv6_prefixes:
             c, o, e = run_command_simple([warp_cli, 'tunnel', 'ip', 'add-range', cidr], shell=False)
             if c == 0:
@@ -551,7 +758,7 @@ def warp_add_host(host, route='ipv6'):
             else:
                 logger.debug(f'WARP auto-exclude IPv6 CIDR {cidr} for {host}: skipped ({(o+e).strip()[:100]})')
 
-        # 3. 添加 hosts 条目，强制域名解析到 IPv6 地址
+        # 2. 添加 hosts 条目，强制域名解析到 IPv6 地址
         # 这是关键步骤！WARP DNS fallback 不可靠，Chrome 用系统 DNS (127.0.2.2) 解析时拿不到 AAAA 记录
         # 通过 hosts 文件可以直接指定 IPv6 地址，绕过 WARP DNS
         if ipv6_addrs:
@@ -565,7 +772,7 @@ def warp_add_host(host, route='ipv6'):
         else:
             logger.warning(f'No IPv6 addresses for {host}, cannot add hosts entry')
 
-        # 4. 防火墙阻止 IPv4（所有协议），强制浏览器走 IPv6
+        # 3. 防火墙阻止 IPv4（所有协议），强制浏览器走 IPv6
         # 注意：WARP 排除的流量可能绕过 Windows 防火墙，此规则不一定生效
         # 但仍尝试添加，对非 WARP 排除的 IPv4 流量有效
         if ipv4_addrs:
@@ -578,38 +785,47 @@ def warp_add_host(host, route='ipv6'):
         else:
             logger.info(f'No IPv4 addresses for {host}, no firewall block needed')
 
+    # 排除规则只有在 WARP 观察到一次 DNS 查询后才会下发绕行路由，
+    # 清掉缓存才能让浏览器下次访问时立刻走到直连路径。
+    flush_dns_cache()
     return True, '添加成功', blocked_ipv4
 
 
 def warp_remove_host(host, route='ipv6'):
     """删除域名排除规则。
     route='ipv6': tunnel host remove + DNS fallback remove + IPv6 CIDR remove + IPv4 防火墙移除
-    route='ipv4': tunnel host remove
+    route='ipv4': tunnel host remove + DNS fallback remove
     """
     warp_cli = get_warp_cli_path()
     if not warp_cli:
         return False, 'warp-cli 未找到'
 
-    # 两种路由都移除 tunnel host
-    code, output, err = run_command_simple([warp_cli, 'tunnel', 'host', 'remove', host], shell=False)
-    if code == 0:
-        logger.info(f'WARP remove host {host}: success')
-    else:
-        msg = (output + err).strip()
-        if 'Not found' in msg or 'not found' in msg.lower():
-            logger.info(f'WARP remove host {host}: not found, treated as success')
+    # 移除根域名与通配子域两条条目（添加时会成对写入）
+    remove_targets = [host]
+    wildcard = wildcard_host(host)
+    if wildcard and wildcard != host:
+        remove_targets.append(wildcard)
+
+    for target in remove_targets:
+        code, output, err = run_command_simple([warp_cli, 'tunnel', 'host', 'remove', target], shell=False)
+        if code == 0:
+            logger.info(f'WARP remove host {target}: success')
         else:
-            logger.warning(f'WARP remove host {host}: failed, {msg[:200]}')
+            msg = (output + err).strip()
+            if 'Not found' in msg or 'not found' in msg.lower():
+                logger.info(f'WARP remove host {target}: not found, treated as success')
+            else:
+                logger.warning(f'WARP remove host {target}: failed, {msg[:200]}')
+
+    # 两种路由都添加了 DNS fallback（见 warp_add_host），移除时一并清理
+    code, output, err = run_command_simple([warp_cli, 'dns', 'fallback', 'remove', host], shell=False)
+    if code == 0:
+        logger.info(f'WARP remove dns fallback {host}: success')
+    else:
+        logger.debug(f'WARP remove dns fallback {host}: {(output+err).strip()[:100]}')
 
     if route == 'ipv6':
         # IPv6 路由额外清理
-        # 1. 移除 DNS fallback
-        code, output, err = run_command_simple([warp_cli, 'dns', 'fallback', 'remove', host], shell=False)
-        if code == 0:
-            logger.info(f'WARP remove dns fallback {host}: success')
-        else:
-            logger.debug(f'WARP remove dns fallback {host}: {(output+err).strip()[:100]}')
-
         # 2. 移除 IPv6 CIDR
         ipv6_prefixes = _resolve_ipv6_prefixes(host)
         for cidr in ipv6_prefixes:
@@ -629,6 +845,7 @@ def warp_remove_host(host, route='ipv6'):
         # 4. 移除 IPv4 防火墙阻止规则
         _remove_ipv4_firewall_block(host)
 
+    flush_dns_cache()
     return True, '删除成功'
 
 
@@ -920,6 +1137,7 @@ class ExclusionManager:
     def __init__(self):
         self._lock = threading.Lock()
         self.dns_monitor = DnsMonitor()
+        self._collapse_dirty = False
         # 启动时从 WARP 同步规则到本地配置（确保 WARP 中的规则在应用中可见可管理）
         self.sync_from_warp()
 
@@ -936,25 +1154,33 @@ class ExclusionManager:
             details = {'hosts_added': [], 'dns_added': [], 'ip_ranges_added': []}
 
             # 同步 tunnel host 规则
-            # 判断路由类型：如果域名同时在 DNS fallback 中，则是 IPv6 路由
-            warp_dns_set = set(warp_list_dns_fallback())
             warp_hosts = warp_list_hosts()
-            existing_domains = {d['domain'] for d in cfg.get('domains', [])}
+            existing_domains = {base_host(d['domain']) for d in cfg.get('domains', [])}
+            self._collapse_wildcard_entries(cfg, existing_domains)
+            # 判断路由类型：IPv6 路由的域名会创建 CampusAuth_IPv6Route_* 防火墙规则。
+            # （不能用 DNS fallback 判别：2026-09-01 起 IPv4 路由域名也会添加
+            #  fallback，以保证排除域名经本地 DNS 解析到国内 CDN 节点。）
+            new_hosts = []
             for host in warp_hosts:
-                if host not in existing_domains:
-                    # 根据是否在 DNS fallback 中判断路由类型
-                    route = 'ipv6' if host in warp_dns_set else 'ipv4'
-                    entry = {
-                        'domain': host,
-                        'enabled': True,
-                        'route': route,
-                        'added_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-                        'source': 'warp_sync',
-                    }
-                    cfg.setdefault('domains', []).append(entry)
+                # `*.x.com` 与 `x.com` 是同一条规则的两个条目，只登记根域名
+                host = base_host(host)
+                if host and host not in existing_domains:
+                    new_hosts.append(host)
                     existing_domains.add(host)
-                    details['hosts_added'].append(host)
-                    logger.info(f'Synced tunnel host from WARP ({route} route): {host}')
+            ipv6_route_domains = _list_ipv6_route_firewall_domains() if new_hosts else set()
+            for host in new_hosts:
+                route = 'ipv6' if host in ipv6_route_domains else 'ipv4'
+                entry = {
+                    'domain': host,
+                    'enabled': True,
+                    'route': route,
+                    'added_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'source': 'warp_sync',
+                }
+                cfg.setdefault('domains', []).append(entry)
+                existing_domains.add(host)
+                details['hosts_added'].append(host)
+                logger.info(f'Synced tunnel host from WARP ({route} route): {host}')
 
             # 同步 DNS fallback 规则
             warp_dns = warp_list_dns_fallback()
@@ -1003,8 +1229,10 @@ class ExclusionManager:
                     details['ip_ranges_added'].append(cidr)
                     logger.info(f'Synced IP range from WARP: {cidr}')
 
-            # 只有实际新增了规则才保存
-            has_new = details['hosts_added'] or details['dns_added'] or details['ip_ranges_added']
+            # 只有实际新增了规则或清理了重复项才保存
+            has_new = (details['hosts_added'] or details['dns_added']
+                       or details['ip_ranges_added'] or self._collapse_dirty)
+            self._collapse_dirty = False
             if has_new:
                 self._save_config(cfg)
                 total = len(details['hosts_added']) + len(details['dns_added']) + len(details['ip_ranges_added'])
@@ -1013,6 +1241,40 @@ class ExclusionManager:
                 return True, msg, details
             else:
                 return True, 'WARP 与本地配置已同步，无需更新', details
+
+    def _collapse_wildcard_entries(self, cfg, existing_domains=None):
+        """把配置里 `*.x.com` 形式的重复条目收敛为根域名条目。
+
+        排除规则现在按「根域名 + 通配子域」成对下发，配置里只需要保留根域名。
+        老配置（或从 WARP 同步进来的通配条目）里可能残留 `*.x.com`，
+        这里统一折叠掉，避免界面出现两行看起来重复的规则。
+        """
+        self._collapse_dirty = False
+        domains = cfg.get('domains', [])
+        if not domains:
+            self._collapse_dirty = False
+            return
+        base_names = {base_host(d['domain']) for d in domains}
+        if existing_domains:
+            base_names |= set(existing_domains)
+        collapsed = []
+        seen = set()
+        for entry in domains:
+            name = entry['domain']
+            base = base_host(name)
+            if not base:
+                continue
+            if base in seen:
+                continue
+            seen.add(base)
+            if name != base:
+                entry = dict(entry)
+                entry['domain'] = base
+            collapsed.append(entry)
+        if len(collapsed) != len(domains):
+            cfg['domains'] = collapsed
+            self._collapse_dirty = True
+            logger.info(f'Collapsed {len(domains) - len(collapsed)} wildcard domain entries')
 
     def get_config(self):
         with self._lock:
@@ -1028,15 +1290,23 @@ class ExclusionManager:
         route='ipv6': tunnel host add + DNS fallback + IPv6 CIDR + 阻止 IPv4，走校园网 IPv6 直连
         返回 (success, message, info)
         """
-        domain = domain.strip().lower()
+        # 允许直接粘贴网址：https://www.goofish.com/ -> goofish.com
+        domain = normalize_domain_input(domain)
+        domain = base_host(domain)
         if not domain or '.' not in domain:
-            return False, '域名格式无效', None
+            return False, '域名格式无效（可填 goofish.com 或直接粘贴网址）', None
+        # www 只是站点的一个主机名，排除站点时应该落到注册域上，
+        # 这样 www / m / api 等所有子域才会被 *.domain 通配规则覆盖。
+        stripped_www = ''
+        if domain.startswith('www.') and domain.count('.') >= 2:
+            stripped_www = domain
+            domain = domain[4:]
         if route not in ('ipv4', 'ipv6'):
             route = 'ipv6'
         with self._lock:
             cfg = load_exclusion_config()
             for entry in cfg['domains']:
-                if entry['domain'] == domain:
+                if base_host(entry['domain']) == domain:
                     return False, f'域名 {domain} 已存在', None
             # 立即应用到WARP
             ok, msg, blocked_ipv4 = warp_add_host(domain, route=route)
@@ -1058,20 +1328,29 @@ class ExclusionManager:
             cfg['domains'].append(entry)
             self._save_config(cfg)
             logger.info(f'Added domain {domain} (route={actual_route})')
+            if stripped_www:
+                msg = f'{msg}（{stripped_www} 已归并为 {domain}，子域一并排除）'
             return True, msg, entry
 
     def remove_domain(self, domain):
         """从排除列表移除域名，并从WARP删除规则"""
+        domain = base_host(normalize_domain_input(domain))
         with self._lock:
             cfg = load_exclusion_config()
+            # 用户可能填 www.x.com 而配置里存的是 x.com（或反过来），两边都认
+            names = [base_host(d['domain']) for d in cfg['domains']]
+            if domain not in names:
+                alt = domain[4:] if domain.startswith('www.') else 'www.' + domain
+                if alt in names:
+                    domain = alt
             # 查找该域名的 route，用于决定是否清理 IPv6 CIDR
             route = 'ipv6'
             for entry in cfg['domains']:
-                if entry['domain'] == domain:
+                if base_host(entry['domain']) == domain:
                     route = entry.get('route', 'ipv6')
                     break
             original_len = len(cfg['domains'])
-            cfg['domains'] = [d for d in cfg['domains'] if d['domain'] != domain]
+            cfg['domains'] = [d for d in cfg['domains'] if base_host(d['domain']) != domain]
             if len(cfg['domains']) == original_len:
                 return False, f'域名 {domain} 不存在'
             self._save_config(cfg)
@@ -1085,7 +1364,8 @@ class ExclusionManager:
         with self._lock:
             cfg = load_exclusion_config()
             for entry in cfg['domains']:
-                if entry['domain'] == domain:
+                if base_host(entry['domain']) == domain:
+                    domain = base_host(entry['domain'])
                     old_enabled = entry.get('enabled', True)
                     if old_enabled == enabled:
                         return True, f'域名 {domain} 状态未变化'
@@ -1113,7 +1393,8 @@ class ExclusionManager:
         with self._lock:
             cfg = load_exclusion_config()
             for entry in cfg['domains']:
-                if entry['domain'] == domain:
+                if base_host(entry['domain']) == domain:
+                    domain = base_host(entry['domain'])
                     old_route = entry.get('route', 'ipv6')
                     if old_route == route:
                         return True, f'域名 {domain} 路由未变化'

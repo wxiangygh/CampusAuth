@@ -107,6 +107,15 @@ DEFAULT_CONFIG = {
     "username": "", "password": "", "wifi_name": "",
     "auto_auth": False, "auto_startup": False, "auto_restore": False,
     "auto_enable_ipv4": True, "auth_total_timeout": 90,
+    # WARP 底层网络锁定在校园网 IPv6 上。
+    # WARP 的端点配置里同时有 v4/v6 地址，只要网卡 IPv4 可用它就会优先走 v4 端点，
+    # 底层流量因此变成计费的校园网 IPv4（且 Portal 会话过期后会连带断线）。
+    # 开启后会清空 Cloudflare conf.json 里的 IPv4 端点，强制底层只走免费 IPv6。
+    "warp_underlay_ipv6": True,
+    # WARP 意外断开后自动重连（仅对非主动断开生效）
+    "warp_auto_reconnect": False,
+    # 判定"意外断开"的持续时长（秒），低于该值视为正常抖动/切换
+    "warp_reconnect_delay": 20,
     "portal_ip": "10.21.221.98", "portal_port": "801",
     "warp_cli_path": "", "silent_startup": False,
     # 启动时自动检测 GitHub Releases 更新

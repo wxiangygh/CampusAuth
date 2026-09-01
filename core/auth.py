@@ -229,6 +229,13 @@ def run_restore_task():
     # 1=断开WARP+启用IPv4  2=验证IPv4地址  3=验证互联网连通
     _push_auth_progress(1, 3, '断开 WARP 并启用 IPv4...', action='restore')
     logger.info("[1/3] Disconnecting WARP and enabling IPv4 in parallel...")
+    # 恢复正常模式时移除 WARP 底层 IPv6 pin（防火墙程序级规则），
+    # 否则 WARP 日后再连接时仍被强制走 IPv6 端点
+    try:
+        from warp_exclusion import remove_warp_underlay_ipv6_pin
+        remove_warp_underlay_ipv6_pin()
+    except Exception as exc:
+        logger.warning(f'remove WARP underlay pin failed in restore: {exc}')
 
     warp_result = [None]
     ipv4_result = [None]

@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onBeforeUnmount, watch } from 'vue'
+import { onMounted, onBeforeUnmount, watch, ref } from 'vue'
 import { NConfigProvider } from 'naive-ui'
 import { naiveTheme, themeOverrides, setThemeMode, isDark, themeMode } from './theme'
 import { store, checkForUpdate } from './store'
@@ -29,6 +29,22 @@ watch(
     if (['home', 'workflow', 'warp', 'traffic', 'settings'].includes(name)) {
       bridgeApi()?.save_ui_prefs({ active_tab: name })?.catch(() => {})
     }
+  }
+)
+
+// 每个 tab 独立的滚动进度：五个视图共用 .app-content 这一个滚动容器，
+// 切换时先记下旧 tab 的 scrollTop，再恢复新 tab 上次滚到的位置。
+// 视图均为 v-show 常驻挂载，切回时内容高度已就绪，恢复无需等渲染。
+const contentRef = ref(null)
+const scrollPositions = {}
+
+watch(
+  () => store.activeTab,
+  (name, old) => {
+    const el = contentRef.value
+    if (!el) return
+    if (old) scrollPositions[old] = el.scrollTop
+    el.scrollTop = scrollPositions[name] || 0
   }
 )
 
@@ -255,7 +271,7 @@ onBeforeUnmount(() => {
       <TitleBar />
       <div class="app-body">
         <SideNav />
-        <main class="app-content">
+        <main ref="contentRef" class="app-content">
           <HomeView v-show="store.activeTab === 'home'" />
           <WorkflowView v-show="store.activeTab === 'workflow'" />
           <WarpView v-show="store.activeTab === 'warp'" />

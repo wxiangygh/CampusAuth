@@ -506,6 +506,18 @@ def _finalize(context: WorkflowContext, step: StepSpec) -> StepResult:
         warp_cli = context.data.get('warp_cli')
         _set_warp_masque_mode(warp_cli, False, timeout=_command_timeout(context, 4))
         _set_warp_endpoint_ipv6(False)
+    # 常驻 pin：阻止 warp-svc.exe 访问 Cloudflare 端点的 IPv4 地址段，
+    # 防止 WARP 后续自行重连时（IPv4 已启用）底层从 IPv6 切到 IPv4。
+    # 端点配置（conf.json）在连接后即恢复，无法约束未来的重连，必须靠
+    # 这条程序级防火墙规则兜底。失败不阻断主流程；受 warp_underlay_ipv6 开关控制。
+    if get_config().get('warp_underlay_ipv6', True):
+        try:
+            from warp_exclusion import ensure_warp_underlay_ipv6_pin
+            ok, msg = ensure_warp_underlay_ipv6_pin()
+            if not ok:
+                logger.warning(f'WARP underlay IPv6 pin failed in finalize: {msg}')
+        except Exception as exc:
+            logger.warning(f'WARP underlay IPv6 pin error in finalize: {exc}')
     interface_name = context.data.get('interface_name') or get_wifi_interface_name()
     if interface_name and context.config.get('auto_enable_ipv4', True):
         if not enable_ipv4(interface_name, timeout=_command_timeout(context, 8)):

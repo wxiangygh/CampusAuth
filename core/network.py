@@ -2,7 +2,9 @@
 
 包含 WiFi 扫描、IP/MAC 获取、IPv6 就绪检测、WARP 连接状态检测等功能。
 """
+import ctypes
 import logging
+import sys
 import time
 
 from core.command import run_command
@@ -31,7 +33,8 @@ def _interruptible_sleep(seconds, check_interval=0.5):
     return True
 
 
-def scan_wifi_networks():
+def _read_wifi_networks():
+    """读取系统已缓存的 WiFi 列表（netsh 只返回上一次扫描的缓存结果）。"""
     code, output, _ = run_command('netsh wlan show networks', timeout=5)
     networks = []
     for line in output.split('\n'):
@@ -41,6 +44,127 @@ def scan_wifi_networks():
             if ssid and ssid not in networks:
                 networks.append(ssid)
     return networks
+
+
+_WLAN_SCAN_TIMEOUT = 5.0
+
+
+def _trigger_wlan_scan():
+    """通过 Native WiFi API 主动触发一次无线扫描。
+
+    `netsh wlan show networks` 只是读取系统缓存的上次扫描结果，不会发起扫描；
+    必须先调用 WlanScan 让无线网卡重新扫描，否则列表会长期停留在旧结果上
+    （表现为：只有点开 Windows 的 WiFi 面板后 CampusAuth 才能读到网络）。
+    返回 True 表示已成功下发扫描请求。
+    """
+    if sys.platform != 'win32':
+        return False
+    try:
+        wlanapi = ctypes.WinDLL('wlanapi')
+    except Exception as exc:  # 非 Windows 或缺少 wlanapi
+        logger.warning('wlanapi 不可用，跳过主动扫描: %s', exc)
+        return False
+
+    class GUID(ctypes.Structure):
+        _fields_ = [
+            ('Data1', ctypes.c_ulong),
+            ('Data2', ctypes.c_ushort),
+            ('Data3', ctypes.c_ushort),
+            ('Data4', ctypes.c_ubyte * 8),
+        ]
+
+    class WLAN_INTERFACE_INFO(ctypes.Structure):
+        _fields_ = [
+            ('InterfaceGuid', GUID),
+            ('strInterfaceDescription', ctypes.c_wchar * 256),
+            ('isState', ctypes.c_uint),
+        ]
+
+    class WLAN_INTERFACE_INFO_LIST(ctypes.Structure):
+        _fields_ = [
+            ('dwNumberOfItems', ctypes.c_ulong),
+            ('dwIndex', ctypes.c_ulong),
+            ('InterfaceInfo', WLAN_INTERFACE_INFO * 1),
+        ]
+
+    try:
+        handle = ctypes.c_void_p()
+        negotiated = ctypes.c_ulong()
+        wlanapi.WlanOpenHandle.argtypes = [
+            ctypes.c_ulong, ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_void_p),
+        ]
+        wlanapi.WlanOpenHandle.restype = ctypes.c_ulong
+        ret = wlanapi.WlanOpenHandle(2, None, ctypes.byref(negotiated), ctypes.byref(handle))
+        if ret != 0:
+            logger.warning('WlanOpenHandle 失败: %s', ret)
+            return False
+
+        try:
+            wlanapi.WlanEnumInterfaces.argtypes = [
+                ctypes.c_void_p, ctypes.c_void_p,
+                ctypes.POINTER(ctypes.POINTER(WLAN_INTERFACE_INFO_LIST)),
+            ]
+            wlanapi.WlanEnumInterfaces.restype = ctypes.c_ulong
+            wlanapi.WlanScan.argtypes = [
+                ctypes.c_void_p, ctypes.POINTER(GUID),
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+            ]
+            wlanapi.WlanScan.restype = ctypes.c_ulong
+            wlanapi.WlanFreeMemory.argtypes = [ctypes.c_void_p]
+
+            iface_list = ctypes.POINTER(WLAN_INTERFACE_INFO_LIST)()
+            ret = wlanapi.WlanEnumInterfaces(handle, None, ctypes.byref(iface_list))
+            if ret != 0 or not iface_list:
+                logger.warning('WlanEnumInterfaces 失败: %s', ret)
+                return False
+            try:
+                count = int(iface_list.contents.dwNumberOfItems)
+                triggered = False
+                for i in range(count):
+                    info = iface_list.contents.InterfaceInfo[i]
+                    ret = wlanapi.WlanScan(
+                        handle, ctypes.byref(info.InterfaceGuid), None, None, None)
+                    if ret == 0:
+                        triggered = True
+                    else:
+                        # 1061: 服务未启动；5: 拒绝访问；均为环境态，仅记录
+                        logger.debug('WlanScan 接口 %d 返回 %s', i, ret)
+                return triggered
+            finally:
+                wlanapi.WlanFreeMemory(iface_list)
+        finally:
+            wlanapi.WlanCloseHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            wlanapi.WlanCloseHandle.restype = ctypes.c_ulong
+            wlanapi.WlanCloseHandle(handle, None)
+    except Exception as exc:
+        logger.warning('主动 WiFi 扫描失败: %s', exc)
+        return False
+
+
+def scan_wifi_networks(force_scan=True):
+    """扫描可见 WiFi。
+
+    force_scan=True（默认）时先用 Native WiFi API 触发真实扫描，再轮询读取结果，
+    直到拿到与扫描前不同的列表或超时；这样无需用户去点 Windows 的 WiFi 面板。
+    """
+    if not force_scan:
+        return _read_wifi_networks()
+
+    before = _read_wifi_networks()
+    if not _trigger_wlan_scan():
+        # 无法主动扫描（如无线服务未运行），退回读取系统缓存
+        return before
+
+    deadline = time.monotonic() + _WLAN_SCAN_TIMEOUT
+    time.sleep(1.0)
+    latest = _read_wifi_networks()
+    while time.monotonic() < deadline and not _auth_cancelled.is_set():
+        if latest and latest != before:
+            return latest
+        time.sleep(0.6)
+        latest = _read_wifi_networks()
+    return latest or before
 
 
 def get_wifi_interface_name():

@@ -70,8 +70,10 @@ const restoreOptions = computed(() => [
 ])
 
 // ===== WiFi 扫描 =====
+// 扫描是异步的：先下发扫描请求，等系统拿到新结果后再读取并展开候选列表。
 const wifiOptions = ref([])
 const scanning = ref(false)
+const wifiInputRef = ref(null)
 
 async function refreshWifi() {
   if (scanning.value) return
@@ -80,10 +82,19 @@ async function refreshWifi() {
   try {
     const networks = await api().scan_wifi()
     wifiOptions.value = (networks || []).map((s) => ({ label: s, value: s }))
+    if (!wifiOptions.value.length) {
+      ui.toast('未扫描到 WiFi，请确认无线网卡已启用且 WLAN 服务已启动', 'warning')
+      return
+    }
+    // 聚焦输入框，让扫描结果直接弹出（输入框为空时也能展示全部候选）
+    await nextTick()
+    wifiInputRef.value?.focus?.()
   } catch (e) {
     console.error('Failed to start wifi scan:', e)
+    ui.toast('扫描 WiFi 失败：' + e.message, 'error')
+  } finally {
+    scanning.value = false
   }
-  scanning.value = false
 }
 
 async function browseWarpPath() {
@@ -264,8 +275,8 @@ onBeforeUnmount(() => {
         <div class="form-group">
           <label class="form-label">WiFi 网络</label>
           <n-input-group>
-            <n-auto-complete v-model:value="store.form.wifi_name" :options="wifiOptions"
-              placeholder="选择或输入WiFi名称" style="flex: 1" />
+            <n-auto-complete ref="wifiInputRef" v-model:value="store.form.wifi_name" :options="wifiOptions"
+              :get-show="() => wifiOptions.length > 0" placeholder="选择或输入WiFi名称" style="flex: 1" />
             <n-button :loading="scanning" @click="refreshWifi">扫描</n-button>
           </n-input-group>
         </div>

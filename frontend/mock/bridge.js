@@ -183,6 +183,15 @@ const api = {
       size: 30000000,
     },
   }),
+
+  // ===== WiFi 扫描（模拟真实扫描耗时，便于验证加载态与候选列表弹出）=====
+  scan_wifi: () => delay([
+    'CMCC_BJUT_SUSHE_H0910',
+    'BJUT_SUSHE_2.4G',
+    'BJUT_SUSHE_5G',
+    'CMCC-kuandai',
+    'CMCC_BJUT_SUSHE_H1009-5G',
+  ], 2500),
 }
 
 // 其他视图（设置 / WARP / 流量）不是预览重点，统一空实现保持控制台干净

@@ -96,7 +96,7 @@ onMounted(async () => {
         </div>
         <div class="viewer-title-right">
           <button class="title-btn" title="刷新" @click="refresh" :disabled="loading">
-            <AppIcon name="loader" :size="14" />
+            <AppIcon name="refresh" :size="14" />
           </button>
           <button class="title-btn close" title="关闭" @click="closeWindow">
             <AppIcon name="x" :size="14" />
@@ -245,10 +245,11 @@ onMounted(async () => {
   cursor: default;
 }
 
-/* 三列分栏 */
+/* 三列分栏：body 不滚动，各列拉伸等高，列表区域独立垂直滚动 */
 .viewer-body {
   flex: 1;
   min-height: 0;
+  overflow: hidden;
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 10px;
@@ -257,6 +258,8 @@ onMounted(async () => {
 
 .viewer-col {
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
@@ -295,9 +298,9 @@ onMounted(async () => {
 }
 
 .col-list {
+  margin-top: 8px;
   flex: 1;
   min-height: 0;
-  margin-top: 8px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;

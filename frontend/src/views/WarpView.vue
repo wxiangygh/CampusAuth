@@ -698,7 +698,7 @@ onBeforeUnmount(() => {
           <span class="domain-name mono">{{ d }}</span>
         </div>
       </div>
-      <n-pagination v-if="filteredLearned.length" size="small" :page="learnedPage.page"
+      <n-pagination v-if="filteredLearned.length" class="pager" size="small" :page="learnedPage.page"
         :page-size="learnedPage.pageSize" :item-count="filteredLearned.length" :page-sizes="[10, 20, 50, 100]"
         show-size-picker @update:page="(p) => (learnedPage.page = p)" @update:page-size="onLearnedPageSize" />
     </section>
@@ -782,7 +782,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <n-pagination v-if="filteredRules.length" size="small" :page="rules.page" :page-size="rules.pageSize"
+        <n-pagination v-if="filteredRules.length" class="pager" size="small" :page="rules.page" :page-size="rules.pageSize"
           :item-count="filteredRules.length" :page-sizes="[10, 20, 50, 100]" show-size-picker
           @update:page="(p) => (rules.page = p)" @update:page-size="onRulesPageSize" />
       </div>
@@ -1002,8 +1002,9 @@ onBeforeUnmount(() => {
   word-break: break-all;
 }
 
-.domain-list .n-pagination {
-  margin-top: 10px;
+/* 分页器与列表/卡片的间隔（分页器是列表容器的兄弟节点，不能靠 .list .n-pagination 命中） */
+.pager {
+  margin-top: 12px;
 }
 
 /* 子tab */
@@ -1111,10 +1112,6 @@ onBeforeUnmount(() => {
   margin-top: 7px;
   font-size: 11px;
   color: var(--text-tertiary);
-}
-
-.rule-list .n-pagination {
-  margin-top: 12px;
 }
 
 /* 推荐连接 */

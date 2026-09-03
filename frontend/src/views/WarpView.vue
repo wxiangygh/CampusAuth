@@ -5,6 +5,7 @@ import { api } from '../bridge'
 import { store } from '../store'
 import { ui } from '../ui'
 import { fuzzyMatch, paginate } from '../utils'
+import AppIcon from '../components/AppIcon.vue'
 
 // ===== 状态 =====
 const subtab = ref('domain')
@@ -41,15 +42,47 @@ const recommendLoading = ref(false)
 // 网络方案（启用/禁用 IPv4、认证后自动启用 IPv4）已移除：
 // 工作流提供 enable_ipv4 / disable_ipv4 等节点可实现相同功能
 
-// WARP 当前规则
-const warpDomainRanges = ref([])
-const warpIpv6Ranges = ref([])
-const warpLegacyRanges = ref([])
-
-// DNS Fallback
+// DNS Fallback（作为"已配置的排除规则"的第三个子tab）
 const dnsList = ref([])
-const warpDnsList = ref([])
 const dnsInput = ref('')
+
+// ===== 当前分流配置悬浮窗 =====
+// 生产环境（pywebview）由后端 open_traffic_config_window 创建独立子窗口；
+// 浏览器 dev 预览回退为 window.open 同源弹窗，可拖出主窗口、独立关闭。
+let viewerPopup = null
+
+function openConfigViewer() {
+  const a = api()
+  if (a && typeof a.open_traffic_config_window === 'function') {
+    a.open_traffic_config_window().catch((e) => {
+      console.error('open_traffic_config_window failed:', e)
+      ui.toast('打开分流配置窗口失败: ' + e, 'error')
+    })
+    return
+  }
+  const base = window.location.href.split('#')[0]
+  const win = window.open(base + '#viewer', 'cauth-config-viewer',
+    'width=900,height=640')
+  if (!win) {
+    ui.toast('悬浮窗被浏览器拦截，请允许本站弹出窗口', 'error')
+    return
+  }
+  viewerPopup = win
+}
+
+// 主窗口关闭时联动关闭悬浮窗（生命周期要求：主窗关闭 → 悬浮窗关闭）
+function closeViewerPopup() {
+  try {
+    if (viewerPopup && !viewerPopup.closed) viewerPopup.close()
+  } catch (e) {
+    /* ignore */
+  }
+  viewerPopup = null
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', closeViewerPopup)
+  window.addEventListener('pagehide', closeViewerPopup)
+}
 
 // ===== 计算 =====
 const filteredLearned = computed(() => {
@@ -240,7 +273,6 @@ async function setDomainRoute(domain, route) {
     const r = await api().set_domain_route(domain, route)
     ui.toast(r.message, r.success ? 'success' : 'error')
     await loadRules()
-    await loadWarpRanges()
   } catch (e) {
     ui.toast('切换失败: ' + e, 'error')
   }
@@ -255,7 +287,6 @@ async function removeDomain(domain) {
     const r = await api().remove_domain(domain)
     ui.toast(r.message, r.success ? 'success' : 'error')
     await loadRules()
-    await loadWarpRanges()
   } catch (e) {
     ui.toast('删除失败: ' + e, 'error')
   }
@@ -267,7 +298,6 @@ async function toggleDomain(domain, enabled) {
     const r = await api().toggle_domain(domain, enabled)
     ui.toast(r.message, r.success ? 'success' : 'error')
     await loadRules()
-    await loadWarpRanges()
   } catch (e) {
     ui.toast('操作失败: ' + e, 'error')
   }
@@ -281,17 +311,16 @@ async function applyAllToWarp() {
     const okCount = details.filter((d) => d.success).length
     const failCount = details.length - okCount
     ui.toast(`${r.message} (${okCount}成功/${failCount}失败)`, failCount ? 'error' : 'success')
-    await loadWarpRanges()
   } catch (e) {
     ui.toast('同步失败: ' + e, 'error')
   }
   ui.hideLoading()
 }
 
-async function syncFromWarp() {
+async function syncFromWarp(kind) {
   ui.showLoading('从WARP同步规则...')
   try {
-    const r = await api().sync_from_warp()
+    const r = await api().sync_from_warp(kind || null)
     ui.toast(r.message, r.success ? 'success' : 'error')
     await loadRules()
     await loadDnsFallbackRules()
@@ -398,6 +427,21 @@ async function setIpRangeRoute(cidr, route) {
   ui.hideLoading()
 }
 
+// IP 排除子tab：同步配置的 CIDR 到 WARP（启用→add-range，禁用→remove-range）
+async function applyIpRangesToWarp() {
+  ui.showLoading('同步 IP 范围到WARP...')
+  try {
+    const r = await api().apply_ip_ranges_to_warp()
+    const details = r.details || []
+    const okCount = details.filter((d) => d.success).length
+    const failCount = details.length - okCount
+    ui.toast(`${r.message} (${okCount}成功/${failCount}失败)`, failCount ? 'error' : 'success')
+  } catch (e) {
+    ui.toast('同步失败: ' + e, 'error')
+  }
+  ui.hideLoading()
+}
+
 // ===== 从当前连接推荐 =====
 const recommendItems = computed(() => {
   const data = recommend.value
@@ -486,57 +530,15 @@ async function toggleAutoEnableIpv4(enabled) {
   await loadAutoEnableIpv4()
 }
 
-// ===== WARP 当前规则 =====
-async function loadWarpRanges() {
-  try {
-    const ranges = await api().get_warp_ranges()
-    warpDomainRanges.value = ranges || []
-    try {
-      const ipInfo = await api().get_cli_ip_ranges()
-      warpIpv6Ranges.value = ipInfo.active_ipv6 || []
-      warpLegacyRanges.value = ipInfo.legacy || []
-    } catch (e) {
-      warpIpv6Ranges.value = []
-      warpLegacyRanges.value = []
-    }
-  } catch (e) {
-    console.error('loadWarpRanges error:', e)
-  }
-}
-
-async function cleanupLegacyRules() {
-  const ok = await ui.confirm(
-    '确定清理旧版IP/CIDR排除规则残留？\n\n将执行：\n1. 删除WARP中所有CLI添加的IP排除规则\n2. 清理配置文件中的ips/cidrs/mode等旧字段\n3. 将配置中的域名以域名排除方式重新应用到WARP'
-  )
-  if (!ok) return
-  ui.showLoading('清理旧版规则残留中...')
-  try {
-    const r = await api().cleanup_legacy_config()
-    ui.toast(r.message, r.success ? 'success' : 'error')
-    await loadRules()
-    await loadWarpRanges()
-  } catch (e) {
-    ui.toast('清理失败: ' + e, 'error')
-  }
-  ui.hideLoading()
-}
-
 // ===== DNS Fallback =====
+// WARP 实时状态（tunnel host / dns fallback 列表）不再常驻展示，
+// 统一在"当前分流配置"悬浮窗（ConfigViewer.vue）中按需加载
 async function loadDnsFallbackRules() {
   try {
     const cfg = await api().get_exclusion_config()
     dnsList.value = cfg.dns_fallback || []
-    await loadWarpDnsFallback()
   } catch (e) {
     console.error('loadDnsFallbackRules error:', e)
-  }
-}
-
-async function loadWarpDnsFallback() {
-  try {
-    warpDnsList.value = (await api().get_dns_fallback_list()) || []
-  } catch (e) {
-    console.error('loadWarpDnsFallback error:', e)
   }
 }
 
@@ -649,7 +651,6 @@ watch(
   async (ready) => {
     if (!ready) return
     await loadRules()
-    await loadWarpRanges()
     await loadDnsFallbackRules()
   },
   { immediate: true }
@@ -707,11 +708,19 @@ onBeforeUnmount(() => {
       <div class="section-title">
         已配置的排除规则
         <n-tag size="small">{{ rules.list.length }}</n-tag>
+        <n-button size="small" type="primary" secondary class="config-view-btn" @click="openConfigViewer"
+          title="悬浮窗展示 WARP 实时排除规则、IPv6 白名单 CIDR 与 DNS fallback 域名">
+          <template #icon>
+            <AppIcon name="globe" :size="13" />
+          </template>
+          当前分流配置
+        </n-button>
       </div>
 
       <div class="subtab-bar">
         <button class="subtab-btn" :class="{ active: subtab === 'domain' }" @click="subtab = 'domain'">域名排除</button>
         <button class="subtab-btn" :class="{ active: subtab === 'ip' }" @click="subtab = 'ip'">IP 排除</button>
+        <button class="subtab-btn" :class="{ active: subtab === 'dns' }" @click="subtab = 'dns'">DNS Fallback</button>
       </div>
 
       <!-- 域名排除子页 -->
@@ -732,8 +741,10 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="bulk-actions">
-          <n-button size="tiny" type="primary" secondary @click="applyAllToWarp">同步到WARP</n-button>
-          <n-button size="tiny" @click="syncFromWarp">从WARP同步</n-button>
+          <n-button size="tiny" type="primary" secondary @click="applyAllToWarp"
+            title="把本页配置的域名排除规则应用到 WARP（tunnel host）">同步到WARP</n-button>
+          <n-button size="tiny" @click="syncFromWarp('domain')"
+            title="把 WARP 中已有的域名排除规则读回本地配置">从WARP同步</n-button>
           <n-button size="tiny" @click="checkIpv6Support" title="检测所有 IPv6 路由域名是否真的支持 IPv6，不支持则降级为 IPv4">检测 IPv6 支持</n-button>
         </div>
 
@@ -794,6 +805,13 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <div class="bulk-actions">
+          <n-button size="tiny" type="primary" secondary @click="applyIpRangesToWarp"
+            title="把本页配置的 CIDR 应用到 WARP（启用→add-range，禁用→remove-range）">同步到WARP</n-button>
+          <n-button size="tiny" @click="syncFromWarp('ip')"
+            title="把 WARP 中已有的 IP/CIDR 排除规则读回本地配置">从WARP同步</n-button>
+        </div>
+
         <div class="recommend-box">
           <div class="recommend-head">
             <span class="add-title">从当前连接推荐</span>
@@ -851,74 +869,46 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
-    </section>
 
-    <!-- WARP 当前排除规则 -->
-    <section class="card section">
-      <div class="section-title">
-        WARP 当前排除规则
-        <n-button size="tiny" style="margin-left: auto" @click="loadWarpRanges">刷新</n-button>
-      </div>
-      <div class="bulk-actions" v-if="warpLegacyRanges.length">
-        <n-button size="tiny" type="error" secondary @click="cleanupLegacyRules">清理旧版IP规则残留</n-button>
-      </div>
-      <div class="warp-ranges">
-        <div v-if="!warpDomainRanges.length" class="empty-hint">WARP中暂无域名排除规则</div>
-        <template v-else>
-          <div class="range-group-title">域名排除规则（tunnel host）:</div>
-          <div class="range-line mono" v-for="r in warpDomainRanges" :key="r">{{ r }}</div>
-        </template>
-        <template v-if="warpIpv6Ranges.length">
-          <div class="range-group-title">IPv6 白名单使用的 CIDR（{{ warpIpv6Ranges.length }}条，正常）:</div>
-          <div class="range-line mono" v-for="r in warpIpv6Ranges" :key="r">{{ r }}</div>
-        </template>
-        <template v-if="warpLegacyRanges.length">
-          <div class="range-group-title legacy">旧版IP排除规则残留（{{ warpLegacyRanges.length }}条，建议清理）:</div>
-          <div class="range-line mono legacy" v-for="r in warpLegacyRanges" :key="r">{{ r }}</div>
-        </template>
-      </div>
-    </section>
-
-    <!-- DNS Fallback -->
-    <section class="card section">
-      <div class="section-title">
-        DNS Fallback 域名（本地解析）
-        <n-tag size="small">{{ dnsList.length }}</n-tag>
-        <n-button size="tiny" style="margin-left: auto" @click="loadDnsFallbackRules">刷新</n-button>
-      </div>
-      <div class="dns-desc">
-        <strong>用途：</strong>让指定域名的 DNS 查询走本地运营商 DNS（而非 WARP DNS），避免 CDN 调度域名返回海外节点导致访问被阻止。<br />
-        <strong>典型场景：</strong>bytedns3.com、queniuyk.com 等字节系 CDN 调度域名。<br />
-        <strong>与流量排除的区别：</strong>流量排除（tunnel host）让连接不走 WARP；DNS fallback 让解析走本地 DNS，流量仍可走 WARP。
-      </div>
-      <div class="add-form">
-        <n-input v-model:value="dnsInput" size="small" placeholder="输入域名，如 bytedns3.com" style="flex: 1"
-          @keydown.enter="addDnsFallbackManually" />
-        <n-button type="primary" size="small" @click="addDnsFallbackManually">添加</n-button>
-      </div>
-      <div class="bulk-actions">
-        <n-button size="tiny" type="primary" secondary @click="applyDnsFallbackToWarp">同步到WARP</n-button>
-      </div>
-      <div class="rule-list">
-        <div v-if="!dnsList.length" class="empty-hint">暂无 DNS fallback 域名</div>
-        <div v-for="d in dnsList" :key="d.domain" class="rule-item">
-          <div class="rule-header">
-            <span class="rule-domain mono">{{ d.domain }}</span>
-            <div class="rule-actions">
-              <n-tag size="small" :type="d.enabled !== false ? 'success' : 'default'">{{ d.enabled !== false ? '已启用' : '已禁用' }}</n-tag>
-              <n-button size="tiny" quaternary @click="toggleDnsFallback(d.domain, d.enabled === false)">
-                {{ d.enabled !== false ? '禁用' : '启用' }}
-              </n-button>
-              <n-button size="tiny" quaternary type="error" @click="removeDnsFallback(d.domain)">删除</n-button>
-            </div>
+      <!-- DNS Fallback 子页 -->
+      <div v-show="subtab === 'dns'">
+        <div class="add-row">
+          <div class="add-title">手动添加 DNS Fallback 域名</div>
+          <div class="add-form">
+            <n-input v-model:value="dnsInput" size="small" placeholder="输入域名，如 bytedns3.com" style="flex: 2"
+              @keydown.enter="addDnsFallbackManually" />
+            <n-button type="primary" size="small" @click="addDnsFallbackManually">添加</n-button>
           </div>
-          <div class="rule-meta">添加时间: {{ d.added_at || '未知' }}</div>
+          <div class="section-desc">
+            <strong>用途：</strong>让指定域名的 DNS 查询走本地运营商 DNS（而非 WARP DNS），避免 CDN 调度域名返回海外节点导致访问被阻止。<br />
+            <strong>典型场景：</strong>bytedns3.com、queniuyk.com 等字节系 CDN 调度域名。<br />
+            <strong>与流量排除的区别：</strong>流量排除（tunnel host）让连接不走 WARP；DNS fallback 让解析走本地 DNS，流量仍可走 WARP。
+          </div>
         </div>
-      </div>
-      <div class="warp-dns-block">
-        <div class="range-group-title">WARP 中当前的 DNS fallback 域名：</div>
-        <div v-if="!warpDnsList.length" class="empty-hint">WARP中暂无 DNS fallback 域名</div>
-        <div class="range-line mono" v-for="d in warpDnsList" :key="d">{{ d }}</div>
+
+        <div class="bulk-actions">
+          <n-button size="tiny" type="primary" secondary @click="applyDnsFallbackToWarp"
+            title="把本页配置的 DNS fallback 域名应用到 WARP">同步到WARP</n-button>
+          <n-button size="tiny" @click="syncFromWarp('dns')"
+            title="把 WARP 中已有的 DNS fallback 域名读回本地配置">从WARP同步</n-button>
+        </div>
+
+        <div class="rule-list">
+          <div v-if="!dnsList.length" class="empty-hint">暂无 DNS fallback 域名</div>
+          <div v-for="d in dnsList" :key="d.domain" class="rule-item">
+            <div class="rule-header">
+              <span class="rule-domain mono">{{ d.domain }}</span>
+              <div class="rule-actions">
+                <n-tag size="small" :type="d.enabled !== false ? 'success' : 'default'">{{ d.enabled !== false ? '已启用' : '已禁用' }}</n-tag>
+                <n-button size="tiny" quaternary @click="toggleDnsFallback(d.domain, d.enabled === false)">
+                  {{ d.enabled !== false ? '禁用' : '启用' }}
+                </n-button>
+                <n-button size="tiny" quaternary type="error" @click="removeDnsFallback(d.domain)">删除</n-button>
+              </div>
+            </div>
+            <div class="rule-meta">添加时间: {{ d.added_at || '未知' }}</div>
+          </div>
+        </div>
       </div>
     </section>
   </div>
@@ -1022,6 +1012,11 @@ onBeforeUnmount(() => {
   gap: 2px;
   margin: 12px 0;
   border-bottom: 1px solid var(--border);
+}
+
+/* "当前分流配置"悬浮窗入口按钮 */
+.config-view-btn {
+  margin-left: auto;
 }
 
 .subtab-btn {
@@ -1197,39 +1192,6 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-/* WARP ranges */
-.warp-ranges {
-  margin-top: 12px;
-}
-
-.range-group-title {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  margin: 10px 0 6px;
-}
-
-.range-group-title:first-child {
-  margin-top: 0;
-}
-
-.range-group-title.legacy {
-  color: var(--error);
-}
-
-.range-line {
-  font-size: 11px;
-  color: var(--text-secondary);
-  padding: 3px 10px;
-  background: var(--bg-elevated);
-  border-radius: 5px;
-  margin-bottom: 3px;
-  word-break: break-all;
-}
-
-.range-line.legacy {
-  color: var(--error);
-}
-
 /* DNS */
 .dns-desc {
   margin: 12px 0;
@@ -1239,11 +1201,5 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--text-tertiary);
   line-height: 1.7;
-}
-
-.warp-dns-block {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
 }
 </style>

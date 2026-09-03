@@ -194,9 +194,180 @@ const api = {
   ], 2500),
 }
 
-// 其他视图（设置 / WARP / 流量）不是预览重点，统一空实现保持控制台干净
+// ===== WARP 分流规则（WarpView 子tab + "当前分流配置"悬浮窗预览）=====
+let learnedDomains = ['www.bjut.edu.cn', 'jwgl.bjut.edu.cn', 'lib.bjut.edu.cn', 'mail.bjut.edu.cn', 'ehall.bjut.edu.cn']
+
+let exclusion = {
+  domains: [
+    { domain: 'www.bjut.edu.cn', route: 'ipv6', enabled: true, added_at: '2026-08-30 10:12' },
+    { domain: 'jwgl.bjut.edu.cn', route: 'ipv6', enabled: true, added_at: '2026-08-30 10:14' },
+    { domain: 'lib.bjut.edu.cn', route: 'ipv6', enabled: true, added_at: '2026-08-30 10:15' },
+    { domain: 'v.qq.com', route: 'ipv4', enabled: true, added_at: '2026-08-31 09:02' },
+    { domain: 'music.163.com', route: 'ipv4', enabled: false, added_at: '2026-09-01 21:40' },
+  ],
+  ip_ranges: [
+    { cidr: '10.0.0.0/8', route: 'ipv4', enabled: true },
+    { cidr: '166.111.0.0/16', route: 'ipv4', enabled: false },
+    { cidr: '2402:4e00:1430::/48', route: 'ipv6', enabled: true },
+  ],
+  dns_fallback: [
+    { domain: 'bytedns3.com', enabled: true, added_at: '2026-08-29 08:30' },
+    { domain: 'queniuyk.com', enabled: true, added_at: '2026-08-29 08:31' },
+    { domain: 'queniuak.com', enabled: false, added_at: '2026-09-01 12:05' },
+  ],
+}
+
+// WARP 实时状态（悬浮窗三列数据源）
+let warpTunnelHosts = ['www.bjut.edu.cn', 'jwgl.bjut.edu.cn', 'lib.bjut.edu.cn', 'v.qq.com', 'music.163.com']
+let warpCliRanges = {
+  active_ipv6: ['2402:4e00:1430::/48', '2408:4002:10c0::/48'],
+  legacy: ['203.205.255.17/32'],
+}
+let warpDnsFallback = ['bytedns3.com', 'queniuyk.com']
+
+function findBy(list, key, value) {
+  return list.find((it) => it[key] === value)
+}
+
+Object.assign(api, {
+  get_exclusion_config: () => delay(clone(exclusion)),
+  add_domain: (domain, route) => {
+    exclusion.domains.push({ domain, route: route || 'ipv6', enabled: true, added_at: '2026-09-03 21:00' })
+    if (route !== 'ipv4' && !warpTunnelHosts.includes(domain)) warpTunnelHosts.push(domain)
+    return delay({ success: true, message: `已添加 ${domain}` })
+  },
+  remove_domain: (domain) => {
+    exclusion.domains = exclusion.domains.filter((d) => d.domain !== domain)
+    warpTunnelHosts = warpTunnelHosts.filter((d) => d !== domain)
+    return delay({ success: true, message: `已删除 ${domain}` })
+  },
+  toggle_domain: (domain, enabled) => {
+    const d = findBy(exclusion.domains, 'domain', domain)
+    if (d) d.enabled = !!enabled
+    return delay({ success: true, message: enabled ? '已启用' : '已禁用' })
+  },
+  set_domain_route: (domain, route) => {
+    const d = findBy(exclusion.domains, 'domain', domain)
+    if (d) d.route = route
+    return delay({ success: true, message: '路由已切换' })
+  },
+  add_ip_range: (cidr, route) => {
+    exclusion.ip_ranges.push({ cidr, route: route || 'ipv4', enabled: true })
+    return delay({ success: true, message: `已添加 ${cidr}` })
+  },
+  remove_ip_range: (cidr) => {
+    exclusion.ip_ranges = exclusion.ip_ranges.filter((r) => r.cidr !== cidr)
+    return delay({ success: true, message: `已删除 ${cidr}` })
+  },
+  toggle_ip_range: (cidr, enabled) => {
+    const r = findBy(exclusion.ip_ranges, 'cidr', cidr)
+    if (r) r.enabled = !!enabled
+    return delay({ success: true, message: enabled ? '已启用' : '已禁用' })
+  },
+  set_ip_range_route: (cidr, route) => {
+    const r = findBy(exclusion.ip_ranges, 'cidr', cidr)
+    if (r) r.route = route
+    return delay({ success: true, message: '路由已切换' })
+  },
+  check_ipv6_support: () => delay({ success: true, message: '检测完成', details: [] }),
+  apply_to_warp: () => delay({
+    success: true,
+    message: '已同步到 WARP',
+    details: exclusion.domains.map((d) => ({ domain: d.domain, success: true })),
+  }),
+  sync_from_warp: (kind) => {
+    // 按子tab分类同步：把 WARP 侧独有的条目合并进本地配置（不覆盖已有项）
+    let added = 0
+    if (!kind || kind === 'domain') {
+      for (const host of warpTunnelHosts) {
+        if (!exclusion.domains.some((d) => d.domain === host)) {
+          exclusion.domains.push({ domain: host, route: 'ipv6', enabled: true, added_at: '2026-09-03 21:00' })
+          added++
+        }
+      }
+    }
+    if (!kind || kind === 'dns') {
+      for (const d of warpDnsFallback) {
+        if (!exclusion.dns_fallback.some((x) => x.domain === d)) {
+          exclusion.dns_fallback.push({ domain: d, enabled: true, added_at: '2026-09-03 21:00' })
+          added++
+        }
+      }
+    }
+    if (!kind || kind === 'ip') {
+      for (const cidr of warpCliRanges.active_ipv6.concat(warpCliRanges.legacy)) {
+        if (!exclusion.ip_ranges.some((r) => r.cidr === cidr)) {
+          exclusion.ip_ranges.push({ cidr, route: cidr.includes(':') ? 'ipv6' : 'ipv4', enabled: true })
+          added++
+        }
+      }
+    }
+    return delay({
+      success: true,
+      message: added ? `从 WARP 同步了 ${added} 条规则` : 'WARP 与本地配置已同步，无需更新',
+      details: { hosts_added: [], dns_added: [], ip_ranges_added: [] },
+    })
+  },
+  apply_ip_ranges_to_warp: () => {
+    for (const r of exclusion.ip_ranges.filter((x) => x.enabled)) {
+      if (!warpCliRanges.active_ipv6.includes(r.cidr) && !warpCliRanges.legacy.includes(r.cidr)) {
+        ;(r.cidr.includes(':') ? warpCliRanges.active_ipv6 : warpCliRanges.legacy).push(r.cidr)
+      }
+    }
+    return delay({
+      success: true,
+      message: 'IP 范围已同步到 WARP',
+      details: exclusion.ip_ranges.map((r) => ({ cidr: r.cidr, success: true })),
+    })
+  },
+  get_warp_ranges: () => delay(clone(warpTunnelHosts)),
+  get_cli_ip_ranges: () => delay(clone(warpCliRanges)),
+  get_dns_fallback_list: () => delay(clone(warpDnsFallback)),
+  cleanup_legacy_config: () => {
+    warpCliRanges.legacy = []
+    return delay({ success: true, message: '旧版规则残留已清理', details: [] })
+  },
+  add_dns_fallback: (domain) => {
+    exclusion.dns_fallback.push({ domain, enabled: true, added_at: '2026-09-03 21:00' })
+    if (!warpDnsFallback.includes(domain)) warpDnsFallback.push(domain)
+    return delay({ success: true, message: `已添加 ${domain}` })
+  },
+  remove_dns_fallback: (domain) => {
+    exclusion.dns_fallback = exclusion.dns_fallback.filter((d) => d.domain !== domain)
+    warpDnsFallback = warpDnsFallback.filter((d) => d !== domain)
+    return delay({ success: true, message: `已移除 ${domain}` })
+  },
+  toggle_dns_fallback: (domain, enabled) => {
+    const d = findBy(exclusion.dns_fallback, 'domain', domain)
+    if (d) d.enabled = !!enabled
+    return delay({ success: true, message: enabled ? '已启用' : '已禁用' })
+  },
+  apply_dns_fallback_to_warp: () => delay({ success: true, message: 'DNS fallback 已同步到 WARP', details: [] }),
+  is_ipv4_enabled: () => delay(false),
+  set_ipv4_enabled: (enabled) => delay({ success: true, message: enabled ? 'IPv4 已启用' : 'IPv4 已禁用' }),
+  get_auto_enable_ipv4: () => delay(false),
+  set_auto_enable_ipv4: (enabled) => delay({ success: true }),
+  start_learning: () => delay({ success: true, message: '学习模式已启动' }),
+  stop_learning: () => delay({ success: true, message: '学习模式已停止' }),
+  get_learned_domains: () => delay(clone(learnedDomains)),
+  // "从当前连接推荐"数据（未走 WARP 的直连）
+  get_traffic_status: () => delay({
+    warp_underlay: 'ipv6',
+    stats: { ipv4: 5, ipv6: 2, ipv4_warp: 4, ipv4_warp_ipv6: 1, ipv6_warp: 3, ipv6_warp_ipv4: 0 },
+    connections: [
+      { process: 'chrome.exe', hostname: '', remote_ip: '104.21.6.52', remote_port: 443, route_type: 'ipv4', is_warp: false },
+      { process: 'WeChat.exe', hostname: 'szshort.weixin.qq.com', remote_ip: '101.91.34.117', remote_port: 80, route_type: 'ipv4', is_warp: false },
+      { process: 'python.exe', hostname: 'mirrors.aliyun.com', remote_ip: '2408:4002:10c0::16', remote_port: 443, route_type: 'ipv6', is_warp: false },
+      { process: 'steam.exe', hostname: 'api.steampowered.com', remote_ip: '23.203.216.54', remote_port: 443, route_type: 'ipv4', is_warp: false },
+    ],
+  }, 90),
+  // 注意：刻意不提供 open_traffic_config_window / close_traffic_config_window，
+  // 使浏览器 dev 预览走 window.open 弹窗回退路径，与真实环境行为可分别验证
+})
+
+// 其他视图（设置 / 流量）不是预览重点，统一空实现保持控制台干净
 const NOOP_STUBS = [
-  'get_exclusion_config', 'save_exclusion_config', 'get_warp_ranges', 'save_warp_ranges',
+  'save_exclusion_config', 'save_warp_ranges',
   'load_config', 'save_config', 'get_startup_status', 'set_auto_startup',
   'list_workflows', 'get_traffic_stats',
   'get_traffic_history', 'reset_traffic_stats', 'get_warp_status', 'warp_action',

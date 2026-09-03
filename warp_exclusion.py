@@ -894,6 +894,25 @@ def warp_list_ip_ranges():
     return cli_ranges, all_ranges
 
 
+def warp_add_ip_range(cidr):
+    """添加WARP IP排除规则：warp-cli tunnel ip add-range <cidr>
+
+    与 warp_add_ip（单 IP，tunnel ip add）区分：本函数用于 CIDR 网段。
+    """
+    warp_cli = get_warp_cli_path()
+    if not warp_cli:
+        return False, 'warp-cli 未找到'
+    code, output, err = run_command_simple([warp_cli, 'tunnel', 'ip', 'add-range', cidr], shell=False)
+    if code == 0:
+        logger.info(f'WARP add ip range {cidr}: success')
+        return True, '添加成功'
+    msg = (output + err).strip()[:200]
+    if 'already' in msg.lower() or '已存在' in msg:
+        return True, '已存在'
+    logger.warning(f'WARP add ip range {cidr}: failed, {msg}')
+    return False, f'添加失败: {msg}'
+
+
 def warp_remove_ip_range(cidr):
     """删除WARP IP排除规则：warp-cli tunnel ip remove-range <cidr>"""
     warp_cli = get_warp_cli_path()
@@ -1141,93 +1160,112 @@ class ExclusionManager:
         # 启动时从 WARP 同步规则到本地配置（确保 WARP 中的规则在应用中可见可管理）
         self.sync_from_warp()
 
-    def sync_from_warp(self):
+    def sync_from_warp(self, kind=None):
         """从 WARP 读取当前规则，合并到本地配置中。
         解决场景：应用重新打包后本地配置丢失，但 WARP 中的规则仍在，
         导致用户无法通过应用界面管理这些规则。
         合并策略：WARP 中存在但本地不存在的规则会被添加进来（enabled=True），
         本地已有的规则不会被覆盖。
+
+        kind: 只同步某一类规则，供界面按子tab分别触发
+            None/'all'   全部（域名 + DNS fallback + IP 范围）
+            'domain'     仅域名排除（tunnel host）
+            'dns'        仅 DNS fallback 域名
+            'ip'         仅 IP/CIDR 范围
         返回 (success, message, details)
         """
+        if kind in (None, '', 'all'):
+            sync_hosts = sync_dns = sync_ip = True
+        elif kind in ('domain', 'dns', 'ip'):
+            sync_hosts, sync_dns, sync_ip = (
+                kind == 'domain', kind == 'dns', kind == 'ip')
+        else:
+            return False, f'无效的同步类型: {kind}', {}
+
         with self._lock:
             cfg = load_exclusion_config()
             details = {'hosts_added': [], 'dns_added': [], 'ip_ranges_added': []}
+            # 折叠通配条目由域名分支负责；限定其他类型时不应带上上一轮遗留的脏标记
+            self._collapse_dirty = False
 
             # 同步 tunnel host 规则
-            warp_hosts = warp_list_hosts()
-            existing_domains = {base_host(d['domain']) for d in cfg.get('domains', [])}
-            self._collapse_wildcard_entries(cfg, existing_domains)
-            # 判断路由类型：IPv6 路由的域名会创建 CampusAuth_IPv6Route_* 防火墙规则。
-            # （不能用 DNS fallback 判别：2026-09-01 起 IPv4 路由域名也会添加
-            #  fallback，以保证排除域名经本地 DNS 解析到国内 CDN 节点。）
-            new_hosts = []
-            for host in warp_hosts:
-                # `*.x.com` 与 `x.com` 是同一条规则的两个条目，只登记根域名
-                host = base_host(host)
-                if host and host not in existing_domains:
-                    new_hosts.append(host)
+            if sync_hosts:
+                warp_hosts = warp_list_hosts()
+                existing_domains = {base_host(d['domain']) for d in cfg.get('domains', [])}
+                self._collapse_wildcard_entries(cfg, existing_domains)
+                # 判断路由类型：IPv6 路由的域名会创建 CampusAuth_IPv6Route_* 防火墙规则。
+                # （不能用 DNS fallback 判别：2026-09-01 起 IPv4 路由域名也会添加
+                #  fallback，以保证排除域名经本地 DNS 解析到国内 CDN 节点。）
+                new_hosts = []
+                for host in warp_hosts:
+                    # `*.x.com` 与 `x.com` 是同一条规则的两个条目，只登记根域名
+                    host = base_host(host)
+                    if host and host not in existing_domains:
+                        new_hosts.append(host)
+                        existing_domains.add(host)
+                ipv6_route_domains = _list_ipv6_route_firewall_domains() if new_hosts else set()
+                for host in new_hosts:
+                    route = 'ipv6' if host in ipv6_route_domains else 'ipv4'
+                    entry = {
+                        'domain': host,
+                        'enabled': True,
+                        'route': route,
+                        'added_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'source': 'warp_sync',
+                    }
+                    cfg.setdefault('domains', []).append(entry)
                     existing_domains.add(host)
-            ipv6_route_domains = _list_ipv6_route_firewall_domains() if new_hosts else set()
-            for host in new_hosts:
-                route = 'ipv6' if host in ipv6_route_domains else 'ipv4'
-                entry = {
-                    'domain': host,
-                    'enabled': True,
-                    'route': route,
-                    'added_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'source': 'warp_sync',
-                }
-                cfg.setdefault('domains', []).append(entry)
-                existing_domains.add(host)
-                details['hosts_added'].append(host)
-                logger.info(f'Synced tunnel host from WARP ({route} route): {host}')
+                    details['hosts_added'].append(host)
+                    logger.info(f'Synced tunnel host from WARP ({route} route): {host}')
 
             # 同步 DNS fallback 规则
-            warp_dns = warp_list_dns_fallback()
-            # DNS fallback 中已有的独立管理条目
-            existing_dns = {d['domain'] for d in cfg.get('dns_fallback', [])}
-            # 域名排除列表中已有的域名（不管 route）
-            existing_domain_names = {d['domain'] for d in cfg.get('domains', [])}
-            for domain in warp_dns:
-                if domain in existing_domain_names:
-                    # 已在域名排除列表中，跳过（可能是 IPv6 路由域名自动添加的 DNS fallback）
-                    continue
-                if domain not in existing_dns:
-                    entry = {
-                        'domain': domain,
-                        'enabled': True,
-                        'added_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-                        'source': 'warp_sync',
-                    }
-                    cfg.setdefault('dns_fallback', []).append(entry)
-                    existing_dns.add(domain)
-                    details['dns_added'].append(domain)
-                    logger.info(f'Synced dns fallback from WARP: {domain}')
+            if sync_dns:
+                warp_dns = warp_list_dns_fallback()
+                # DNS fallback 中已有的独立管理条目
+                existing_dns = {d['domain'] for d in cfg.get('dns_fallback', [])}
+                # 域名排除列表中已有的域名（不管 route）
+                existing_domain_names = {d['domain'] for d in cfg.get('domains', [])}
+                for domain in warp_dns:
+                    if domain in existing_domain_names:
+                        # 已在域名排除列表中，跳过（可能是 IPv6 路由域名自动添加的 DNS fallback）
+                        continue
+                    if domain not in existing_dns:
+                        entry = {
+                            'domain': domain,
+                            'enabled': True,
+                            'added_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                            'source': 'warp_sync',
+                        }
+                        cfg.setdefault('dns_fallback', []).append(entry)
+                        existing_dns.add(domain)
+                        details['dns_added'].append(domain)
+                        logger.info(f'Synced dns fallback from WARP: {domain}')
 
             # 同步 IP 范围规则（CLI 添加的 CIDR 排除）
-            cli_ranges, _ = warp_list_ip_ranges()
-            # 收集域名规则自动生成的 IPv6 CIDR，这些不算独立的 IP 范围规则
-            domain_ipv6_cidrs = set()
-            for entry in cfg.get('domains', []):
-                if entry.get('enabled', True) and entry.get('route', 'ipv6') == 'ipv6':
-                    prefixes = _resolve_ipv6_prefixes(entry['domain'])
-                    domain_ipv6_cidrs.update(prefixes)
-            existing_ip_ranges = {r['cidr'] for r in cfg.get('ip_ranges', [])}
-            for cidr in cli_ranges:
-                if cidr not in existing_ip_ranges and cidr not in domain_ipv6_cidrs:
-                    # 根据地址类型自动判断 route
-                    route = 'ipv6' if ':' in cidr else 'ipv4'
-                    entry = {
-                        'cidr': cidr,
-                        'route': route,
-                        'enabled': True,
-                        'added_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-                        'source': 'warp_sync',
-                    }
-                    cfg.setdefault('ip_ranges', []).append(entry)
-                    existing_ip_ranges.add(cidr)
-                    details['ip_ranges_added'].append(cidr)
-                    logger.info(f'Synced IP range from WARP: {cidr}')
+            if sync_ip:
+                cli_ranges, _ = warp_list_ip_ranges()
+                # 收集域名规则自动生成的 IPv6 CIDR，这些不算独立的 IP 范围规则
+                domain_ipv6_cidrs = set()
+                for entry in cfg.get('domains', []):
+                    if entry.get('enabled', True) and entry.get('route', 'ipv6') == 'ipv6':
+                        prefixes = _resolve_ipv6_prefixes(entry['domain'])
+                        domain_ipv6_cidrs.update(prefixes)
+                existing_ip_ranges = {r['cidr'] for r in cfg.get('ip_ranges', [])}
+                for cidr in cli_ranges:
+                    if cidr not in existing_ip_ranges and cidr not in domain_ipv6_cidrs:
+                        # 根据地址类型自动判断 route
+                        route = 'ipv6' if ':' in cidr else 'ipv4'
+                        entry = {
+                            'cidr': cidr,
+                            'route': route,
+                            'enabled': True,
+                            'added_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                            'source': 'warp_sync',
+                        }
+                        cfg.setdefault('ip_ranges', []).append(entry)
+                        existing_ip_ranges.add(cidr)
+                        details['ip_ranges_added'].append(cidr)
+                        logger.info(f'Synced IP range from WARP: {cidr}')
 
             # 只有实际新增了规则或清理了重复项才保存
             has_new = (details['hosts_added'] or details['dns_added']
@@ -1713,6 +1751,45 @@ class ExclusionManager:
     def get_dns_fallback_list(self):
         """获取当前 WARP 中所有 CLI 添加的 DNS fallback 域名"""
         return warp_list_dns_fallback()
+
+    # ------------------------------------------------------------------
+    # IP 范围同步（与 DNS fallback 对称，供界面"IP 排除"子tab使用）
+    # ------------------------------------------------------------------
+
+    def apply_ip_ranges_to_warp(self):
+        """将所有 IP/CIDR 排除规则同步到 WARP（tunnel ip add-range / remove-range）。
+
+        启用的条目执行 add-range，禁用的条目执行 remove-range，
+        用于把本地配置与 WARP 实时状态对齐（例如重启后规则残留/缺失）。
+        返回 (success, message, details)
+        """
+        with self._lock:
+            cfg = load_exclusion_config()
+            ranges = cfg.get('ip_ranges', [])
+            if not ranges:
+                return True, '没有 IP 排除规则', []
+            details = []
+            success_count = 0
+            fail_count = 0
+            for entry in ranges:
+                cidr = entry.get('cidr')
+                if not cidr:
+                    continue
+                if entry.get('enabled', True):
+                    ok, msg = warp_add_ip_range(cidr)
+                else:
+                    ok, msg = warp_remove_ip_range(cidr)
+                details.append({
+                    'cidr': cidr,
+                    'success': ok,
+                    'message': msg,
+                })
+                if ok:
+                    success_count += 1
+                else:
+                    fail_count += 1
+            overall_msg = f'同步完成: {success_count} 成功, {fail_count} 失败'
+            return fail_count == 0, overall_msg, details
 
     # ------------------------------------------------------------------
     # IPv4 启用/禁用管理（WLAN 适配器级别）

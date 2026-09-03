@@ -550,10 +550,26 @@ class ApiBridge:
         try:
             if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
                 core.state._tray_app_instance.save_window_geometry()
+                # 主窗口关闭（隐藏到托盘）时联动关闭"当前分流配置"悬浮窗
+                core.state._tray_app_instance.close_config_viewer()
                 core.state._tray_app_instance.settings_window.hide()
                 logger.info("Window hidden via title bar button")
         except Exception as e:
             logger.error(f"close_window failed: {e}")
+
+    def open_traffic_config_window(self):
+        """打开"当前分流配置"悬浮窗（分流规则 tab 前端按钮调用）。"""
+        app = core.state._tray_app_instance
+        if not app:
+            return {'success': False, 'message': '应用实例不可用'}
+        return app.open_config_viewer()
+
+    def close_traffic_config_window(self):
+        """关闭"当前分流配置"悬浮窗（悬浮窗自身的关闭按钮调用）。"""
+        app = core.state._tray_app_instance
+        if app:
+            app.close_config_viewer()
+        return {'success': True}
 
     def scan_wifi(self):
         return scan_wifi_networks()
@@ -1203,8 +1219,12 @@ class ApiBridge:
         ok, msg, details = self._get_mgr().apply_to_warp(domain)
         return {'success': ok, 'message': msg, 'details': details}
 
-    def sync_from_warp(self):
-        ok, msg, details = self._get_mgr().sync_from_warp()
+    def sync_from_warp(self, kind=None):
+        """从 WARP 合并规则到本地配置。
+
+        kind: None 全部；'domain' 仅域名排除；'ip' 仅 IP/CIDR；'dns' 仅 DNS fallback。
+        """
+        ok, msg, details = self._get_mgr().sync_from_warp(kind)
         return {'success': ok, 'message': msg, 'details': details}
 
     def get_warp_ranges(self):
@@ -1250,6 +1270,11 @@ class ApiBridge:
 
     def apply_dns_fallback_to_warp(self):
         ok, msg, details = self._get_mgr().apply_dns_fallback_to_warp()
+        return {'success': ok, 'message': msg, 'details': details}
+
+    def apply_ip_ranges_to_warp(self):
+        """将配置的 IP/CIDR 排除规则同步到 WARP（"IP 排除"子tab）"""
+        ok, msg, details = self._get_mgr().apply_ip_ranges_to_warp()
         return {'success': ok, 'message': msg, 'details': details}
 
     def get_dns_fallback_list(self):
@@ -1544,6 +1569,85 @@ class TrayApp:
         self._webview_start_event = threading.Event()
         self._init_done = False
         self._state_unsubscribe = None
+        # "当前分流配置"悬浮窗（独立子窗口，主窗口关闭时联动销毁）
+        self._config_viewer_window = None
+        self._html_url = None
+
+    # ------------------------------------------------------------------
+    # "当前分流配置"悬浮窗（分流规则 tab 的实时状态展示）
+    # ------------------------------------------------------------------
+    def open_config_viewer(self):
+        """打开（或聚焦已存在的）"当前分流配置"悬浮窗。
+
+        独立 frameless 子窗口加载 dist/index.html#viewer，
+        可拖出主窗口边界、可单独关闭；主窗口关闭时由 close_config_viewer 联动销毁。
+        """
+        try:
+            win = self._config_viewer_window
+            if win is not None:
+                try:
+                    win.show()
+                    win.restore()
+                    return {'success': True, 'message': '已打开'}
+                except Exception:
+                    # 旧窗口对象已失效（已被销毁），重建
+                    self._config_viewer_window = None
+
+            html_file = get_resource_path('frontend/dist/index.html')
+            if not os.path.isfile(html_file):
+                return {'success': False, 'message': '前端资源缺失，无法打开悬浮窗'}
+            if not self._html_url:
+                self._html_url = f'file:///{html_file.replace(chr(92), "/")}'
+
+            # 悬浮窗初始位置：主窗口左上角右下偏移，制造"浮在主窗口旁"的层次感
+            x = y = None
+            try:
+                hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
+                if hwnd:
+                    rect = ctypes.wintypes.RECT()
+                    if ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                        x = rect.left + 80
+                        y = rect.top + 80
+            except Exception:
+                pass
+
+            kwargs = {}
+            if x is not None and y is not None:
+                kwargs['x'], kwargs['y'] = x, y
+            win = webview.create_window(
+                '当前分流配置 - CampusAuth',
+                self._html_url + '#viewer',
+                js_api=self.api,
+                width=900, height=640,
+                resizable=True,
+                min_size=(600, 420),
+                background_color='#0D0D0D',
+                easy_drag=False,   # 与主窗口一致：由 pywebview-drag-region 精确控制拖动区域
+                frameless=True,
+                **kwargs,
+            )
+            win.events.closed += self._on_config_viewer_closed
+            self._config_viewer_window = win
+            logger.info('config viewer window opened')
+            return {'success': True, 'message': '已打开'}
+        except Exception as e:
+            logger.error(f'open_config_viewer failed: {e}')
+            return {'success': False, 'message': str(e)}
+
+    def _on_config_viewer_closed(self, *args):
+        self._config_viewer_window = None
+
+    def close_config_viewer(self):
+        """关闭"当前分流配置"悬浮窗（若存在）。"""
+        win = self._config_viewer_window
+        if win is None:
+            return
+        self._config_viewer_window = None
+        try:
+            win.destroy()
+            logger.info('config viewer window closed')
+        except Exception as e:
+            logger.debug(f'close_config_viewer: {e}')
 
     def calc_initial_window_geometry(self):
         """计算初始窗口几何（含最大化标记），支持多显示器坐标并在屏幕拔出时安全回退。
@@ -1624,7 +1728,7 @@ class TrayApp:
             self.save_window_geometry()
         except Exception as e:
             logger.debug(f"request_exit: save geometry failed: {e}")
-        for win_attr in ('settings_window',):
+        for win_attr in ('settings_window', '_config_viewer_window'):
             win = getattr(self, win_attr, None)
             if win:
                 try:
@@ -1942,6 +2046,9 @@ class TrayApp:
 
         try:
             html_url = f'file:///{html_file.replace(chr(92), "/")}'
+            if html_file == dist_index:
+                # 悬浮窗复用同一份 Vue 前端（#viewer hash 路由）
+                self._html_url = html_url
             self.settings_window = webview.create_window(
                 'CampusAuth',
                 url=html_url,
@@ -1970,6 +2077,8 @@ class TrayApp:
                 self.save_window_geometry()
             except Exception as e:
                 logger.error(f"[on_closing] save_window_geometry failed: {e}")
+            # 主窗口关闭（无论隐藏到托盘还是真正退出）都联动关闭"当前分流配置"悬浮窗
+            self.close_config_viewer()
             if self._should_exit:
                 logger.info("[on_closing] Real exit requested, allowing close")
                 return None

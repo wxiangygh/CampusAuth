@@ -23,6 +23,7 @@ import logging
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.command import run_powershell_simple as _run_ps
+from core.proc_icon import get_process_icon
 
 logger = logging.getLogger('traffic_monitor')
 
@@ -56,7 +57,11 @@ def _get_network_snapshot():
     # 2. 获取 TCP 连接和进程名映射
     $conns = Get-NetTCPConnection -State Established
     $procTable = @{}
-    Get-Process | ForEach-Object { $procTable[$_.Id] = $_.ProcessName }
+    Get-Process | ForEach-Object {
+        $procPath = $null
+        try { $procPath = $_.Path } catch { $procPath = $null }
+        $procTable[$_.Id] = @{ N = $_.ProcessName; P = $procPath }
+    }
 
     # 需要过滤的进程名（辅助/系统进程，不是用户实际发起的网络请求）
     $filterNames = @('powershell','conhost','wsmprovhost','WmiPrvSE','svchost','lsass','services','wininit','smss','csrss','dwm','RuntimeBroker','SearchHost','StartMenuExperienceHost','TextInputHost','ShellExperienceHost')
@@ -64,7 +69,8 @@ def _get_network_snapshot():
     $connList = @()
     foreach ($c in $conns) {
         $procId = [int]$c.OwningProcess
-        $pname = if ($procTable.ContainsKey($procId)) { $procTable[$procId] } else { 'unknown' }
+        $pi = if ($procTable.ContainsKey($procId)) { $procTable[$procId] } else { $null }
+        $pname = if ($pi) { $pi.N } else { 'unknown' }
         # 过滤辅助进程
         if ($filterNames -contains $pname) { continue }
         $connList += [PSCustomObject]@{
@@ -72,6 +78,7 @@ def _get_network_snapshot():
             RemotePort = [int]$c.RemotePort
             ProcessId = $procId
             ProcessName = $pname
+            ProcessPath = if ($pi) { $pi.P } else { $null }
             InterfaceIndex = if ($c.InterfaceIndex) { [int]$c.InterfaceIndex } else { -1 }
         }
     }
@@ -196,7 +203,11 @@ def _get_network_snapshot_fast():
     # 2. 获取 TCP 连接和进程名映射
     $conns = Get-NetTCPConnection -State Established
     $procTable = @{}
-    Get-Process | ForEach-Object { $procTable[$_.Id] = $_.ProcessName }
+    Get-Process | ForEach-Object {
+        $procPath = $null
+        try { $procPath = $_.Path } catch { $procPath = $null }
+        $procTable[$_.Id] = @{ N = $_.ProcessName; P = $procPath }
+    }
 
     # 需要过滤的进程名（辅助/系统进程，不是用户实际发起的网络请求）
     $filterNames = @('powershell','conhost','wsmprovhost','WmiPrvSE','svchost','lsass','services','wininit','smss','csrss','dwm','RuntimeBroker','SearchHost','StartMenuExperienceHost','TextInputHost','ShellExperienceHost')
@@ -204,13 +215,15 @@ def _get_network_snapshot_fast():
     $connList = @()
     foreach ($c in $conns) {
         $procId = [int]$c.OwningProcess
-        $pname = if ($procTable.ContainsKey($procId)) { $procTable[$procId] } else { 'unknown' }
+        $pi = if ($procTable.ContainsKey($procId)) { $procTable[$procId] } else { $null }
+        $pname = if ($pi) { $pi.N } else { 'unknown' }
         if ($filterNames -contains $pname) { continue }
         $connList += [PSCustomObject]@{
             RemoteAddress = [string]$c.RemoteAddress
             RemotePort = [int]$c.RemotePort
             ProcessId = $procId
             ProcessName = $pname
+            ProcessPath = if ($pi) { $pi.P } else { $null }
             InterfaceIndex = if ($c.InterfaceIndex) { [int]$c.InterfaceIndex } else { -1 }
         }
     }
@@ -414,7 +427,8 @@ def get_traffic_status_fast():
     hostname 字段为空字符串。目标耗时 <2 秒。
 
     Returns:
-        dict: 与 get_traffic_status 相同结构，但 connections 中 hostname 为空
+        dict: 与 get_traffic_status 相同结构，但 connections 中 hostname 为空。
+              额外包含 icons: {进程名: 图标 data URL | None}（按进程去重）。
     """
     snapshot = _get_network_snapshot_fast()
     warp_ifindex = snapshot.get('WarpIfIndex', -1)
@@ -427,6 +441,10 @@ def get_traffic_status_fast():
 
     stats = {k: 0 for k in ROUTE_TYPES}
     conn_details = []
+    # 进程图标按进程名去重，单独以 {进程名: data URL} 映射下发。
+    # 若塞进每条连接，一次轮询会重复传输上百份相同的 base64（32x32 PNG 约 1-3KB），
+    # 而前端本就按进程名分组展示，映射表足够且体积恒定。
+    icon_map = {}
 
     for conn in connections:
         if conn.get('ProcessId') == my_pid:
@@ -453,8 +471,13 @@ def get_traffic_status_fast():
 
         stats[route_type] = stats.get(route_type, 0) + 1
 
+        process = conn.get('ProcessName', 'unknown')
+        if process not in icon_map:
+            icon_map[process] = get_process_icon(conn.get('ProcessPath'))
+
         conn_details.append({
-            'process': conn.get('ProcessName', 'unknown'),
+            'process': process,
+            'process_path': conn.get('ProcessPath'),
             'remote_ip': remote_ip,
             'remote_port': conn.get('RemotePort', 0),
             'hostname': '',  # 快速模式不获取域名，留空由 slow 接口填充
@@ -469,6 +492,8 @@ def get_traffic_status_fast():
     return {
         'stats': stats,
         'connections': conn_details,
+        # 进程名 → 图标 data URL（可能为 None，前端回退为首字母占位）
+        'icons': icon_map,
         'warp_ifindex': warp_ifindex,
         'warp_underlay': warp_underlay,
         'total': len(conn_details),

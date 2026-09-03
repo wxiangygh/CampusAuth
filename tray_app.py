@@ -75,6 +75,13 @@ LOG_FILE = SCRIPT_DIR / 'tray_app.log'
 CONFIG_FILE = SCRIPT_DIR / 'tray_config.json'
 TASK_NAME_STARTUP = "WiFiAutoAuthStartup"
 
+# 退出 hook（exit_hook_workflow 绑定的工作流）的整体执行上限（秒）。
+# 各节点自带超时，这里只是兜底：hook 卡死时不能让用户永远退不出程序。
+EXIT_HOOK_TIMEOUT = 120
+# 等待在途认证/恢复操作让出 _auth_lock 的时间（秒）。
+# 退出 hook 会改网络状态，与在途操作并发执行会互相踩踏。
+EXIT_HOOK_LOCK_WAIT = 5
+
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s [%(levelname)s] [%(funcName)s:%(lineno)d] %(message)s',
@@ -671,7 +678,7 @@ class ApiBridge:
             'wifi_name', 'username', 'password', 'auto_auth', 'auto_restore',
             'warp_cli_path', 'silent_startup', 'portal_ip', 'portal_port',
             'auto_enable_ipv4', 'auth_total_timeout', 'auth_workflow',
-            'auth_button_workflow', 'restore_button_workflow',
+            'auth_button_workflow', 'restore_button_workflow', 'exit_hook_workflow',
             'auto_check_update', 'auto_tune_workflow',
             'warp_auto_reconnect', 'warp_reconnect_delay',
         }
@@ -1521,8 +1528,61 @@ def _run_restore(icon):
 def on_reauth(icon, item):
     _start_tray_workflow('portal_reauth', icon)
 
+def _run_exit_hook():
+    """托盘「退出」时、进程结束前同步执行用户绑定的工作流（默认未绑定即跳过）。
+
+    典型用途：退出前断开 WARP / 注销校园网，把网络恢复干净。
+    实现要点：
+    - 必须同步等待完成：hook 跑完才允许 request_exit() 销毁窗口/停托盘，
+      否则进程退出会直接中断在途的 hook，等于没执行。
+    - 与在途认证/恢复互斥：先请求取消并等待 _auth_lock 释放，
+      拿不到锁就跳过 hook（日志记录），不与在途操作并发改网络。
+    - 有整体超时兜底：超时后放弃等待继续退出，由节点自身的超时保证
+      大多数情况下 hook 能正常收尾。
+    """
+    try:
+        wf_id = str(CONFIG_STORE.get('exit_hook_workflow') or '').strip()
+    except Exception as e:
+        logger.warning(f"exit hook: read config failed: {e}")
+        return
+    if not wf_id:
+        return
+    if not (CONFIG_STORE.get('workflows') or {}).get(wf_id):
+        logger.warning(f"exit hook: bound workflow {wf_id!r} not found, skipping")
+        return
+
+    logger.info(f"exit hook: requesting cancel of in-flight operation, then acquiring lock")
+    _auth_cancelled.set()
+    if not _auth_lock.acquire(timeout=EXIT_HOOK_LOCK_WAIT):
+        logger.warning("exit hook: auth lock busy, skipping exit hook")
+        _auth_cancelled.clear()
+        return
+    try:
+        logger.info(f"exit hook: running workflow {wf_id} before exit")
+        result = {}
+
+        def _run():
+            try:
+                result['out'] = run_workflow_by_id(wf_id)
+            except Exception as exc:
+                result['out'] = (False, str(exc))
+
+        t = threading.Thread(target=_run, daemon=True, name='exit-hook')
+        t.start()
+        t.join(EXIT_HOOK_TIMEOUT)
+        if t.is_alive():
+            logger.warning(f"exit hook: workflow {wf_id} still running after "
+                           f"{EXIT_HOOK_TIMEOUT}s, exiting anyway")
+            return
+        ok, msg = result.get('out', (False, 'no result'))
+        logger.info(f"exit hook: workflow {wf_id} finished: {'ok' if ok else 'FAILED'} - {msg}")
+    finally:
+        _auth_cancelled.clear()
+        _auth_lock.release()
+
 def on_exit(icon, item):
     logger.info("on_exit: user clicked Exit")
+    _run_exit_hook()
     if core.state._tray_app_instance:
         core.state._tray_app_instance.request_exit()
     else:

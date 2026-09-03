@@ -5,7 +5,9 @@ import { api } from '../bridge'
 import { store } from '../store'
 import { ui } from '../ui'
 import { fuzzyMatch, paginate } from '../utils'
+import { sortBy, compareText, compareDomain } from '../utils/sortlists'
 import AppIcon from '../components/AppIcon.vue'
+import SortToggle from '../components/SortToggle.vue'
 
 // ===== 状态 =====
 const subtab = ref('domain')
@@ -20,6 +22,8 @@ const learning = reactive({
 })
 const checkedDomains = reactive(new Set())
 const learnedPage = reactive({ page: 1, pageSize: store.pageSize || 20 })
+// 学习域名列表排序方向：1=A→Z，-1=Z→A
+const learnedSortDir = ref(1)
 
 // 排除规则
 const rules = reactive({
@@ -30,6 +34,8 @@ const rules = reactive({
 })
 const domainInput = ref('')
 const domainRoute = ref('ipv6')
+// 域名排除列表排序方向（*.x.com 与 x.com 同组、裸域名在前）
+const rulesSortDir = ref(1)
 
 // IP 排除
 const ipRanges = ref([])
@@ -38,6 +44,10 @@ const ipPrefix = ref('auto')
 const ipRoute = ref('ipv4')
 const recommend = ref(null)
 const recommendLoading = ref(false)
+// IP 排除列表排序方向（IP/CIDR 按字母序）
+const ipSortDir = ref(1)
+// 推荐连接列表排序方向（按域名，无域名时退回 IP）
+const recommendSortDir = ref(1)
 
 // 网络方案（启用/禁用 IPv4、认证后自动启用 IPv4）已移除：
 // 工作流提供 enable_ipv4 / disable_ipv4 等节点可实现相同功能
@@ -45,6 +55,7 @@ const recommendLoading = ref(false)
 // DNS Fallback（作为"已配置的排除规则"的第三个子tab）
 const dnsList = ref([])
 const dnsInput = ref('')
+const dnsSortDir = ref(1)
 
 // ===== 当前分流配置悬浮窗 =====
 // 生产环境（pywebview）由后端 open_traffic_config_window 创建独立子窗口；
@@ -90,14 +101,22 @@ const filteredLearned = computed(() => {
   return kw ? learning.domains.filter((d) => fuzzyMatch(d, kw)) : learning.domains
 })
 
-const pagedLearned = computed(() => paginate(filteredLearned.value, learnedPage.page, learnedPage.pageSize))
+const sortedLearned = computed(() => sortBy(filteredLearned.value, (x) => x, learnedSortDir.value, compareText))
+
+const pagedLearned = computed(() => paginate(sortedLearned.value, learnedPage.page, learnedPage.pageSize))
 
 const filteredRules = computed(() => {
   const kw = rules.keyword.trim()
   return kw ? rules.list.filter((d) => fuzzyMatch(d.domain || '', kw)) : rules.list
 })
 
-const pagedRules = computed(() => paginate(filteredRules.value, rules.page, rules.pageSize))
+// 域名排除：按 d.domain 排序，*.x.com 与 x.com 同组、裸域名在前
+const sortedRules = computed(() => sortBy(filteredRules.value, (x) => x.domain, rulesSortDir.value, compareDomain))
+
+const pagedRules = computed(() => paginate(sortedRules.value, rules.page, rules.pageSize))
+
+const sortedIpRanges = computed(() => sortBy(ipRanges.value, (x) => x.cidr || '', ipSortDir.value, compareText))
+const sortedDnsList = computed(() => sortBy(dnsList.value, (x) => x.domain || '', dnsSortDir.value, compareDomain))
 
 const routeOptions = [
   { label: '走 IPv6 校园网', value: 'ipv6' },
@@ -453,7 +472,7 @@ const recommendItems = computed(() => {
       ipMap.set(c.remote_ip, { ip: c.remote_ip, process: c.process, hostname: c.hostname || '', route_type: c.route_type })
     }
   }
-  return Array.from(ipMap.values())
+  return sortBy(Array.from(ipMap.values()), (c) => c.hostname || c.ip || '', recommendSortDir.value)
 })
 
 async function loadTrafficForExclude() {
@@ -686,6 +705,8 @@ onBeforeUnmount(() => {
         <span class="search-count" v-if="learning.keyword.trim() && learning.domains.length">
           {{ filteredLearned.length }}/{{ learning.domains.length }}
         </span>
+        <div class="search-row-spacer"></div>
+        <SortToggle v-model:dir="learnedSortDir" subject="域名" />
         <n-button size="small" :disabled="!pagedLearned.length" @click="toggleSelectAll">
           {{ pageAllChecked ? '取消全选' : '全选' }}
         </n-button>
@@ -753,6 +774,8 @@ onBeforeUnmount(() => {
           <span class="search-count" v-if="rules.keyword.trim() && rules.list.length">
             {{ filteredRules.length }}/{{ rules.list.length }}
           </span>
+          <div class="search-row-spacer"></div>
+          <SortToggle v-model:dir="rulesSortDir" subject="域名" />
         </div>
 
         <div class="rule-list">
@@ -815,6 +838,7 @@ onBeforeUnmount(() => {
         <div class="recommend-box">
           <div class="recommend-head">
             <span class="add-title">从当前连接推荐</span>
+            <SortToggle v-model:dir="recommendSortDir" compact subject="推荐连接" />
             <n-button size="tiny" :loading="recommendLoading" @click="loadTrafficForExclude">刷新连接</n-button>
           </div>
           <div class="section-desc">显示当前未走 WARP 的连接（直连），点击可一键将其 IP 网段加入排除列表。</div>
@@ -843,9 +867,12 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <div class="list-sort-row">
+          <SortToggle v-model:dir="ipSortDir" subject="IP / CIDR" />
+        </div>
         <div class="rule-list">
           <div v-if="!ipRanges.length" class="empty-hint">暂无 IP 排除规则</div>
-          <div v-for="r in ipRanges" :key="r.cidr" class="rule-item">
+          <div v-for="r in sortedIpRanges" :key="r.cidr" class="rule-item">
             <div class="rule-header">
               <span class="rule-domain mono">
                 {{ r.cidr }}
@@ -893,9 +920,12 @@ onBeforeUnmount(() => {
             title="把 WARP 中已有的 DNS fallback 域名读回本地配置">从WARP同步</n-button>
         </div>
 
+        <div class="list-sort-row">
+          <SortToggle v-model:dir="dnsSortDir" subject="域名" />
+        </div>
         <div class="rule-list">
           <div v-if="!dnsList.length" class="empty-hint">暂无 DNS fallback 域名</div>
-          <div v-for="d in dnsList" :key="d.domain" class="rule-item">
+          <div v-for="d in sortedDnsList" :key="d.domain" class="rule-item">
             <div class="rule-header">
               <span class="rule-domain mono">{{ d.domain }}</span>
               <div class="rule-actions">
@@ -969,6 +999,19 @@ onBeforeUnmount(() => {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   white-space: nowrap;
+}
+
+/* 把排序切换与右侧操作按钮推到行尾 */
+.search-row-spacer {
+  flex: 1;
+}
+
+/* 无搜索框的列表，排序切换单独成行右对齐 */
+.list-sort-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 
 .domain-list {
@@ -1126,7 +1169,11 @@ onBeforeUnmount(() => {
 .recommend-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
+}
+
+.recommend-head .add-title {
+  flex: 1;
 }
 
 .recommend-box .section-desc {

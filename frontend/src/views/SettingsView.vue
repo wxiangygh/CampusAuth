@@ -4,6 +4,8 @@ import { NButton, NInput, NAutoComplete, NSwitch, NInputGroup, NSelect, NInputNu
 import { store, doAutoSave, openUpdate } from '../store'
 import { api } from '../bridge'
 import { ui } from '../ui'
+import { sortBy } from '../utils/sortlists'
+import SortToggle from '../components/SortToggle.vue'
 
 // ===== 应用信息（版本 / 安装位置）=====
 const appInfo = ref({ version: '', install_dir: '', exe: '' })
@@ -69,11 +71,23 @@ const restoreOptions = computed(() => [
   ...workflowOptions.value,
 ])
 
+// 退出 hook：默认"无"，退出时不执行任何工作流
+const exitHookOptions = computed(() => [
+  { label: '无（退出时不执行工作流）', value: '' },
+  ...workflowOptions.value,
+])
+
 // ===== WiFi 扫描 =====
 // 扫描是异步的：先下发扫描请求，等系统拿到新结果后再读取并展开候选列表。
 const wifiOptions = ref([])
+// WiFi 候选列表排序方向：1 = A→Z，-1 = Z→A（扫描结果默认按信号强度返回）
+const wifiSortDir = ref(1)
 const scanning = ref(false)
 const wifiInputRef = ref(null)
+
+const sortedWifiOptions = computed(() =>
+  sortBy(wifiOptions.value, (o) => o.label, wifiSortDir.value)
+)
 
 async function refreshWifi() {
   if (scanning.value) return
@@ -144,7 +158,7 @@ watch(
 
 // 按钮绑定工作流：立即保存
 watch(
-  () => [store.form.auth_button_workflow, store.form.restore_button_workflow],
+  () => [store.form.auth_button_workflow, store.form.restore_button_workflow, store.form.exit_hook_workflow],
   () => {
     if (!store.configLoaded) return
     clearTimeout(autoSaveTimer)
@@ -206,6 +220,7 @@ async function initSettings() {
     f.warp_reconnect_delay = config.warp_reconnect_delay || 20
     f.auth_button_workflow = config.auth_button_workflow || 'default_auth'
     f.restore_button_workflow = config.restore_button_workflow || ''
+    f.exit_hook_workflow = config.exit_hook_workflow || ''
     store.configRevision = config._revision || 0
     await nextTick()
     store.configLoaded = true
@@ -239,6 +254,9 @@ async function initSettings() {
     if (!ids.has(store.form.auth_button_workflow)) store.form.auth_button_workflow = 'default_auth'
     if (store.form.restore_button_workflow && !ids.has(store.form.restore_button_workflow)) {
       store.form.restore_button_workflow = ''
+    }
+    if (store.form.exit_hook_workflow && !ids.has(store.form.exit_hook_workflow)) {
+      store.form.exit_hook_workflow = ''
     }
   } catch (e) {
     console.error('Failed to load workflows:', e)
@@ -274,11 +292,14 @@ onBeforeUnmount(() => {
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">WiFi 网络</label>
-          <n-input-group>
-            <n-auto-complete ref="wifiInputRef" v-model:value="store.form.wifi_name" :options="wifiOptions"
-              :get-show="() => wifiOptions.length > 0" placeholder="选择或输入WiFi名称" style="flex: 1" />
-            <n-button :loading="scanning" @click="refreshWifi">扫描</n-button>
-          </n-input-group>
+          <div class="wifi-row">
+            <n-input-group class="wifi-input-group">
+              <n-auto-complete ref="wifiInputRef" v-model:value="store.form.wifi_name" :options="sortedWifiOptions"
+                :get-show="() => wifiOptions.length > 0" placeholder="选择或输入WiFi名称" style="flex: 1" />
+              <n-button :loading="scanning" @click="refreshWifi">扫描</n-button>
+            </n-input-group>
+            <SortToggle v-model:dir="wifiSortDir" compact subject="WiFi 名称" />
+          </div>
         </div>
         <div class="form-group">
           <label class="form-label">认证账号</label>
@@ -319,6 +340,13 @@ onBeforeUnmount(() => {
         <div class="form-group">
           <label class="form-label">「恢复网络」按钮执行的工作流</label>
           <n-select v-model:value="store.form.restore_button_workflow" :options="restoreOptions" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">退出时执行的工作流（托盘「退出」触发）</label>
+          <n-select v-model:value="store.form.exit_hook_workflow" :options="exitHookOptions" />
         </div>
       </div>
 
@@ -423,6 +451,18 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
+}
+
+/* 输入框组与排序切换并排，切换按钮不参与 input-group 的圆角拼接 */
+.wifi-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wifi-input-group {
+  flex: 1;
+  min-width: 0;
 }
 
 .toggle-grid {

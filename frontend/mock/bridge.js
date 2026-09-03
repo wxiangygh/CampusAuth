@@ -3,6 +3,14 @@
 const delay = (value, ms = 40) => new Promise((resolve) => setTimeout(() => resolve(value), ms))
 const clone = (value) => JSON.parse(JSON.stringify(value))
 
+// 进程图标 mock：真实环境由后端从 exe 提取 32x32 PNG 转成 data URL，
+// dev 预览无 Python 后端，这里用彩色字母方块代替，仅用于验证布局。
+const procIcon = (letter, color) =>
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="7" fill="${color}"/><text x="16" y="23" font-family="Segoe UI,sans-serif" font-size="18" font-weight="700" fill="#fff" text-anchor="middle">${letter}</text></svg>`
+  )
+
 const CATALOG = [
   { id: 'ensure_wifi', name: '检查并连接目标 WiFi', description: '确认目标 SSID，必要时发起 WiFi 连接。', group: '基础网络', default_timeout: 15, default_retries: 1 },
   { id: 'detect_warp_state', name: '检测 WARP 当前状态', description: '已连接时跳过重复认证准备步骤。', group: '基础网络', default_timeout: 8, default_retries: 0 },
@@ -156,6 +164,15 @@ const api = {
         { process: 'steam.exe', hostname: 'cdn.cloudflare.steamstatic.com', remote_ip: '104.18.30.182', remote_port: 443, route_type: 'ipv4_warp', is_warp: true },
         { process: 'QQ.exe', hostname: 'qzs.qq.com', remote_ip: '119.147.235.122', remote_port: 443, route_type: 'ipv4', is_warp: false },
       ],
+      icons: {
+        'chrome.exe': procIcon('C', '#4285f4'),
+        'Code.exe': procIcon('V', '#007acc'),
+        'python.exe': procIcon('P', '#ffd43b'),
+        'WeChat.exe': procIcon('W', '#07c160'),
+        'cloudflared.exe': procIcon('F', '#f6821f'),
+        'steam.exe': procIcon('S', '#1b2838'),
+        'QQ.exe': procIcon('Q', '#12b7f5'),
+      },
     }, 90),
   get_traffic_status_slow: (ips) =>
     delay(Object.fromEntries((ips || []).map((ip) => [ip, ip.startsWith('2') ? 'ipv6.example.net' : 'resolved.example.net'])), 300),

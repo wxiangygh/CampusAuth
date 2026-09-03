@@ -9,7 +9,9 @@ import { NConfigProvider, NButton, NTag } from 'naive-ui'
 import { waitForApi, api } from '../bridge'
 import { naiveTheme, themeOverrides, isDark } from '../theme'
 import { ui } from '../ui'
+import { sortBy, compareDomain } from '../utils/sortlists'
 import AppIcon from '../components/AppIcon.vue'
+import SortToggle from '../components/SortToggle.vue'
 
 const loading = ref(false)
 const loadedAt = ref('')
@@ -20,6 +22,18 @@ const state = reactive({
   legacy: [],    // 旧版 IP/CIDR 排除规则残留
   dns: [],       // WARP 中当前的 DNS fallback 域名
 })
+
+// 每列独立的排序方向：1 = A→Z，-1 = Z→A
+const domainSortDir = ref(1)
+const cidrSortDir = ref(1)
+const dnsSortDir = ref(1)
+
+// 域名列：*.x.com 与 x.com 同组，组内裸域名在前（降序只翻转分组之间）
+const sortedDomains = computed(() => sortBy(state.domains, (x) => x, domainSortDir.value, compareDomain))
+// IPv6 白名单与旧版残留同属一列，共用一个排序方向
+const sortedIpv6 = computed(() => sortBy(state.ipv6, (x) => x, cidrSortDir.value))
+const sortedLegacy = computed(() => sortBy(state.legacy, (x) => x, cidrSortDir.value))
+const sortedDns = computed(() => sortBy(state.dns, (x) => x, dnsSortDir.value, compareDomain))
 
 const hasAny = computed(() =>
   state.domains.length + state.ipv6.length + state.legacy.length + state.dns.length > 0)
@@ -109,19 +123,25 @@ onMounted(async () => {
         <section class="viewer-col">
           <div class="col-head">
             <span class="col-title">WARP 当前排除规则</span>
-            <n-tag size="small">{{ state.domains.length }}</n-tag>
+            <div class="col-head-right">
+              <n-tag size="small">{{ state.domains.length }}</n-tag>
+              <SortToggle v-model:dir="domainSortDir" compact subject="域名" />
+            </div>
           </div>
           <div class="col-sub">域名排除规则（tunnel host）</div>
           <div class="col-list">
             <div v-if="!state.domains.length" class="empty-hint">WARP 中暂无域名排除规则</div>
-            <div v-for="r in state.domains" :key="r" class="col-item mono">{{ r }}</div>
+            <div v-for="r in sortedDomains" :key="r" class="col-item mono">{{ r }}</div>
           </div>
         </section>
 
         <section class="viewer-col">
           <div class="col-head">
             <span class="col-title">IPv6 白名单 CIDR</span>
-            <n-tag size="small" type="success">{{ state.ipv6.length }}</n-tag>
+            <div class="col-head-right">
+              <n-tag size="small" type="success">{{ state.ipv6.length }}</n-tag>
+              <SortToggle v-model:dir="cidrSortDir" compact subject="CIDR" />
+            </div>
           </div>
           <div class="col-sub">
             域名规则自动生成的 IPv6 路由 CIDR
@@ -132,9 +152,9 @@ onMounted(async () => {
           </div>
           <div class="col-list">
             <div v-if="!state.ipv6.length && !state.legacy.length" class="empty-hint">暂无 IPv6 白名单 CIDR</div>
-            <div v-for="r in state.ipv6" :key="r" class="col-item mono">{{ r }}</div>
+            <div v-for="r in sortedIpv6" :key="r" class="col-item mono">{{ r }}</div>
             <template v-if="state.legacy.length">
-              <div class="col-item mono legacy" v-for="r in state.legacy" :key="r">{{ r }}</div>
+              <div class="col-item mono legacy" v-for="r in sortedLegacy" :key="r">{{ r }}</div>
             </template>
           </div>
           <div class="col-foot" v-if="state.legacy.length">
@@ -147,12 +167,15 @@ onMounted(async () => {
         <section class="viewer-col">
           <div class="col-head">
             <span class="col-title">WARP DNS Fallback 域名</span>
-            <n-tag size="small">{{ state.dns.length }}</n-tag>
+            <div class="col-head-right">
+              <n-tag size="small">{{ state.dns.length }}</n-tag>
+              <SortToggle v-model:dir="dnsSortDir" compact subject="域名" />
+            </div>
           </div>
           <div class="col-sub">WARP 中当前的 DNS fallback（本地解析）域名</div>
           <div class="col-list">
             <div v-if="!state.dns.length" class="empty-hint">WARP 中暂无 DNS fallback 域名</div>
-            <div v-for="d in state.dns" :key="d" class="col-item mono">{{ d }}</div>
+            <div v-for="d in sortedDns" :key="d" class="col-item mono">{{ d }}</div>
           </div>
         </section>
       </div>
@@ -282,6 +305,14 @@ onMounted(async () => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 计数标签与排序切换靠右成组，避免 space-between 把标签甩到中间 */
+.col-head-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .col-sub {

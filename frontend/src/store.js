@@ -38,6 +38,8 @@ export const store = reactive({
     // 主页按钮绑定的工作流：'' = 恢复按钮使用内置恢复逻辑
     auth_button_workflow: 'default_auth',
     restore_button_workflow: '',
+    // 退出 hook：'' = 退出时不执行任何工作流
+    exit_hook_workflow: '',
   },
   configLoaded: false,
   configRevision: 0,
@@ -356,6 +358,7 @@ export function collectFormConfig() {
     warp_reconnect_delay: Number(f.warp_reconnect_delay || 20),
     auth_button_workflow: String(f.auth_button_workflow || 'default_auth'),
     restore_button_workflow: String(f.restore_button_workflow || ''),
+    exit_hook_workflow: String(f.exit_hook_workflow || ''),
   }
 }
 

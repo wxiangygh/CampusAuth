@@ -4,6 +4,9 @@ import { NButton, NInput, NSwitch, NCheckbox } from 'naive-ui'
 import { api } from '../bridge'
 import { store } from '../store'
 import { ui } from '../ui'
+import { sortBy } from '../utils/sortlists'
+import AppIcon from '../components/AppIcon.vue'
+import SortToggle from '../components/SortToggle.vue'
 
 // 6 类路由：标签即语义，不再依赖颜色区分（单色设计）
 const ROUTE_ORDER = ['ipv4', 'ipv6', 'ipv4_warp', 'ipv4_warp_ipv6', 'ipv6_warp', 'ipv6_warp_ipv4']
@@ -19,6 +22,8 @@ const ROUTE_LABEL = {
 const traffic = reactive({
   conns: [],
   stats: {},
+  // 进程名 → 图标 data URL，由后端按进程去重下发
+  icons: {},
   warpUnderlay: 'ipv4',
   cumulativeMode: false,
   autoRefresh: true,
@@ -35,7 +40,10 @@ const ROUTE_ACTION_LABEL = {
 
 const cumulativeConns = reactive(new Map())
 const selectedConns = reactive(new Set())
-const collapsedGroups = reactive(new Set())
+// 折叠状态用白名单：只记录"已展开"的进程，未记录的即折叠 → 默认全部折叠
+const expandedGroups = reactive(new Set())
+// 进程分组（以及组内连接）的排序方向：1 = A→Z，-1 = Z→A
+const procSortDir = ref(1)
 
 let loadingSlow = false
 let autoTimer = null
@@ -76,6 +84,8 @@ async function refreshFast() {
     }
     traffic.conns = data.connections || []
     traffic.stats = data.stats || traffic.stats
+    // 合并而非替换：累计展示时可能仍显示已断开进程的连接，其图标不能丢失
+    traffic.icons = Object.assign({}, traffic.icons, data.icons || {})
     traffic.warpUnderlay = data.warp_underlay || 'ipv4'
     if (traffic.cumulativeMode && traffic.conns.length) {
       for (const c of traffic.conns) cumulativeConns.set(connId(c), c)
@@ -167,20 +177,59 @@ const filteredConns = computed(() => {
   return conns
 })
 
+// 进程名 → 图标 data URL（大小写不敏感查表）
+const iconMap = computed(() => {
+  const m = {}
+  for (const [name, url] of Object.entries(traffic.icons || {})) {
+    if (url) m[name.toLowerCase()] = url
+  }
+  return m
+})
+
+function procIcon(name) {
+  return iconMap.value[String(name || '').toLowerCase()] || null
+}
+
 const groupedConns = computed(() => {
   const groups = {}
   for (const c of filteredConns.value) {
     const key = c.process || 'unknown'
     ;(groups[key] ||= []).push(c)
   }
-  return Object.keys(groups)
-    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
-    .map((name) => ({ name, items: groups[name] }))
+  const dir = procSortDir.value
+  return sortBy(Object.keys(groups), (x) => x, dir).map((name) => ({
+    name,
+    // 组内连接同样按字母排序：优先域名，无解析域名时退回 IP
+    items: sortBy(groups[name], (c) => c.hostname || c.remote_ip || '', dir),
+  }))
 })
 
 function toggleGroupCollapse(proc) {
-  if (collapsedGroups.has(proc)) collapsedGroups.delete(proc)
-  else collapsedGroups.add(proc)
+  if (expandedGroups.has(proc)) expandedGroups.delete(proc)
+  else expandedGroups.add(proc)
+}
+
+const allExpanded = computed(
+  () => groupedConns.value.length > 0 && groupedConns.value.every((g) => expandedGroups.has(g.name))
+)
+
+// 单按钮切换：已全部展开时点击折叠全部，否则展开全部
+function toggleAllCollapse() {
+  if (allExpanded.value) expandedGroups.clear()
+  else for (const g of groupedConns.value) expandedGroups.add(g.name)
+}
+
+// 折叠状态下分组内看不到任何路由信息，给一个按数量排序的概要（最多 3 类）
+function routeSummary(group) {
+  const counts = {}
+  for (const c of group.items) {
+    const key = c.route_type || 'ipv4'
+    counts[key] = (counts[key] || 0) + 1
+  }
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([key, n]) => ({ key, n }))
 }
 
 function toggleConn(id, checked) {
@@ -400,6 +449,7 @@ onBeforeUnmount(() => {
       <n-checkbox :checked="allSelected" @update:checked="toggleSelectAll">全选</n-checkbox>
       <n-input v-model:value="traffic.search" size="small" placeholder="搜索进程名 / 域名 / IP" clearable
         style="width: min(280px, 100%)" />
+      <SortToggle v-model:dir="procSortDir" subject="进程名" />
       <label class="tv-switch">
         <n-switch :value="traffic.cumulativeMode" size="small" @update:value="toggleCumulative" />
         累计展示
@@ -409,6 +459,12 @@ onBeforeUnmount(() => {
         自动刷新
       </label>
       <div class="tv-toolbar-spacer"></div>
+      <n-button size="tiny" quaternary :disabled="!groupedConns.length" @click="toggleAllCollapse()">
+        <template #icon>
+          <AppIcon :name="allExpanded ? 'collapseAll' : 'expandAll'" :size="13" />
+        </template>
+        {{ allExpanded ? '全部折叠' : '全部展开' }}
+      </n-button>
       <n-button quaternary circle size="small" class="refresh-btn" title="刷新" @click="refreshFast()">
         <svg class="refresh-icon" :class="{ spinning: traffic.loadingFast }" viewBox="0 0 24 24" fill="none"
           aria-hidden="true">
@@ -431,7 +487,7 @@ onBeforeUnmount(() => {
         {{ traffic.cumulativeMode ? '暂无累计连接' : '暂无活动连接' }}
       </div>
       <div v-for="group in groupedConns" :key="group.name" class="proc-group"
-        :class="{ collapsed: collapsedGroups.has(group.name) }">
+        :class="{ collapsed: !expandedGroups.has(group.name) }">
         <div class="proc-group-header" @click="toggleGroupCollapse(group.name)">
           <svg class="collapse-icon" viewBox="0 0 10 10">
             <path d="M2 3 L5 7 L8 3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"
@@ -440,8 +496,17 @@ onBeforeUnmount(() => {
           <n-checkbox :checked="group.items.every((c) => selectedConns.has(connId(c)))"
             :style="{ opacity: group.items.some((c) => selectedConns.has(connId(c))) && !group.items.every((c) => selectedConns.has(connId(c))) ? 0.5 : 1 }"
             @click.stop @update:checked="(v) => toggleGroup(group.name, v)" />
+          <span class="proc-icon-box">
+            <img v-if="procIcon(group.name)" :src="procIcon(group.name)" class="proc-icon" alt="" />
+            <span v-else class="proc-icon-fallback">{{ (group.name[0] || '?').toUpperCase() }}</span>
+          </span>
           <span class="proc-name">{{ group.name }}</span>
           <span class="proc-count">{{ group.items.length }}</span>
+          <span v-if="!expandedGroups.has(group.name)" class="proc-summary">
+            <span v-for="s in routeSummary(group)" :key="s.key" class="proc-summary-tag">
+              {{ ROUTE_LABEL[s.key] || ROUTE_LABEL.ipv4 }} {{ s.n }}
+            </span>
+          </span>
         </div>
         <div class="proc-group-body">
           <div v-for="(c, i) in group.items" :key="i" class="conn-row"
@@ -769,6 +834,57 @@ onBeforeUnmount(() => {
   color: var(--text-primary);
 }
 
+/* 进程图标：由后端从 exe 提取，尺寸固定保证无图标时行高不跳动 */
+.proc-icon-box {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.proc-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  image-rendering: auto;
+}
+
+/* 提取失败（系统进程、权限不足等）时回退为首字母色块 */
+.proc-icon-fallback {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  color: var(--text-tertiary);
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+/* 折叠时补一行路由概要，避免全折叠状态下完全看不到路由信息 */
+.proc-summary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.proc-summary-tag {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
 /* 刷新按钮：纯图标、无底色，与主题背景融为一体；加载时图标自旋，尺寸不变 */
 .refresh-btn {
   flex-shrink: 0;
@@ -800,12 +916,6 @@ onBeforeUnmount(() => {
 
 .proc-group.collapsed .collapse-icon {
   transform: rotate(-90deg);
-}
-
-.proc-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
 }
 
 .proc-count {

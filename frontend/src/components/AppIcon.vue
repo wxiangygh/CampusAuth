@@ -37,6 +37,14 @@ const ICONS = {
   minus: '<line x1="5" y1="12" x2="19" y2="12"/>',
   // 关闭
   x: '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>',
+  // 排序：升序 A→Z（短→长，配合文字标签 A→Z 使用）
+  sortAsc: '<path d="M4 7h6"/><path d="M4 12h11"/><path d="M4 17h16"/>',
+  // 排序：降序 Z→A（长→短）
+  sortDesc: '<path d="M4 7h16"/><path d="M4 12h11"/><path d="M4 17h6"/>',
+  // 全部展开（两组箭头朝外）
+  expandAll: '<polyline points="8 9 12 5 16 9"/><polyline points="8 15 12 19 16 15"/>',
+  // 全部折叠（两组箭头朝内）
+  collapseAll: '<polyline points="8 5 12 9 16 5"/><polyline points="8 19 12 15 16 19"/>',
 }
 </script>
 

@@ -153,6 +153,9 @@ DEFAULT_CONFIG = {
     # restore_button_workflow 为空串时使用内置恢复逻辑（run_restore_task）
     "auth_button_workflow": "default_auth",
     "restore_button_workflow": "",
+    # 退出 hook：托盘菜单「退出」时、进程结束前同步执行的工作流。
+    # 空串 = 不执行任何 hook（默认）。典型用途是退出前断开 WARP / 注销校园网。
+    "exit_hook_workflow": "",
 }
 
 

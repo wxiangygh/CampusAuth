@@ -176,6 +176,16 @@ def get_wifi_interface_name():
     return None
 
 
+def _is_virtual_adapter_ip(ip: str) -> bool:
+    """判断是否虚拟适配器/未连接时才出现的地址。
+
+    - 192.168.137.x：Windows 移动热点 / ICS 共享的默认网段（"本地连接* 1" 等
+      Wi-Fi Direct 虚拟网卡），不是校园网分配的真实地址
+    - 169.254.x：APIPA 自动配置地址，表示未获取到 DHCP
+    """
+    return ip.startswith('192.168.137.') or ip.startswith('169.254.')
+
+
 def get_local_ip():
     wifi_name = get_wifi_interface_name()
     if wifi_name:
@@ -185,13 +195,16 @@ def get_local_ip():
         for line in lines:
             line_stripped = line.strip()
             # 遇到新的适配器标题时才重置 found_wifi（不在空行时重置，
-            # 因为适配器标题行后常紧跟空行，会导致 WLAN 部分的 IPv4 被跳过）
+            # 因为适配器标题行后常紧跟空行，会导致 WLAN 部分的 IPv4 被跳过）。
+            # 注意：只认"标题里含 WLAN 网卡名"——不能用 'Wireless'/'无线' 宽匹配，
+            # 否则会误匹配 Wi-Fi Direct 虚拟网卡（"本地连接* 1"，开了移动热点后
+            # IP 是 192.168.137.1），导致取到共享地址而非真实校园网 IP。
             if 'adapter' in line_stripped.lower() or '适配器' in line_stripped:
-                found_wifi = (wifi_name in line_stripped or '无线' in line_stripped or 'Wireless' in line_stripped)
+                found_wifi = wifi_name in line_stripped
                 continue
             if found_wifi and ('IPv4' in line_stripped or 'IPv4 地址' in line_stripped) and ':' in line_stripped:
                 ip = line_stripped.split(':', 1)[1].strip()
-                if ip and not ip.startswith('172.16.'):
+                if ip and not _is_virtual_adapter_ip(ip) and not ip.startswith('172.16.'):
                     return ip
                 continue
     import socket
@@ -200,7 +213,7 @@ def get_local_ip():
         s.connect(('8.8.8.8', 80))
         ip = s.getsockname()[0]
         s.close()
-        if ip.startswith('172.16.'):
+        if ip.startswith('172.16.') or _is_virtual_adapter_ip(ip):
             return ''
         return ip
     except Exception:

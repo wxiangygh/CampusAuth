@@ -18,7 +18,7 @@ Windows 托盘应用，提供校园网自动认证、WARP 排除管理、流量�
 
 - Windows 10/11
 - Python 3.12
-- [Cloudflare WARP](https://1.1.1.1/) 客户端（使用 WARP 排除功能时需要）
+- [Cloudflare WARP](https://1.1.1.1/) 客户端
 
 ## 依赖安装
 

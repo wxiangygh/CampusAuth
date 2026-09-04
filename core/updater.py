@@ -405,6 +405,18 @@ def _installer_script(new_exe: Path, install_dir: Path, pid: int,
     return script
 
 
+# PyInstaller onefile 运行时注入的环境变量。更新安装器由旧进程启动，
+# 若继承这些变量，其重启的新 exe 会去旧进程已删除的 _MEI 临时目录加载
+# python312.dll，报 "Failed to load Python DLL / LoadLibrary 找不到指定的模块"。
+# 启动安装器前必须从子进程环境中剔除（脚本内还有一道 Remove-Item 兜底）。
+_PYI_ENV_VARS = (
+    '_MEIPASS2',
+    '_PYI_APPLICATION_HOME_DIR',
+    '_PYI_ARCHIVE_FILE',
+    '_PYI_PARENT_PROCESS_LEVEL',
+)
+
+
 def install_update(new_exe: str | Path, install_dir: str | Path,
                    restart: bool = True, version: str = '') -> dict[str, Any]:
     """启动图形安装器完成覆盖安装。
@@ -430,11 +442,16 @@ def install_update(new_exe: str | Path, install_dir: str | Path,
             # 千万别加 DETACHED_PROCESS——实测它会让子进程脱离控制台会话，
             # 结果是 tasklist 查不到目标进程、管道命令直接挂死，更新装不上。
             creation_flags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+        # 传净化过的环境：不让安装器（及其重启的新 exe）继承 _MEIPASS2 等变量
+        env = os.environ.copy()
+        for var in _PYI_ENV_VARS:
+            env.pop(var, None)
         subprocess.Popen(
             ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA',
              '-WindowStyle', 'Hidden', '-File', str(script)],
             creationflags=creation_flags,
             close_fds=True,
+            env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

@@ -12,7 +12,10 @@ from core.config import (
     DEFAULT_REAUTH_WORKFLOW, DEFAULT_RESTART_WARP_WORKFLOW,
     DEFAULT_RESTORE_WORKFLOW, get_config,
 )
-from core.network import get_wifi_interface_name, has_public_ipv6, is_warp_connected
+from core.network import (apply_link_exclusive, detect_link_type,
+                          get_wifi_interface_name, get_wired_interface_name,
+                          has_public_ipv6, is_warp_connected,
+                          prepare_wifi_connection)
 from core.warp_manager import (
     _set_warp_endpoint_ipv6, _set_warp_masque_mode, connect_warp_result,
     disconnect_warp, get_warp_cli,
@@ -76,11 +79,15 @@ WORKFLOW_CATALOG = {
         'name': '校园网 Portal 认证',
         'description': '向校园网认证服务器提交账号并解析结果。',
         'group': 'Portal 认证',
+        'configurable': True,
+        'config_kind': 'portal',
     },
     'portal_logout': {
         'name': '校园网 Portal 注销',
-        'description': '注销当前 Portal 会话，可放在重认证或独立工作流开头。',
+        'description': '按自定义步骤列表依次点击注销页面按钮（如"注销→确定"），步骤间等待页面变化。',
         'group': 'Portal 认证',
+        'configurable': True,
+        'config_kind': 'portal',
     },
     'set_warp_endpoint_ipv6': {
         'name': '切换 WARP 到 IPv6 端点',
@@ -129,7 +136,7 @@ WORKFLOW_CATALOG = {
     },
     'connect_warp': {
         'name': '连接 Cloudflare WARP',
-        'description': '在硬超时内连接，并按可恢复错误重试。',
+        'description': '按官方文档的模式链连接：默认先「流量和DNS」（warp，连通性检查经隧道内 DNS 代理，成功率高），失败再退「仅流量」（tunnel_only）兜底；节点参数 warp_mode 可指定单模式。',
         'group': 'Cloudflare WARP',
     },
     'refresh_status': {
@@ -159,11 +166,53 @@ def _skip_if_ready(context: WorkflowContext):
     return bool(context.data.get('already_connected'))
 
 
-def _interface(context: WorkflowContext):
-    interface_name = context.data.get('interface_name') or get_wifi_interface_name()
-    if not interface_name:
-        return None, StepResult.fail('无法获取 WiFi 接口名称', code='interface_missing',
-                                     retryable=True)
+def _interface(context: WorkflowContext, step: StepSpec | None = None):
+    """选择本节点应操作的网卡，返回 (interface_name, error)。
+
+    解析顺序（后两者支持在节点 params.link_mode 里显式指定，实现按节点
+    灵活控制走有线/无线，例如恢复流程中的「启用 IPv4」强制走有线）：
+    1. 节点 params.link_mode 显式为 wired/wireless → 直接选对应网卡；
+    2. context.data['link_type']（工作流预扫描的链路类型）→ wired 用有线
+       网卡，无线/未指定沿用 WiFi 网卡逻辑（兼容旧工作流）。
+    """
+    params = getattr(step, 'params', None) or {}
+    link_mode = str(params.get('link_mode') or 'auto').strip().lower()
+    if link_mode == 'wired':
+        interface_name = get_wired_interface_name()
+        if not interface_name:
+            return None, StepResult.fail('未找到有线网卡', code='interface_missing',
+                                         retryable=True)
+        context.data['interface_name'] = interface_name
+        return interface_name, None
+    if link_mode == 'wireless':
+        interface_name = get_wifi_interface_name()
+        if not interface_name:
+            interface_name = get_wired_interface_name()
+            if not interface_name:
+                return None, StepResult.fail(
+                    '未找到可用网卡：无线接口不存在，也未检测到有线网卡',
+                    code='interface_missing', retryable=True)
+            logger.info('[interface] 指定无线但系统无可用 WLAN，按有线兜底：%s', interface_name)
+        context.data['interface_name'] = interface_name
+        return interface_name, None
+    # auto：按工作流预扫描的链路类型
+    if context.data.get('link_type') == 'wired':
+        interface_name = get_wired_interface_name()
+        if not interface_name:
+            return None, StepResult.fail('未找到有线网卡', code='interface_missing',
+                                         retryable=True)
+    else:
+        interface_name = context.data.get('interface_name') or get_wifi_interface_name()
+        if not interface_name:
+            # 链路被判为 wireless 但系统没有可用 WLAN 接口（纯有线机器
+            # 检测失误时的自愈）：按有线兜底，而不是报"无法获取 WiFi 接口名称"
+            interface_name = get_wired_interface_name()
+            if not interface_name:
+                return None, StepResult.fail(
+                    '未找到可用网卡：无线接口不存在，也未检测到有线网卡',
+                    code='interface_missing', retryable=True)
+            logger.info('[interface] 链路判定 wireless 但无可用 WLAN，按有线兜底：%s',
+                        interface_name)
     context.data['interface_name'] = interface_name
     return interface_name, None
 
@@ -174,6 +223,9 @@ def _reset_ipv6_dns_command(interface_name: str, timeout: float = 5):
 
 
 def _ensure_wifi(context: WorkflowContext, step: StepSpec) -> StepResult:
+    # 有线链路下 WiFi 连接节点无意义：直接跳过（不算失败，链路隔离已保证走有线）
+    if context.data.get('link_type') == 'wired':
+        return StepResult.ok('有线链路，跳过 WiFi 连接')
     wifi_name = str(context.config.get('wifi_name', '')).strip()
     if not wifi_name:
         return StepResult.fail('WiFi 名称未配置', code='wifi_not_configured')
@@ -184,6 +236,11 @@ def _ensure_wifi(context: WorkflowContext, step: StepSpec) -> StepResult:
     connected = wifi_name in output and ('已连接' in output or 'connected' in output.lower())
     if connected:
         return StepResult.ok(f'已连接 {wifi_name}')
+    # 连接前的准备：网卡被禁用则启用、软件无线电关闭则自动打开
+    # （飞行模式/Fn 键软关是 netsh wlan connect 报"无线电已关闭"直接失败的常见原因）
+    ok, prepare_msg = prepare_wifi_connection(timeout=15)
+    if not ok:
+        return StepResult.fail(f'WiFi 准备失败：{prepare_msg}', code='wifi_prepare_failed')
     code, output, error = run_command(['netsh', 'wlan', 'connect', f'name={wifi_name}'], shell=False, timeout=timeout)
     if code != 0:
         detail = (error or output).strip()[:160] or f'返回码 {code}'
@@ -225,7 +282,7 @@ def _disconnect_warp_action(context: WorkflowContext, step: StepSpec) -> StepRes
 
 def _prepare_network(context: WorkflowContext, step: StepSpec) -> StepResult:
     disable_ipv4, enable_ipv4, _, _ = _auth_helpers()
-    interface_name, error = _interface(context)
+    interface_name, error = _interface(context, step)
     if error:
         return error
     if is_warp_connected() and not context.data.get('strict_full_run'):
@@ -249,7 +306,7 @@ def _enable_ipv4_action(context: WorkflowContext, step: StepSpec) -> StepResult:
     _, enable_ipv4, _, _ = _auth_helpers()
     if _skip_if_ready(context) and not context.data.get('warp_connected'):
         return StepResult.ok('WARP 已连接，跳过准备阶段启用 IPv4')
-    interface_name, error = _interface(context)
+    interface_name, error = _interface(context, step)
     if error:
         return error
     if not enable_ipv4(interface_name, timeout=_command_timeout(context, 8)):
@@ -262,7 +319,7 @@ def _disable_ipv4_action(context: WorkflowContext, step: StepSpec) -> StepResult
     if _skip_if_ready(context):
         return StepResult.ok('WARP 已连接，跳过禁用 IPv4')
     disable_ipv4, _, _, _ = _auth_helpers()
-    interface_name, error = _interface(context)
+    interface_name, error = _interface(context, step)
     if error:
         return error
     if not disable_ipv4(interface_name, timeout=_command_timeout(context, 8)):
@@ -278,7 +335,7 @@ def _disable_ipv4_action(context: WorkflowContext, step: StepSpec) -> StepResult
 def _configure_ipv6_dns_action(context: WorkflowContext, step: StepSpec) -> StepResult:
     if _skip_if_ready(context):
         return StepResult.ok('WARP 已连接，跳过 IPv6 DNS 设置')
-    interface_name, error = _interface(context)
+    interface_name, error = _interface(context, step)
     if error:
         return error
     primary = f'netsh interface ipv6 set dnsservers "{interface_name}" static 2606:4700:4700::1111 primary'
@@ -296,7 +353,7 @@ def _configure_ipv6_dns_action(context: WorkflowContext, step: StepSpec) -> Step
 
 
 def _reset_ipv6_dns_action(context: WorkflowContext, step: StepSpec) -> StepResult:
-    interface_name, error = _interface(context)
+    interface_name, error = _interface(context, step)
     if error:
         return error
     code, _, error_text = _reset_ipv6_dns_command(
@@ -321,23 +378,147 @@ def _wait_public_ipv6_action(context: WorkflowContext, step: StepSpec) -> StepRe
     return StepResult.fail('在限定时间内未获取到公网 IPv6', code='ipv6_timeout', retryable=True)
 
 
+def _server_to_ip_port(server: str) -> dict:
+    """把 "ip:port" / "域名:port" / "域名" 服务器串拆成覆盖项；空串返回 {}。
+
+    端口可选：不带端口时 portal_port 置空（core.auth 会直接用 host 拼地址），
+    同时避免全局 portal_port 误加到用户填的域名上。
+    """
+    server = str(server or '').strip()
+    if not server:
+        return {}
+    if '://' in server:
+        server = server.split('://', 1)[1]
+    server = server.split('/', 1)[0].strip()
+    if not server:
+        return {}
+    if ':' in server:
+        ip, _, port = server.rpartition(':')
+        return {'portal_ip': ip.strip(), 'portal_port': port.strip()}
+    return {'portal_ip': server, 'portal_port': ''}
+
+
+def _portal_variant_configured(variant) -> bool:
+    """按认证方式判断变体是否实际配置过。
+
+    web：认证网址 / 按钮名 / 点击步骤 任一非空；http：服务器非空
+    （http 的空服务器表示"回退全局服务器"，在自动检测场景视为未配置，
+     否则自动检测会选中一套空 HTTP 配置跑错方式——正是"自动检测不生效"
+     的根因：用户配置在 wired 变体，运行时选中了只有旧按钮名的 wireless）。
+    """
+    if not isinstance(variant, dict):
+        return False
+    method = str(variant.get('method') or 'http').lower()
+    if method == 'web':
+        return bool(str(variant.get('auth_url') or '').strip()
+                    or str(variant.get('button_name') or '').strip()
+                    or variant.get('click_steps'))
+    return bool(str(variant.get('server') or '').strip())
+
+
+def _resolve_portal_params(step: StepSpec, context) -> dict:
+    """按 link_mode 选出有线/无线变体并补齐默认值。
+
+    - link_mode 显式 wired/wireless 时优先采用（两套都配置时起区分作用）；
+    - auto 时优先用工作流预扫描写入 context.data['link_type'] 的结果，
+      避免同一工作流内二次探测导致前后不一致；无预扫描再现场检测；
+    - 选中的变体缺失**或实际未配置**（空 HTTP/无网址无按钮无步骤）时回退
+      另一套已配置变体——不论 link_mode 是否显式。"自动检测选中一套空
+      配置"正是回退要修的 bug（用户配置在有线，无线只有旧按钮名残留，
+      运行时被跑成对全局服务器的 HTTP 注销超时）；
+    - method 缺省为 http、server 缺省为空（由调用方回退全局 portal_ip/portal_port），
+      因此空 params 的内置工作流行为与改造前完全一致。
+    """
+    params = getattr(step, 'params', None) or {}
+    data = getattr(context, 'data', None) or {}
+    link_mode = str(params.get('link_mode') or 'auto').strip().lower()
+    if link_mode in ('wired', 'wireless'):
+        link = link_mode
+    else:
+        link = data.get('link_type')
+        if link not in ('wired', 'wireless'):
+            try:
+                link = detect_link_type()
+            except Exception:
+                logger.exception('detect_link_type failed, fallback to wireless')
+                link = 'wireless'
+    variant = params.get(link) if isinstance(params.get(link), dict) else None
+    if not _portal_variant_configured(variant):
+        other_link = 'wireless' if link == 'wired' else 'wired'
+        other = params.get(other_link)
+        if _portal_variant_configured(other):
+            logger.info('[portal] 链路 %s 的变体未配置，回退使用 %s 变体配置',
+                        link, other_link)
+            variant = other
+    if not isinstance(variant, dict):
+        variant = {}
+    method = str(variant.get('method') or 'http').lower()
+    if method not in ('web', 'http'):
+        method = 'http'
+    from core.portal_web import normalize_click_steps
+    click_steps = normalize_click_steps(variant.get('click_steps'))
+    resolved = {
+        'link': link,
+        'method': method,
+        'auth_url': str(variant.get('auth_url') or '').strip(),
+        'button_name': str(variant.get('button_name') or '').strip(),
+        'click_steps': click_steps,
+        'user_selector': str(variant.get('user_selector') or '').strip(),
+        'pass_selector': str(variant.get('pass_selector') or '').strip(),
+        'success_keyword': str(variant.get('success_keyword') or '').strip(),
+        'fail_keyword': str(variant.get('fail_keyword') or '').strip(),
+        'server': str(variant.get('server') or '').strip(),
+    }
+    logger.info('[portal] 解析配置：链路=%s 方法=%s 网址=%s 点击步骤=%d',
+                resolved['link'], resolved['method'],
+                resolved['auth_url'] or '(空)', len(click_steps))
+    return resolved
+
+
 def _portal_login(context: WorkflowContext, step: StepSpec) -> StepResult:
     if _skip_if_ready(context):
         return StepResult.ok('WARP 已连接，无需重复 Portal 认证')
     _, _, portal_login, portal_logout = _auth_helpers()
-    if context.current_attempt > 1:
-        portal_logout(context.config, timeout=min(4, context.remaining()))
-    success, message = portal_login(context.config, timeout=min(8, context.remaining()))
+    resolved = _resolve_portal_params(step, context.config)
+    if resolved['method'] == 'web':
+        from core.portal_web import web_portal_submit
+        success, message = web_portal_submit(
+            resolved['auth_url'], context.config.get('username', ''),
+            context.config.get('password', ''), resolved['button_name'],
+            user_selector=resolved['user_selector'], pass_selector=resolved['pass_selector'],
+            success_keyword=resolved['success_keyword'], fail_keyword=resolved['fail_keyword'],
+            click_steps=resolved['click_steps'],
+            timeout=min(step.timeout, context.remaining()), cancelled=context.cancelled)
+    else:
+        effective = {**context.config, **_server_to_ip_port(resolved['server'])}
+        if context.current_attempt > 1:
+            portal_logout(effective, timeout=min(4, context.remaining()))
+        success, message = portal_login(effective, timeout=min(8, context.remaining()))
+    if context.cancelled():
+        return StepResult.fail('已取消', code='cancelled')
     if success:
         return StepResult.ok(message)
     retryable = any(token in message for token in
-                    ('暂时不可用', '连接失败', 'AC认证失败', 'HTTP 5', '请求异常'))
+                    ('暂时不可用', '连接失败', 'AC认证失败', 'HTTP 5', '请求异常',
+                     '打开认证网页失败', '无法交互', '未加载完成'))
     return StepResult.fail(message, code='portal_failed', retryable=retryable)
 
 
 def _portal_logout_action(context: WorkflowContext, step: StepSpec) -> StepResult:
     _, _, _, portal_logout = _auth_helpers()
-    success = portal_logout(context.config, timeout=min(6, context.remaining()))
+    resolved = _resolve_portal_params(step, context)
+    if resolved['method'] == 'web':
+        from core.portal_web import web_portal_submit
+        success, _message = web_portal_submit(
+            resolved['auth_url'], context.config.get('username', ''),
+            context.config.get('password', ''), resolved['button_name'],
+            user_selector=resolved['user_selector'], pass_selector=resolved['pass_selector'],
+            success_keyword=resolved['success_keyword'], fail_keyword=resolved['fail_keyword'],
+            click_steps=resolved['click_steps'],
+            timeout=min(step.timeout, context.remaining()), cancelled=context.cancelled)
+    else:
+        effective = {**context.config, **_server_to_ip_port(resolved['server'])}
+        success = portal_logout(effective, timeout=min(6, context.remaining()))
     if context.cancelled():
         return StepResult.fail('已取消', code='cancelled')
     if success:
@@ -502,21 +683,130 @@ def _configure_warp(context: WorkflowContext, step: StepSpec) -> StepResult:
     return StepResult.ok('WARP 连接参数已准备')
 
 
+# 「仅流量」（tunnel_only）兜底模式的本网络失败记忆：网络指纹 → 失败时刻。
+# 官方机制：Traffic only 的连通性检查依赖本地 DNS 代理的隧道外 DoH 直连，
+# 校园网封锁该直连时此模式永远卡 Connecting。确认失败一次后 6 小时内不再
+# 浪费兜底预算（换网络后指纹变化，记忆自动失效）。
+_TUNNEL_ONLY_FAILED_AT: dict[str, float] = {}
+_TUNNEL_ONLY_RETRY_AFTER = 6 * 3600.0
+
+
+def _network_fingerprint() -> str:
+    """当前网络的粗略指纹：公网 IPv6 的 /64 前缀（跨网络会变化）。"""
+    try:
+        from core.network import has_public_ipv6
+        _, addr = has_public_ipv6()
+        if addr:
+            return 'v6:' + ':'.join(str(addr).split(':')[:4])
+    except Exception:
+        pass
+    return 'unknown'
+
+
+def _tunnel_only_known_bad() -> bool:
+    failed_at = _TUNNEL_ONLY_FAILED_AT.get(_network_fingerprint())
+    return failed_at is not None and (time.monotonic() - failed_at) < _TUNNEL_ONLY_RETRY_AFTER
+
+
+def _mark_tunnel_only_failed() -> None:
+    _TUNNEL_ONLY_FAILED_AT[_network_fingerprint()] = time.monotonic()
+
+
+def _mark_tunnel_only_ok() -> None:
+    _TUNNEL_ONLY_FAILED_AT.pop(_network_fingerprint(), None)
+
+
 def _connect_warp(context: WorkflowContext, step: StepSpec) -> StepResult:
     if _skip_if_ready(context):
         context.data['warp_connected'] = True
         return StepResult.ok('WARP 已连接')
-    result = connect_warp_result(timeout=min(step.timeout, context.remaining()), max_attempts=1)
-    if result.success:
-        context.data['warp_connected'] = True
-        return StepResult.ok(result.message, attempts=result.attempts, elapsed=result.elapsed)
-    # 连接失败：中止可能仍在后台建立的连接。否则随后的回滚会恢复 IPv4
+    # 官方文档结论（Cloudflare One Client: Client modes / Known limitations）：
+    # 客户端只有在本机 DNS 代理（127.0.2.2/3）成功解析专用主机
+    # connectivity-check.warp-svc 并通过连通性检查后才显示「已连接」。
+    # - warp（Traffic and DNS）：本地 DNS 代理的 DoH 上游经隧道转发，隧道一建
+    #   立检查即可通过 → 校园网封锁 DoH 直连（162.159.36.x:443，见
+    #   core/network.py 注释）时唯一可靠的连接模式；
+    # - tunnel_only（Traffic only）：DNS 留在系统解析器，但连通性检查仍必须经
+    #   本地 DNS 代理，其 DoH 上游走隧道外直连 → 被校园网封锁时检查永远无法
+    #   通过，卡在 Connecting 直至超时（2026-09-06 多次实测，与官方机制一致）。
+    # 因此默认 auto：先 warp（高成功率），失败再退 tunnel_only 兜底。
+    warp_cli, cli_error = _resolve_warp_cli(context)
+    mode_pref = str(step.params.get('warp_mode')
+                    or context.config.get('warp_connect_mode') or 'auto').strip().lower()
+    if mode_pref not in ('auto', 'warp', 'tunnel_only'):
+        mode_pref = 'auto'
+    modes = {'warp': ['warp'], 'tunnel_only': ['tunnel_only']}.get(
+        mode_pref, ['warp', 'tunnel_only'])
+    if cli_error is not None:
+        modes = modes[:1]  # 找不到 warp-cli 时两种模式结局相同，不必重试
+    mode_labels = {'warp': '流量和DNS', 'tunnel_only': '仅流量'}
+    # 底层 IPv6 pin 必须在连接「前」生效：finalize 才建 pin 的话，IPv4 在线的
+    # 首轮连接里 warp-svc 会直接挑 engage 的 IPv4 端点（A 记录），隧道走 IPv4。
+    # 提前建好（幂等），warp-svc 只能走 IPv6 端点；IPv4 保持在线还保住了
+    # 系统 DNS。范围不含 DoH（162.159.36.x），不影响本地 DNS 代理的上游。
+    if context.config.get('warp_underlay_ipv6', True):
+        try:
+            from warp_exclusion import ensure_warp_underlay_ipv6_pin
+            ok, pin_msg = ensure_warp_underlay_ipv6_pin()
+            if ok:
+                logger.info('[connect_warp] %s', pin_msg)
+            else:
+                logger.warning('[connect_warp] IPv6 pin 建立失败：%s（按当前底层继续连接）', pin_msg)
+        except Exception as exc:
+            logger.warning('[connect_warp] IPv6 pin error: %s', exc)
+    total_budget = max(5.0, min(float(step.timeout), max(1.0, context.remaining())))
+    last_result = None
+    for idx, mode in enumerate(modes):
+        if context.cancelled():
+            return StepResult.fail('已取消', code='cancelled')
+        label = mode_labels[mode]
+        # auto 链兜底记忆：本网络已确认「仅流量」无法通过连通性检查 → 直接跳过
+        if mode == 'tunnel_only' and mode_pref == 'auto' and _tunnel_only_known_bad():
+            logger.info('[connect_warp] 跳过兜底「仅流量」模式：本网络此前已确认其连通性检查无法通过（DoH 直连被封）')
+            continue
+        if cli_error is None:
+            code, _, err = run_command([warp_cli, 'mode', mode],
+                                       shell=False, timeout=_command_timeout(context, 8))
+            if code == 0:
+                logger.info('[connect_warp] WARP 模式已切换：%s（%s）', label, mode)
+            else:
+                logger.warning('[connect_warp] 切换 %s 失败（%s），按当前模式继续连接',
+                               label, (err or '').strip()[:120])
+        if len(modes) == 1:
+            budget = total_budget
+        elif idx == 0:
+            # 首选模式一次给够：总预算的 8 成（预留 ~12s 给兜底），不设 30s 上限。
+            # 冷启动的隧道握手 + 隧道内连通性检查可能要 60s+，短预算截断会把
+            # 快要完成的握手掐掉重来，反而拖长总时间（2026-09-06 日志实测）
+            budget = min(total_budget,
+                         max(15.0, min(total_budget - 12.0, total_budget * 0.8)))
+        else:
+            # 兜底只给 10s：机制性失败的网络里长预算只是白等；
+            # 真正可用的网络上 10s 也足以完成握手
+            budget = max(5.0, min(10.0, min(float(step.timeout), max(1.0, context.remaining()))))
+        result = connect_warp_result(timeout=budget, max_attempts=1)
+        if result.success:
+            context.data['warp_connected'] = True
+            if mode == 'tunnel_only' and mode_pref == 'auto':
+                _mark_tunnel_only_ok()
+            return StepResult.ok(f'{result.message}（{label}模式）',
+                                 attempts=result.attempts, elapsed=result.elapsed)
+        logger.warning('[connect_warp] %s 模式连接失败（预算 %.0fs）：%s',
+                       label, budget, result.message[:120])
+        last_result = result
+        # 兜底失败且有真实等待（≥8s）才算确认：塌缩预算下的失败不作数
+        if mode == 'tunnel_only' and mode_pref == 'auto' and budget >= 8.0:
+            _mark_tunnel_only_failed()
+        # 每次换模式前断开残留连接，避免上一次的半开隧道干扰下一次模式
+        if cli_error is None:
+            run_command([warp_cli, 'disconnect'], shell=False,
+                        timeout=_command_timeout(context, 5))
+    # 全部模式失败：中止可能仍在后台建立的连接。否则随后的回滚会恢复 IPv4
     # 端点并重新启用 IPv4，WARP 会在几秒后经 IPv4 连上，留下
     # "IPv4 开启 + WARP 走 IPv4"的脏状态（2026-09-01 日志即此情形）
-    warp_cli = context.data.get('warp_cli') or get_warp_cli()
-    if warp_cli:
-        run_command([warp_cli, 'disconnect'], shell=False,
-                    timeout=_command_timeout(context, 5))
+    result = last_result
+    if result is None:
+        return StepResult.fail('无法连接 WARP', code='warp_connect_failed', retryable=True)
     return StepResult.fail(result.message, code=result.code, retryable=result.retryable,
                            attempts=result.attempts, elapsed=result.elapsed,
                            status_output=result.status_output[:200])
@@ -525,6 +815,8 @@ def _connect_warp(context: WorkflowContext, step: StepSpec) -> StepResult:
 def _refresh_status_action(context: WorkflowContext, step: StepSpec) -> StepResult:
     try:
         from core.status import network_status
+        # 工作流刚改过网卡/WARP/防火墙：清探测缓存再刷新，状态立即跟上
+        network_status.invalidate()
         network_status.request_refresh()
     except Exception:
         logger.exception('Could not request status refresh')
@@ -549,7 +841,12 @@ def _finalize(context: WorkflowContext, step: StepSpec) -> StepResult:
                 logger.warning(f'WARP underlay IPv6 pin failed in finalize: {msg}')
         except Exception as exc:
             logger.warning(f'WARP underlay IPv6 pin error in finalize: {exc}')
-    interface_name = context.data.get('interface_name') or get_wifi_interface_name()
+    # finalize 兜底恢复 IPv4：优先用工作流中已确定的网卡，否则按链路类型现取
+    # （单独运行收尾节点时 data 里可能没有 interface_name）
+    if context.data.get('interface_name'):
+        interface_name = context.data['interface_name']
+    else:
+        interface_name, _error = _interface(context, step)
     if interface_name and context.config.get('auto_enable_ipv4', True):
         if not enable_ipv4(interface_name, timeout=_command_timeout(context, 8)):
             return StepResult.fail('WARP 已连接，但恢复 IPv4 失败', code='finalize_ipv4_failed')
@@ -630,7 +927,7 @@ def resolve_workflow(config: dict, workflow_id: str | None = None) -> dict:
 
 
 def _publish(event):
-    from core.auth import _push_auth_progress
+    from core.auth import _push_auth_progress, push_runner_event
     status = event.get('status', 'running')
     operation_status = 'running' if status in ('running', 'retrying', 'success') else status
     app_state.update_operation(
@@ -643,6 +940,68 @@ def _publish(event):
     frontend_status = 'running' if status in ('running', 'retrying', 'success') else status
     _push_auth_progress(event.get('step', 0), event.get('total', 1),
                         event.get('message', ''), frontend_status, 'auth')
+    # 「测试工作流」悬浮窗的详细事件流（窗口未打开时内部自行忽略）
+    push_runner_event(event)
+
+
+_PORTAL_STEP_IDS = ('portal_login', 'portal_logout')
+
+
+def _resolve_workflow_link(steps) -> tuple[str, bool]:
+    """从 steps 提取链路类型，返回 (link_type, explicit)。
+
+    以第一个 Portal 节点的 params.link_mode 为准：
+    - 显式 wired/wireless → (该值, True)；
+    - auto / 无 params / 无 Portal 节点 → (detect_link_type(), False)。
+
+    explicit=True 时调用方执行链路隔离（禁用另一类型网卡）；
+    auto 仅用于 IPv4/IPv6 等节点选网卡，不动系统网卡状态（兼容旧工作流）。
+    """
+    for item in steps:
+        if not isinstance(item, dict) or item.get('id') not in _PORTAL_STEP_IDS:
+            continue
+        params = item.get('params')
+        mode = str(params.get('link_mode') or '').strip().lower() \
+            if isinstance(params, dict) else ''
+        if mode in ('wired', 'wireless'):
+            return mode, True
+        break  # 以第一个 Portal 节点为准
+    try:
+        return detect_link_type(), False
+    except Exception:
+        logger.exception('detect_link_type failed, fallback to wireless')
+        return 'wireless', False
+
+
+def resolve_global_nodes(steps, node_globals):
+    """把 node_mode='global' 的节点替换为其类型对应的全局配置。
+
+    - node_globals: {step_id: {'config': {...}, 'source': {...}}}，见 core.config；
+    - 全局配置覆盖 timeout/retries/retry_delay/continue_on_error/params
+      （enabled 始终属于所在工作流，不参与全局共享）；
+    - 某类型没有全局配置、或节点不是 global 模式时，原样返回该节点
+      （回退到节点自身配置，保证旧配置完全兼容）。
+    """
+    import copy as _copy
+
+    resolved = []
+    for item in steps:
+        step = dict(item) if isinstance(item, dict) else item
+        if not isinstance(step, dict):
+            resolved.append(step)
+            continue
+        mode = str(step.get('node_mode') or 'independent')
+        entry = (node_globals or {}).get(str(step.get('id', '')))
+        if mode == 'global' and isinstance(entry, dict) and isinstance(entry.get('config'), dict):
+            merged = dict(step)
+            for key in ('retries', 'timeout', 'retry_delay', 'continue_on_error', 'params'):
+                if key in entry['config']:
+                    merged[key] = _copy.deepcopy(entry['config'][key])
+            merged['id'] = step.get('id')
+            resolved.append(merged)
+            continue
+        resolved.append(step)
+    return resolved
 
 
 def run_auth_workflow(config=None, workflow=None, workflow_id=None, strict=True):
@@ -664,6 +1023,9 @@ def run_auth_workflow(config=None, workflow=None, workflow_id=None, strict=True)
     elif isinstance(workflow, dict):
         workflow_name = workflow.get('name', workflow_name)
         workflow = workflow.get('steps', DEFAULT_AUTH_WORKFLOW)
+    # 全局节点解析：node_mode='global' 的节点使用该类型的全局配置
+    workflow = resolve_global_nodes(workflow, config.get('node_globals'))
+    logger.info('开始执行工作流「%s」', workflow_name)
     core.state._auth_cancelled.clear()
     app_state.update_operation(kind='auth', status='running', step=0,
                                total=sum(1 for item in workflow if item.get('enabled', True)),
@@ -673,6 +1035,19 @@ def run_auth_workflow(config=None, workflow=None, workflow_id=None, strict=True)
                               publish=_publish,
                               overall_timeout=config.get('auth_total_timeout', 90))
     context.data['strict_full_run'] = bool(strict)
+    # 预扫描链路类型：IPv4/IPv6 等节点据此选网卡；
+    # 用户显式指定连接方式时先做链路隔离（只保留指定类型网卡工作），
+    # 避免 WiFi+网线双开时流量走错网卡导致认证页打不开/填不进。
+    link_type, link_explicit = _resolve_workflow_link(workflow)
+    context.data['link_type'] = link_type
+    if link_explicit:
+        link_ok, link_msg = apply_link_exclusive(link_type)
+        if not link_ok:
+            app_state.update_operation(kind='auth', status='error', message=link_msg)
+            return False, link_msg
+        logger.info('工作流链路=%s（用户指定），%s', link_type, link_msg)
+    else:
+        logger.info('工作流链路=%s（自动检测，未做网卡隔离）', link_type)
     try:
         result = RUNNER.run(workflow, context, success_message=f'{workflow_name}完成')
     except ValueError as exc:
@@ -681,6 +1056,9 @@ def run_auth_workflow(config=None, workflow=None, workflow_id=None, strict=True)
     if workflow_key:
         _record_step_stats(workflow_key, result, config)
     final_status = 'success' if result.success else ('cancelled' if result.code == 'cancelled' else 'error')
+    # 保留最近一次运行结果（含每节点耗时/重试统计），供测试悬浮窗的
+    # done 事件读取；仅供 UI 展示，不参与任何控制流判断
+    core.state.last_workflow_result = result
     app_state.update_operation(kind='auth', status=final_status,
                                message=result.message,
                                details={'code': result.code, 'failed_step': result.failed_step,
@@ -725,6 +1103,9 @@ def _record_step_stats(workflow_key: str, result, config: dict) -> None:
 def apply_auto_tune(workflow_id: str) -> list[dict]:
     """把调优建议写回该工作流的 steps；内置工作流需要标记 customized 才能持久化。
 
+    全局节点（node_mode='global'）的建议写入该类型的全局配置 node_globals，
+    而不是节点副本——否则运行时全局配置会覆盖调优结果，建议永远不生效。
+
     返回变更明细列表（每项含节点 id 与超时/重试的前后值），无建议时返回空列表。
     """
     import copy as _copy
@@ -739,27 +1120,71 @@ def apply_auto_tune(workflow_id: str) -> list[dict]:
     if not definition:
         return []
     steps = _copy.deepcopy(definition.get('steps') or [])
+    node_globals = _copy.deepcopy(snapshot.get('node_globals') or {})
+    old_globals = _copy.deepcopy(node_globals)
     before = {str(step.get('id', '')): (float(step.get('timeout', 15) or 15),
                                         int(step.get('retries', 0) or 0))
               for step in steps}
-    if not get_tuning_store().apply_to_workflow(workflow_id, steps):
+    global_steps = [step for step in steps
+                    if str(step.get('node_mode') or 'independent') == 'global']
+    local_steps = [step for step in steps
+                   if str(step.get('node_mode') or 'independent') != 'global']
+    changed_local = get_tuning_store().apply_to_workflow(workflow_id, local_steps)
+
+    # 全局节点：建议写入 node_globals[step_id].config（该类型共享一份）
+    global_changes = []
+    for step in global_steps:
+        step_id = str(step.get('id', ''))
+        store = get_tuning_store()
+        current_timeout = float(step.get('timeout', 15) or 15)
+        current_retries = int(step.get('retries', 0) or 0)
+        new_timeout = store.suggest_timeout(workflow_id, step_id, current_timeout)
+        new_retries = store.suggest_retries(workflow_id, step_id, current_retries)
+        if new_timeout is None and new_retries is None:
+            continue
+        entry = node_globals.setdefault(step_id, {'config': {}, 'source': {}})
+        cfg = entry.setdefault('config', {})
+        prev_cfg = (old_globals.get(step_id) or {}).get('config') or {}
+        old_timeout = float(prev_cfg.get('timeout', current_timeout))
+        old_retries = int(prev_cfg.get('retries', current_retries))
+        if new_timeout is not None:
+            cfg['timeout'] = new_timeout
+        if new_retries is not None:
+            cfg['retries'] = new_retries
+        global_changes.append({'id': step_id,
+                               'timeout_from': old_timeout,
+                               'timeout': float(cfg.get('timeout', old_timeout)),
+                               'retries_from': old_retries,
+                               'retries': int(cfg.get('retries', old_retries))})
+
+    if not changed_local and not global_changes:
         return []
+
     updated = _copy.deepcopy(definition)
     updated['steps'] = steps
     if updated.get('built_in'):
         updated['customized'] = True
     new_workflows = _copy.deepcopy(workflows)
     new_workflows[workflow_id] = updated
-    config_store.patch({'workflows': new_workflows})
+    patch = {'workflows': new_workflows}
+    if node_globals != (snapshot.get('node_globals') or {}):
+        patch['node_globals'] = node_globals
+    config_store.patch(patch)
+
     changes = []
-    for step in steps:
+    for step in local_steps:
         step_id = str(step.get('id', ''))
         old_timeout, old_retries = before.get(step_id, (step['timeout'], step['retries']))
         if step['timeout'] != old_timeout or step['retries'] != old_retries:
             changes.append({'id': step_id,
                             'timeout_from': old_timeout, 'timeout': step['timeout'],
                             'retries_from': old_retries, 'retries': step['retries']})
-    logger.info('[tuning] 已按运行数据自动调整工作流 %s：%s', workflow_id,
+    changes.extend(global_changes)
+    # 日志里用用户保存的工作流名，id 只作补充——否则配置里改过名的工作流
+    # 在日志中显示的仍是旧 id，用户对不上号
+    wf_name = str(definition.get('name') or workflow_id)
+    wf_label = wf_name if wf_name == workflow_id else f'{wf_name}（{workflow_id}）'
+    logger.info('[tuning] 已按运行数据自动调整工作流 %s：%s', wf_label,
                 '; '.join(f"{c['id']}(timeout {c['timeout_from']}→{c['timeout']}, "
                            f"retries {c['retries_from']}→{c['retries']})" for c in changes))
     return changes

@@ -4,7 +4,10 @@
 """
 import ctypes
 import logging
+import os
+import re
 import sys
+import tempfile
 import time
 
 from core.command import run_command
@@ -168,12 +171,180 @@ def scan_wifi_networks(force_scan=True):
 
 
 def get_wifi_interface_name():
-    code, output, _ = run_command('netsh wlan show interfaces', timeout=3)
+    # cancellable=False：本函数同时服务于状态轮询等后台探测，
+    # 取消认证不应让链路检测退化（曾致纯有线机器被误判为 wireless）
+    code, output, _ = run_command('netsh wlan show interfaces', timeout=3,
+                                  cancellable=False)
     for line in output.split('\n'):
         line = line.strip()
         if (line.startswith('名称') or line.startswith('Name')) and ':' in line:
             return line.split(':', 1)[1].strip()
     return None
+
+
+def _wlan_connected(output: str) -> bool:
+    """netsh wlan show interfaces 输出是否存在「真实连接」的无线接口。
+
+    按接口块解析（名称/状态/SSID）：必须同时满足 状态=已连接 且 SSID 非空。
+    Wi-Fi Direct 虚拟接口（本地连接* N，移动热点/Miracast）可能显示
+    「已连接」但 SSID 为空，不能据此认为当前是无线联网
+    （曾导致纯有线机器的链路检测在虚拟接口抖动时误判为 wireless）。
+    """
+    if not output:
+        return False
+    state_connected = False
+    ssid = ''
+    for line in output.split('\n'):
+        s = line.strip()
+        if s.startswith('接口名称') or s.lower().startswith('name'):
+            continue
+        if (s.startswith('状态') or s.lower().startswith('state')) and ':' in s:
+            value = s.split(':', 1)[1].strip().lower()
+            state_connected = value in ('已连接', 'connected')
+        elif s.startswith('SSID') and ':' in s and not s.upper().startswith('BSSID'):
+            value = s.split(':', 1)[1].strip()
+            if value:
+                ssid = value
+    return state_connected and bool(ssid)
+
+
+def detect_link_type() -> str:
+    """检测当前联网方式，返回 'wireless' 或 'wired'（优先无线的简单启发式）。
+
+    供 Portal 节点在 link_mode=auto 时选用有线/无线配置变体。判定顺序：
+    1. WLAN 接口已连接 → 'wireless'；
+    2. 否则存在 Up 的有线(802.3)物理适配器 → 'wired'；
+    3. 都判不出 → 'wireless'（兜底，与应用整体以 WLAN 为主一致）。
+
+    有线探测复用 _list_physical_adapters（`Get-NetAdapter -Physical`，
+    Status 作为属性输出）。不能用 `Get-NetAdapter -Status Up` 的命令形式：
+    部分 Windows 构建不接受该参数（报"找不到与参数名称 Status 匹配的
+    参数"），探测必败会兜底成 wireless——没有无线接口的有线机器因此被
+    判成无线，Portal 自动检测全部失效。
+    """
+    _, wlan_output, _ = run_command('netsh wlan show interfaces', timeout=3,
+                                    cancellable=False)
+    if _wlan_connected(wlan_output):
+        return 'wireless'
+    for _attempt in range(2):  # 失败重试一次：偶发超时/取消不应误判
+        adapters = _list_physical_adapters(_MEDIA_WIRED)
+        if adapters and any(status.lower() == 'up' for _, status in adapters):
+            return 'wired'
+        if adapters:
+            break  # 命令成功但无 Up 的有线网卡 → 真无线
+    return 'wireless'
+
+
+def _wlan_name_from_output(output: str) -> str | None:
+    """从 netsh wlan show interfaces 输出解析 WLAN 接口名（已连接才有效）。"""
+    for line in (output or '').split('\n'):
+        s = line.strip()
+        if (s.startswith('名称') or s.lower().startswith('name')) and ':' in s:
+            name = s.split(':', 1)[1].strip()
+            if name:
+                return name
+    return None
+
+
+def resolve_active_interface() -> tuple[str, str]:
+    """返回 (link_type, interface_name)：当前联网方式 + 应操作的网卡名。
+
+    与 detect_link_type 同一套判定，但复用一次 netsh 输出直接取 WLAN
+    接口名，避免探测方（状态轮询、get_network_detail）再各跑一遍命令：
+
+    1. WLAN 已连接 → ('wireless', WLAN 接口名)；
+    2. 否则存在 Up 的有线网卡 → ('wired', 有线网卡名)；
+    3. 兜底 → ('wireless', WLAN 接口名或 'WLAN')。
+    """
+    _, wlan_output, _ = run_command('netsh wlan show interfaces', timeout=3,
+                                    cancellable=False)
+    if _wlan_connected(wlan_output):
+        return 'wireless', _wlan_name_from_output(wlan_output) or 'WLAN'
+    wired = get_wired_interface_name()
+    if wired:
+        return 'wired', wired
+    # WLAN 未连接且没找到有线网卡：若系统根本没有可用无线接口，
+    # 只能按有线兜底（纯有线机器上 WLAN 被禁用时 netsh 拿不到任何接口）
+    if not get_wifi_interface_name():
+        return 'wired', ''
+    return 'wireless', get_wifi_interface_name() or 'WLAN'
+
+
+# 物理网卡媒体类型：无线 802.11，有线 Native 802.3
+_MEDIA_WIRELESS = '802\\.11'
+_MEDIA_WIRED = '802\\.3'
+
+
+def _list_physical_adapters(media_pattern: str) -> list[tuple[str, str]]:
+    """列出媒体类型匹配的物理网卡，返回 [(名称, 状态)] 列表。
+
+    状态为 Get-NetAdapter 的 Status（Up / Disconnected / Disabled 等）。
+    """
+    ps = ("Get-NetAdapter -Physical | Where-Object { $_.PhysicalMediaType "
+          f"-match '{media_pattern}' }} | ForEach-Object {{ \"$($_.Name)|$($_.Status)\" }}")
+    code, output, _ = run_command(
+        ['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps],
+        shell=False, timeout=8, cancellable=False)
+    if code != 0:
+        return []
+    adapters = []
+    for line in (output or '').split('\n'):
+        line = line.strip()
+        if '|' not in line:
+            continue
+        name, _, status = line.rpartition('|')
+        name, status = name.strip(), status.strip()
+        if name:
+            adapters.append((name, status))
+    return adapters
+
+
+def get_wired_interface_name():
+    """获取有线(802.3)物理网卡名称，Up 状态优先；找不到返回 None。"""
+    adapters = _list_physical_adapters(_MEDIA_WIRED)
+    for name, status in adapters:
+        if status.lower() == 'up':
+            return name
+    return adapters[0][0] if adapters else None
+
+
+def _run_ps_adapter(cmdlet: str, name: str, timeout: float = 15.0) -> bool:
+    ps = f'{cmdlet} -Name "{name}" -Confirm:$false'
+    code, _, _ = run_command(
+        ['powershell', '-ExecutionPolicy', 'Bypass', '-Command', ps],
+        shell=False, timeout=timeout)
+    return code == 0
+
+
+def apply_link_exclusive(link: str) -> tuple[bool, str]:
+    """链路隔离：只保留 link 类型网卡工作，禁用另一类型的全部物理网卡。
+
+    用户在 Portal 节点显式指定 wired/wireless 时调用（auto 不动网卡，保持兼容）。
+    先启用 link 类型的所有网卡（可能被上一轮隔离禁用，保证来回切换可恢复），
+    再禁用另一类型。操作均幂等。
+
+    Returns:
+        (成功, 消息)。link 类型一张物理网卡都没有时返回失败。
+    """
+    if link not in ('wired', 'wireless'):
+        return True, ''
+    target_pattern = _MEDIA_WIRED if link == 'wired' else _MEDIA_WIRELESS
+    other_pattern = _MEDIA_WIRELESS if link == 'wired' else _MEDIA_WIRED
+    target = _list_physical_adapters(target_pattern)
+    if not target:
+        label = '有线' if link == 'wired' else '无线'
+        return False, f'未找到{label}网卡，无法按指定连接方式工作'
+    others = _list_physical_adapters(other_pattern)
+    enabled, disabled = [], []
+    for name, _ in target:
+        if _run_ps_adapter('Enable-NetAdapter', name):
+            enabled.append(name)
+    for name, _ in others:
+        if _run_ps_adapter('Disable-NetAdapter', name):
+            disabled.append(name)
+    msg = (f'链路隔离：已启用 {enabled or "无"}，已禁用 {disabled or "无"}')
+    logger.info('apply_link_exclusive(%s): %s', link, msg)
+    return True, msg
 
 
 def _is_virtual_adapter_ip(ip: str) -> bool:
@@ -186,7 +357,44 @@ def _is_virtual_adapter_ip(ip: str) -> bool:
     return ip.startswith('192.168.137.') or ip.startswith('169.254.')
 
 
+def get_adapter_ipv4(interface_name):
+    """解析指定网卡的 IPv4 地址（WARP 虚拟网段 / 热点共享 / APIPA 地址除外）。
+
+    与 get_local_ip 的 socket 回退不同：只认指定网卡的 ipconfig 段，不依赖
+    默认路由——WARP 全隧道在线时 socket 会落进隧道取到 WARP 的 172.16.x，
+    物理网卡的真实校园网 IPv4（172.21.x 等）反而拿不到。
+    """
+    if not interface_name:
+        return ''
+    code, output, _ = run_command('ipconfig', timeout=4)
+    if code != 0:
+        return ''
+    in_section = False
+    for line in output.split('\n'):
+        stripped = line.strip()
+        if 'adapter' in stripped.lower() or '适配器' in stripped:
+            # 段标题按结尾精确匹配，避免「以太网」误命中「以太网适配器 以太网 2:」段
+            in_section = stripped.rstrip(':').endswith(str(interface_name))
+            continue
+        if not in_section:
+            continue
+        if ('IPv4' in stripped or 'IPv4 地址' in stripped) and ':' in stripped:
+            ip = stripped.split(':', 1)[1].strip()
+            if ip and not ip.startswith('172.16.') and not _is_virtual_adapter_ip(ip):
+                return ip
+    return ''
+
+
 def get_local_ip():
+    # 优先解析当前活动物理网卡的 IPv4：有线联网时不再依赖 WiFi 段和 socket
+    # 回退（WARP 全隧道在线时 socket 会落进隧道，物理网卡地址取不到）
+    try:
+        _, active_iface = resolve_active_interface()
+        ip = get_adapter_ipv4(active_iface)
+        if ip:
+            return ip
+    except Exception:
+        pass
     wifi_name = get_wifi_interface_name()
     if wifi_name:
         code, output, _ = run_command('ipconfig', timeout=4)
@@ -239,6 +447,177 @@ def get_current_wifi_ssid():
             if ssid:
                 return ssid
     return ''
+
+
+def get_wifi_radio_state() -> tuple[str, str]:
+    """读取 WLAN 无线电状态，返回 (硬件状态, 软件状态)。
+
+    取值 'on' / 'off' / 'unknown'。netsh 在中文系统输出
+    "无线电状态  硬件开/软件关"，英文系统输出 "Radio state  Hardware On/Software Off"。
+    网卡被禁用或不存在时 netsh 报"系统上没有无线接口"，返回 ('unknown', 'unknown')。
+    """
+    code, output, _ = run_command('netsh wlan show interfaces', timeout=5,
+                                  cancellable=False)
+    if code != 0:
+        return 'unknown', 'unknown'
+    for line in output.splitlines():
+        stripped = line.strip()
+        low = stripped.lower()
+        if '无线电状态' not in stripped and not low.startswith('radio state') \
+                and not low.startswith('radio status'):
+            continue
+        if '无线电状态' in stripped:
+            rest = stripped.replace('无线电状态', '').strip()
+        else:
+            rest = stripped.split(':', 1)[1].strip() if ':' in stripped \
+                else stripped.split(None, 2)[-1].strip()
+        hw, sw = 'unknown', 'unknown'
+        for part in re.split(r'[/／]', rest):
+            p = part.strip().lower()
+            if '硬件' in p or 'hardware' in p:
+                hw = 'off' if ('关' in p or 'off' in p) else 'on'
+            elif '软件' in p or 'software' in p:
+                sw = 'off' if ('关' in p or 'off' in p) else 'on'
+        return hw, sw
+    return 'unknown', 'unknown'
+
+
+_RADIO_PS1_ERRORS = {
+    'NO_RADIO': '未找到 WLAN 无线电设备',
+    'TIMEOUT': '无线电操作超时',
+    'DENIED_BY_USER': '系统拒绝控制无线电（Windows 隐私设置中禁用了无线设备控制）',
+    'DENIED_BY_SYSTEM': '系统策略拒绝控制无线电',
+}
+
+
+def _enable_wifi_radio_via_winrt(timeout: float = 20.0) -> tuple[bool, str]:
+    """用 WinRT Radio API 打开 WLAN 软件无线电（飞行模式/软开关场景）。
+
+    脚本输出 ASCII 状态码（OK:xx / ERR:xx），中文提示由本函数映射，
+    避免 PowerShell 5.1 无 BOM 文件的中文编码问题。
+    """
+    script = '''$ErrorActionPreference = 'Stop'
+try {
+  [Windows.Devices.Radios.Radio,Windows.Runtime,ContentType=WindowsRuntime] | Out-Null
+  [Windows.Devices.Radios.RadioState,Windows.Runtime,ContentType=WindowsRuntime] | Out-Null
+  $op = [Windows.Devices.Radios.Radio]::GetRadiosAsync()
+  $deadline = (Get-Date).AddSeconds(6)
+  while ($op.Status -eq 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 50 }
+  if ($op.Status -ne 1) { Write-Output 'ERR:TIMEOUT'; exit 0 }
+  $wifi = @($op.GetResults() | Where-Object { $_.Kind -eq 'WiFi' }) | Select-Object -First 1
+  if (-not $wifi) { Write-Output 'ERR:NO_RADIO'; exit 0 }
+  if ($wifi.State -eq 'On') { Write-Output 'OK:ALREADY'; exit 0 }
+  $op2 = $wifi.SetStateAsync([Windows.Devices.Radios.RadioState]::On)
+  $deadline2 = (Get-Date).AddSeconds(6)
+  while ($op2.Status -eq 0 -and (Get-Date) -lt $deadline2) { Start-Sleep -Milliseconds 50 }
+  if ($op2.Status -ne 1) { Write-Output 'ERR:TIMEOUT'; exit 0 }
+  $res = $op2.GetResults().ToString()
+  if ($res -eq 'Allowed') { Write-Output 'OK:ON' }
+  elseif ($res -eq 'DeniedByUser') { Write-Output 'ERR:DENIED_BY_USER' }
+  elseif ($res -eq 'DeniedBySystem') { Write-Output 'ERR:DENIED_BY_SYSTEM' }
+  else { Write-Output "ERR:FAILED_$res" }
+} catch {
+  Write-Output 'ERR:EXCEPTION'
+}
+'''
+    fd, path = tempfile.mkstemp(prefix='campusauth_radio_', suffix='.ps1')
+    try:
+        with os.fdopen(fd, 'w', encoding='ascii') as f:
+            f.write(script)
+        code, output, err = run_command(
+            ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path],
+            shell=False, timeout=timeout)
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    text = (output or err or '').strip()
+    if code != 0:
+        return False, f'无线电开启脚本执行失败（返回码 {code}）'
+    if text.startswith('OK:'):
+        return True, 'WiFi 无线电已开启'
+    token = text.split(':', 1)[-1].strip() if ':' in text else ''
+    if token.startswith('FAILED_'):
+        return False, f'开启 WiFi 无线电失败（{token[len("FAILED_"):]}）'
+    if token.startswith('EXCEPTION'):
+        return False, '开启 WiFi 无线电失败（WinRT 调用异常）'
+    return False, _RADIO_PS1_ERRORS.get(token, f'开启 WiFi 无线电失败：{text[:80]}')
+
+
+def prepare_wifi_connection(timeout: float = 20.0) -> tuple[bool, str]:
+    """连接 WiFi 前的准备：确保无线网卡已启用、软件无线电已打开。
+
+    处理两类"无线没开"的状态（都是自动连接失败的常见原因）：
+    - 网卡被禁用（上一轮链路隔离/设备管理器）→ Enable-NetAdapter 启用全部
+      无线物理网卡，等接口出现在 netsh 里；
+    - 软件无线电关闭（飞行模式/软开关）→ WinRT Radio API 自动开启；
+    - 硬件开关关闭 → 无法程序化处理，返回明确提示让用户手动开。
+    返回 (ok, message)。
+    """
+    interface = get_wifi_interface_name()
+    if not interface:
+        adapters = _list_physical_adapters(_MEDIA_WIRELESS)
+        if not adapters:
+            return False, '本机没有无线网卡，无法连接 WiFi'
+        enabled = [name for name, _ in adapters if _run_ps_adapter('Enable-NetAdapter', name)]
+        logger.info('prepare_wifi_connection: 无线网卡被禁用，已启用 %s', enabled or '无')
+        # Enable-NetAdapter 后接口注册到 WLAN 服务需要一点时间
+        deadline = time.time() + 6
+        while time.time() < deadline:
+            time.sleep(1.0)
+            interface = get_wifi_interface_name()
+            if interface:
+                break
+        if not interface:
+            return False, '无线网卡已启用但接口未就绪，请稍后重试'
+    hw, sw = get_wifi_radio_state()
+    if hw == 'off':
+        return False, 'WiFi 无线电硬件开关处于关闭状态（Fn 键或物理开关），无法自动开启'
+    if sw == 'off':
+        ok, msg = _enable_wifi_radio_via_winrt(timeout=timeout)
+        if not ok:
+            return False, msg
+        hw2, sw2 = get_wifi_radio_state()
+        if sw2 == 'off':
+            return False, 'WiFi 无线电开启指令已发出但状态未变化'
+        logger.info('prepare_wifi_connection: 软件无线电已从关闭状态开启')
+    return True, ''
+
+
+def connect_wifi(ssid: str, timeout: float = 25) -> tuple[bool, str]:
+    """主动连接指定 WiFi，返回 (ok, message)。
+
+    开机自动认证用：无线环境下先连上用户配置的 WiFi 再执行认证。
+    netsh wlan connect 走系统已保存的配置文件（profile 名与 SSID 一致），
+    从未保存过的网络会直接报错返回。连接请求发出后轮询当前 SSID，
+    稳定落到其他网络时提前判失败，避免等满超时。
+    """
+    ssid = (ssid or '').strip()
+    if not ssid:
+        return False, '未配置 WiFi 名称'
+    ok, msg = prepare_wifi_connection(timeout=timeout)
+    if not ok:
+        return False, msg
+    interface = get_wifi_interface_name()
+    if not interface:
+        return False, '未找到可用的无线网卡'
+    code, output, err = run_command(
+        f'netsh wlan connect name="{ssid}" interface="{interface}"',
+        timeout=10, cancellable=False)
+    if code != 0:
+        detail = (output or err or '').strip().splitlines()
+        return False, (detail[0].strip() if detail else '连接请求发送失败')
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(1.5)
+        current = get_current_wifi_ssid()
+        if current == ssid:
+            return True, '已连接'
+        # 连接尝试开始 8 秒后仍稳定挂在别的网络上 → 本次连接已失败
+        if current and time.time() > deadline - timeout + 8:
+            return False, f'连接到了其他网络：{current}'
+    return False, '连接超时'
 
 
 def wait_for_network_ready(portal_ip, portal_port='801', max_retries=5):

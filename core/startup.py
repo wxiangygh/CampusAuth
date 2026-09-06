@@ -17,13 +17,20 @@ from core.state import WIFI_EVENT_NAME, _auth_lock
 from core.command import run_command
 from core.config import get_config
 from core.status import network_status
-from core.network import get_current_wifi_ssid, is_warp_connected, get_wifi_interface_name
+from core.network import (
+    connect_wifi, get_current_wifi_ssid, is_warp_connected,
+    get_wifi_interface_name, resolve_active_interface,
+)
 from core.warp_manager import update_tray_icon, update_tray_icon_restore
 
 logger = logging.getLogger('wifi_tray')
 
 TASK_NAME_STARTUP = 'WiFiAutoAuthStartup'
 SCRIPT_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
+# ShellExecuteW 的 nShowCmd：必须 SW_SHOWNORMAL(1)。该值写入新进程的
+# STARTUPINFO 后会覆盖其第一次 ShowWindow(SW_SHOWDEFAULT)——传 0
+# （SW_HIDE）会让提权后的 GUI 主窗体"闪现即被隐藏"。
+SW_SHOWNORMAL = 1
 
 
 def is_admin():
@@ -222,16 +229,27 @@ def start_wifi_event_monitor():
     t.start()
     logger.info("WiFi event monitor thread launched")
 
+def should_run_boot_auth(cfg=None, silent: bool = False) -> bool:
+    """开机自动认证只在开机自启（--silent 启动）链路执行。
+
+    用户主动启动应用时不自动认证——人就在电脑前，网络动作交给
+    用户自己决定（主页「开始认证」或工作流）。
+    """
+    return bool(silent and (cfg or get_config()).get('auto_auth'))
+
+
 def check_startup_wifi_and_auth():
-    """开机时检查 WiFi 并认证"""
+    """开机自动认证：无线先连接配置的 WiFi，有线直接认证。
+
+    仅由开机自启链路（--silent 启动）调用，手动启动不执行。
+    - 有线（或无线已连着目标 WiFi）：直接认证；
+    - 无线未连目标：netsh wlan connect 主动连接配置的 WiFi，成功后
+      再认证；未配置 WiFi 或连接失败则放弃本次认证（托盘提示）。
+    """
     # 延迟导入以避免循环依赖
     from core.auth import run_auth_task
     cfg = get_config()
     if not cfg.get('auto_auth'):
-        _update_tray_status()
-        return
-    target_wifi = cfg.get('wifi_name', '')
-    if not target_wifi:
         _update_tray_status()
         return
     # 先快速检测一次WARP状态，避免阻塞启动
@@ -240,21 +258,34 @@ def check_startup_wifi_and_auth():
         update_tray_icon(True, 'WARP已连接')
         return
 
-    current_wifi = get_current_wifi_ssid()
-    logger.info(f"Startup WiFi check: current={current_wifi!r}, target={target_wifi!r}")
-    if current_wifi == target_wifi:
-        if _auth_lock.acquire(blocking=False):
-            try:
-                logger.info("Connected to target WiFi but WARP not connected, starting auto-auth")
-                success, msg = run_auth_task()
-                logger.info(f"Startup auto-auth result: {success}, {msg}")
-                update_tray_icon(success, msg)
-            finally:
-                _auth_lock.release()
-        else:
-            logger.info("Auth already in progress on startup check")
+    link_type, _interface = resolve_active_interface()
+    if link_type == 'wireless':
+        target_wifi = str(cfg.get('wifi_name', '') or '').strip()
+        if not target_wifi:
+            logger.info('开机自动认证：无线网络但未配置 WiFi，无法主动连接，跳过')
+            _update_tray_status()
+            return
+        current_wifi = get_current_wifi_ssid()
+        if current_wifi != target_wifi:
+            logger.info(f'开机自动认证：无线环境，主动连接配置的 WiFi '
+                        f'{target_wifi!r}（当前：{current_wifi!r}）')
+            ok, msg = connect_wifi(target_wifi)
+            if not ok:
+                logger.warning(f'开机自动认证：连接 WiFi 失败：{msg}')
+                update_tray_icon(False, f'连接 WiFi 失败：{msg}')
+                return
+            logger.info(f'开机自动认证：WiFi 已连接（{msg}）')
+
+    if _auth_lock.acquire(blocking=False):
+        try:
+            logger.info('开机自动认证：开始执行认证')
+            success, msg = run_auth_task()
+            logger.info(f'Startup auto-auth result: {success}, {msg}')
+            update_tray_icon(success, msg)
+        finally:
+            _auth_lock.release()
     else:
-        _update_tray_status()
+        logger.info('Auth already in progress on startup check')
 
 
 def _update_tray_status():
@@ -408,9 +439,10 @@ def elevate_if_needed():
             exe_path = pythonw
             logger.debug(f"elevate_if_needed: using pythonw.exe: {exe_path}")
     try:
-        # nShowCmd=0 表示隐藏窗口（SW_HIDE）
+        # nShowCmd 见模块顶部 SW_SHOWNORMAL 注释；静默启动由 --silent 参数
+        # 控制（pywebview hidden=True），与这里的显示命令无关。
         ret = ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", exe_path, f'"{script}" {args}', None, 0
+            None, "runas", exe_path, f'"{script}" {args}', None, SW_SHOWNORMAL
         )
         logger.debug(f"elevate_if_needed: ShellExecuteW returned {ret}")
         if ret > 32:

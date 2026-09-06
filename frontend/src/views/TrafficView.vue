@@ -139,7 +139,12 @@ function pruneSelection() {
 // ===== 自动刷新 =====
 function startAutoRefresh() {
   stopAutoRefresh()
-  autoTimer = setInterval(() => refreshFast(), 3000)
+  autoTimer = setInterval(() => {
+    // 资源守卫：流量页不在用户视角（切到其他 tab / 窗口隐藏到托盘）时不拉取
+    // PowerShell 快照；恢复可见时由 watcher 立即刷新，数据不缺位
+    if (document.hidden || store.activeTab !== 'traffic') return
+    refreshFast()
+  }, 3000)
 }
 
 function stopAutoRefresh() {
@@ -377,10 +382,18 @@ watch(
   { immediate: true }
 )
 
+// 窗口从托盘恢复可见：立即刷新一次，数据即时跟上（隐藏期间定时器一直被守卫跳过）
+function onVisibilityChange() {
+  if (!document.hidden && store.activeTab === 'traffic' && traffic.autoRefresh) {
+    refreshFast()
+  }
+}
+
 onMounted(() => {
   if (store.activeTab === 'traffic' && traffic.autoRefresh) startAutoRefresh()
   updateBarCenter()
   window.addEventListener('resize', updateBarCenter)
+  document.addEventListener('visibilitychange', onVisibilityChange)
   if (trafficViewRef.value && typeof ResizeObserver !== 'undefined') {
     barObserver = new ResizeObserver(updateBarCenter)
     barObserver.observe(trafficViewRef.value)
@@ -391,6 +404,7 @@ onBeforeUnmount(() => {
   stopAutoRefresh()
   if (refreshTimer) clearTimeout(refreshTimer)
   window.removeEventListener('resize', updateBarCenter)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   if (barObserver) barObserver.disconnect()
 })
 </script>

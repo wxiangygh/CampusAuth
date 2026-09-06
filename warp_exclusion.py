@@ -599,10 +599,12 @@ def _list_ipv6_route_firewall_domains():
 # 不影响其他程序（DoH/API 走 104.16.x，不在屏蔽段内，不受影响）。
 
 WARP_UNDERLAY_PIN_RULE = 'CampusAuth_WARPv6Underlay'
-# Cloudflare WARP 端点 IPv4 段：162.158.0.0/15 覆盖 162.159.192-198（当前
+# Cloudflare WARP 端点 IPv4 段：162.159.192.0/21 覆盖 162.159.192-199（当前
 # conf.json 端点为 162.159.198.2，engage 域名的 A 记录在该段内轮换），
 # 188.114.96.0/20 覆盖 188.114.96-99 备用端点段。
-WARP_ENDPOINT_IPV4_RANGES = ('162.158.0.0/15', '188.114.96.0/20')
+# 注意不要扩大到 162.158.0.0/15：它会连带 162.159.36.1/46.1（WARP 客户端
+# 自用 DoH 解析端点 cloudflare-dns.com），把自己的 DNS 通路也封掉。
+WARP_ENDPOINT_IPV4_RANGES = ('162.159.192.0/21', '188.114.96.0/20')
 
 
 def _find_warp_svc_path():
@@ -615,13 +617,16 @@ def _find_warp_svc_path():
 
 
 def is_warp_underlay_pinned():
-    """检查 WARP 底层 IPv6 pin 防火墙规则是否存在"""
+    """检查 WARP 底层 IPv6 pin 防火墙规则是否存在。
+
+    用 netsh 而非 PowerShell：状态探测高频调用，PS 冷启动 1~5s 会拖垮
+    刷新周期；netsh ~0.2s，且找不到规则时退出码非 0，输出跨语言稳定。
+    """
     code, output, _ = run_command_simple([
-        'powershell', '-Command',
-        f'if (Get-NetFirewallRule -DisplayName "{WARP_UNDERLAY_PIN_RULE}" '
-        f'-ErrorAction SilentlyContinue) {{ "yes" }} else {{ "no" }}'
-    ], timeout=15)
-    return code == 0 and output.strip().lower() == 'yes'
+        'netsh', 'advfirewall', 'firewall', 'show', 'rule',
+        f'name={WARP_UNDERLAY_PIN_RULE}'
+    ], timeout=6)
+    return code == 0 and WARP_UNDERLAY_PIN_RULE in (output or '')
 
 
 def ensure_warp_underlay_ipv6_pin():

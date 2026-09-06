@@ -27,6 +27,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(calls, [1, 2])
         self.assertIn('retrying', [event['status'] for event in events])
 
+    def test_retry_stops_after_overall_deadline(self):
+        """总时限耗尽后不再开启节点内重试（避免塌缩预算空转）。"""
+        import time as _time
+        calls = []
+
+        def flaky(context, step):
+            calls.append(context.current_attempt)
+            if context.current_attempt == 1:
+                # 模拟首次尝试执行期间把总时限耗尽
+                context.overall_deadline = _time.monotonic() - 0.01
+            return StepResult.fail('temporary', retryable=True)
+
+        runner = WorkflowRunner({'first': flaky}, CATALOG)
+        context = WorkflowContext(config={}, cancelled=lambda: False)
+        context.overall_deadline = _time.monotonic() + 30
+        result = runner.run([{'id': 'first', 'retries': 3, 'retry_delay': 0, 'timeout': 5}],
+                            context)
+        self.assertFalse(result.success)
+        self.assertEqual(calls, [1])
+
     def test_failure_runs_rollbacks_in_reverse_order(self):
         rolled_back = []
 

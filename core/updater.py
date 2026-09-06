@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -234,8 +235,38 @@ def _ps_quote(text: str) -> str:
     return "'" + str(text).replace("'", "''") + "'"
 
 
+def _icon_png_base64() -> str:
+    """渲染应用图标为 48px PNG 并 base64，嵌入安装器品牌头部。
+
+    参考 ZCode（electron-builder）更新安装器：图标 + 产品名的头部是
+    安装器的主要视觉元素。打包后从 sys._MEIPASS 取（spec 已把
+    app.ico 打进包），开发态回退仓库根目录；都拿不到时返回空串，
+    安装器退化为纯文字头部，不影响安装流程。
+    """
+    import base64
+    import io
+    candidates = []
+    meipass = getattr(sys, '_MEIPASS', '')
+    if meipass:
+        candidates.append(Path(meipass) / 'app.ico')
+    candidates.append(Path(__file__).resolve().parents[1] / 'app.ico')
+    for candidate in candidates:
+        try:
+            if not candidate.is_file():
+                continue
+            from PIL import Image
+            with Image.open(candidate) as im:
+                im = im.resize((48, 48), Image.LANCZOS).convert('RGBA')
+                buf = io.BytesIO()
+                im.save(buf, 'PNG')
+                return base64.b64encode(buf.getvalue()).decode('ascii')
+        except Exception:
+            continue
+    return ''
+
+
 def _installer_script(new_exe: Path, install_dir: Path, pid: int,
-                      restart: bool, version: str = '') -> Path:
+                      restart: bool, version: str = '', dark: bool = False) -> Path:
     """生成 Windows 风格的图形安装器（PowerShell + WinForms）。
 
     为什么不再用 .cmd 脚本
@@ -247,6 +278,9 @@ def _installer_script(new_exe: Path, install_dir: Path, pid: int,
 
     改用 PowerShell + WinForms：原生 Windows 外观、进度可见，且用 `Get-Process`
     判断进程存活比 `tasklist | find` 可靠得多。
+
+    dark=True 时按应用的深色主题渲染安装窗体（黑白单色设计系统），
+    浅色主题/默认保持 Windows 原生白底。
 
     两个必须注意的点
     ----------------
@@ -262,13 +296,23 @@ def _installer_script(new_exe: Path, install_dir: Path, pid: int,
     heading = f'正在更新 {APP_NAME}'
     if version:
         heading = f'正在更新 {APP_NAME} 到 {version}'
-    hint = f'仅替换程序文件，{APP_NAME} 的账号、WiFi 与分流规则配置都会保留。'
     # PowerShell 里不能写 `Write-Log 'a' + $b`（会被当成三个参数），
     # 表达式必须先拼好再传，所以下面统一先算变量再调用。
     restart_literal = '$true' if restart else '$false'
+    # 主题配色（与应用黑白单色设计系统一致）：深色主题复用 cardColor/text 色
+    bg_hex = '#131316' if dark else '#FFFFFF'
+    fg_hex = '#E8E8EA' if dark else '#111113'
+    tip_hex = '#9B9BA1' if dark else '#6B6B72'
+    border_hex = '#2A2A2E' if dark else '#DEDEE2'
+    track_hex = '#1E1E22' if dark else '#F1F1F3'
+    fill_hex = '#E8E8EA' if dark else '#111113'
+    # 品牌图标（48px PNG base64），拿不到则安装器退化为纯文字头部
+    icon_b64 = _icon_png_base64()
+    version_line = f'正在更新到 {version}' if version else '正在准备更新…'
 
     # 注意：下面刻意避开 PowerShell 的 -f 格式化和哈希表，
     # 以免出现 { } 与 Python f-string 的花括号冲突。
+    # 窗体为无边框圆角（Region 裁切），进度条为自绘圆角平滑条（现代样式）。
     lines = [
         'Add-Type -AssemblyName System.Windows.Forms',
         'Add-Type -AssemblyName System.Drawing',
@@ -279,6 +323,14 @@ def _installer_script(new_exe: Path, install_dir: Path, pid: int,
         f'$dst = {_ps_quote(destination)}',
         f'$appDir = {_ps_quote(install_dir)}',
         f'$shouldRestart = {restart_literal}',
+        f'$script:bgHex = {_ps_quote(bg_hex)}',
+        f'$script:fgHex = {_ps_quote(fg_hex)}',
+        f'$script:tipHex = {_ps_quote(tip_hex)}',
+        f'$script:borderHex = {_ps_quote(border_hex)}',
+        f'$script:trackHex = {_ps_quote(track_hex)}',
+        f'$script:fillHex = {_ps_quote(fill_hex)}',
+        '$script:pct = 0',
+        f'$script:iconB64 = {_ps_quote(icon_b64)}',
         '',
         'function Write-Log($msg) {',
         '    try {',
@@ -290,47 +342,169 @@ def _installer_script(new_exe: Path, install_dir: Path, pid: int,
         "$msg = 'installer started, waiting for pid ' + $targetPid",
         'Write-Log $msg',
         '',
+        'function New-RoundedPath($w, $h, $r) {',
+        '    $p = New-Object System.Drawing.Drawing2D.GraphicsPath',
+        '    $p.AddArc(0, 0, $r, $r, 180, 90)',
+        '    $p.AddArc($w - $r - 1, 0, $r, $r, 270, 90)',
+        '    $p.AddArc($w - $r - 1, $h - $r - 1, $r, $r, 0, 90)',
+        '    $p.AddArc(0, $h - $r - 1, $r, $r, 90, 90)',
+        '    $p.CloseFigure()',
+        '    return $p',
+        '}',
+        '',
         '$form = New-Object System.Windows.Forms.Form',
         f'$form.Text = {_ps_quote(title)}',
-        '$form.Size = New-Object System.Drawing.Size(460, 176)',
+        '$form.Size = New-Object System.Drawing.Size(460, 152)',
         "$form.StartPosition = 'CenterScreen'",
-        '$form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog',
+        '$form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None',
         '$form.MaximizeBox = $false',
         '$form.MinimizeBox = $false',
-        '$form.ShowInTaskbar = $true',
+        '$form.ShowInTaskbar = $false',
         '$form.TopMost = $true',
-        '$form.Font = New-Object System.Drawing.Font("Microsoft YaHei UI", 9)',
+        '$form.Font = New-Object System.Drawing.Font("Segoe UI", 9)',
+        f'$form.BackColor = [System.Drawing.ColorTranslator]::FromHtml({_ps_quote(bg_hex)})',
+        '',
+        '# 圆角窗体：Region 裁切出 14px 圆角',
+        '$form.Add_Shown({',
+        '    try {',
+        '        $form.Region = New-Object System.Drawing.Region((New-RoundedPath $form.Width $form.Height 14))',
+        '        $form.Invalidate()',
+        '    } catch { }',
+        '})',
+        '',
+        '# 无边框窗体的 1px 圆角描边 + 头部/内容区分隔线',
+        '$form.Add_Paint({',
+        '    try {',
+        '        $g = $_.Graphics',
+        '        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
+        '        $pen = New-Object System.Drawing.Pen([System.Drawing.ColorTranslator]::FromHtml($script:borderHex))',
+        '        $g.DrawPath($pen, (New-RoundedPath ($form.Width - 1) ($form.Height - 1) 13))',
+        '        # 头部下的 1px 分隔线（ZCode 安装器的头部/内容分区分隔）',
+        '        $g.DrawLine($pen, 24, 70, ($form.Width - 24), 70)',
+        '        $pen.Dispose()',
+        '    } catch { }',
+        '})',
+        '$script:dragging = $false',
+        '$form.Add_MouseDown({',
+        '    if ($_.Button -eq [System.Windows.Forms.MouseButtons]::Left) {',
+        '        $script:dragging = $true',
+        '        $script:dragPos = $_.Location',
+        '    }',
+        '})',
+        '$form.Add_MouseMove({',
+        '    if ($script:dragging) {',
+        '        $screen = $form.PointToScreen($_.Location)',
+        '        $form.Location = New-Object System.Drawing.Point(($screen.X - $script:dragPos.X), ($screen.Y - $script:dragPos.Y))',
+        '    }',
+        '})',
+        '$form.Add_MouseUp({ $script:dragging = $false })',
+        '',
+        '# 品牌头部：应用图标 + 产品名 + 版本行（ZCode 更新安装器同款布局）',
+        "if ($script:iconB64) {",
+        '    try {',
+        '        $iconBytes = [Convert]::FromBase64String($script:iconB64)',
+        '        $iconStream = New-Object System.IO.MemoryStream (, $iconBytes)',
+        '        $iconImage = [System.Drawing.Image]::FromStream($iconStream)',
+        '        $iconBox = New-Object System.Windows.Forms.PictureBox',
+        '        $iconBox.Location = New-Object System.Drawing.Point(24, 15)',
+        '        $iconBox.Size = New-Object System.Drawing.Size(40, 40)',
+        '        $iconBox.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Zoom',
+        '        $iconBox.Image = $iconImage',
+        '        $form.Controls.Add($iconBox)',
+        '    } catch { }',
+        '}',
+        '',
+        '$headingLabel = New-Object System.Windows.Forms.Label',
+        '$headingLabel.Location = New-Object System.Drawing.Point(76, 18)',
+        '$headingLabel.Size = New-Object System.Drawing.Size(360, 22)',
+        f'$headingLabel.Text = {_ps_quote(APP_NAME)}',
+        '$headingLabel.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)',
+        f'$headingLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml({_ps_quote(fg_hex)})',
+        '$form.Controls.Add($headingLabel)',
+        '',
+        '$versionLabel = New-Object System.Windows.Forms.Label',
+        '$versionLabel.Location = New-Object System.Drawing.Point(76, 43)',
+        '$versionLabel.Size = New-Object System.Drawing.Size(360, 16)',
+        f'$versionLabel.Text = {_ps_quote(version_line)}',
+        '$versionLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)',
+        f'$versionLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml({_ps_quote(tip_hex)})',
+        '$form.Controls.Add($versionLabel)',
         '',
         '$label = New-Object System.Windows.Forms.Label',
-        '$label.Location = New-Object System.Drawing.Point(20, 20)',
-        '$label.Size = New-Object System.Drawing.Size(404, 24)',
+        '$label.Location = New-Object System.Drawing.Point(24, 86)',
+        '$label.Size = New-Object System.Drawing.Size(330, 16)',
         "$label.Text = '准备更新…'",
+        f'$label.ForeColor = [System.Drawing.ColorTranslator]::FromHtml({_ps_quote(fg_hex)})',
         '$form.Controls.Add($label)',
         '',
-        '$bar = New-Object System.Windows.Forms.ProgressBar',
-        '$bar.Location = New-Object System.Drawing.Point(20, 52)',
-        '$bar.Size = New-Object System.Drawing.Size(404, 24)',
-        '$bar.Minimum = 0',
-        '$bar.Maximum = 100',
-        '$bar.Value = 0',
-        '$form.Controls.Add($bar)',
+        '$pctLabel = New-Object System.Windows.Forms.Label',
+        '$pctLabel.Location = New-Object System.Drawing.Point(380, 86)',
+        '$pctLabel.Size = New-Object System.Drawing.Size(56, 16)',
+        "$pctLabel.Text = '0%'",
+        '$pctLabel.TextAlign = [System.Drawing.ContentAlignment]::TopRight',
+        f'$pctLabel.ForeColor = [System.Drawing.ColorTranslator]::FromHtml({_ps_quote(tip_hex)})',
+        '$form.Controls.Add($pctLabel)',
         '',
-        '$tip = New-Object System.Windows.Forms.Label',
-        '$tip.Location = New-Object System.Drawing.Point(20, 90)',
-        '$tip.Size = New-Object System.Drawing.Size(404, 36)',
-        '$tip.ForeColor = [System.Drawing.Color]::Gray',
-        f'$tip.Text = {_ps_quote(hint)}',
-        '$form.Controls.Add($tip)',
+        '# 现代进度条：圆角轨道 Panel + 圆角填充子 Panel。填充靠改子 Panel',
+        '# 宽度（WinForms 原生重绘，可靠），不依赖 Paint 事件重绘时读脚本',
+        '# 变量——那会导致"百分比在动、条不动"（事件里画填充曾静默失效）',
+        '$barPanel = New-Object System.Windows.Forms.Panel',
+        '$barPanel.Location = New-Object System.Drawing.Point(24, 112)',
+        '$barPanel.Size = New-Object System.Drawing.Size(412, 8)',
+        f'$barPanel.BackColor = [System.Drawing.ColorTranslator]::FromHtml({_ps_quote(bg_hex)})',
+        '$barPanel.Add_Paint({',
+        '    try {',
+        '        $g = $_.Graphics',
+        '        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
+        '        $trackPath = New-RoundedPath $barPanel.Width $barPanel.Height 4',
+        '        $trackBrush = New-Object System.Drawing.SolidBrush([System.Drawing.ColorTranslator]::FromHtml($script:trackHex))',
+        '        $g.FillPath($trackBrush, $trackPath)',
+        '        $trackBrush.Dispose()',
+        '    } catch { }',
+        '})',
+        '$form.Controls.Add($barPanel)',
         '',
-        'function Set-Step($text, $pct) {',
+        '$fillPanel = New-Object System.Windows.Forms.Panel',
+        '$fillPanel.Location = New-Object System.Drawing.Point(0, 0)',
+        '$fillPanel.Size = New-Object System.Drawing.Size(0, 8)',
+        '$fillPanel.Visible = $false',
+        f'$fillPanel.BackColor = [System.Drawing.ColorTranslator]::FromHtml({_ps_quote(fill_hex)})',
+        '$barPanel.Controls.Add($fillPanel)',
+        '',
+        'function Set-Step($text, $value) {',
+        '    $script:pct = [int]$value',
         '    $label.Text = $text',
-        '    $bar.Value = $pct',
+        '    $pctLabel.Text = ([string]$script:pct + "%")',
+        '    if ($script:pct -gt 0) {',
+        '        $newW = [Math]::Max($fillPanel.Height, [int]($barPanel.Width * $script:pct / 100))',
+        '        if ($newW -gt $barPanel.Width) { $newW = $barPanel.Width }',
+        '        $fillPanel.Width = $newW',
+        '        $fillPanel.Region = New-Object System.Drawing.Region((New-RoundedPath $newW $fillPanel.Height 4))',
+        '        $fillPanel.Visible = $true',
+        '    } else {',
+        '        $fillPanel.Visible = $false',
+        '    }',
+        '    $barPanel.Invalidate()',
         '    $form.Refresh()',
         '    [System.Windows.Forms.Application]::DoEvents()',
         '}',
         '',
         '$form.Show()',
         '$form.Refresh()',
+        '',
+        '# UI 自检模式（测试专用）：仅演示进度动画后立即退出，',
+        '# 不等待主进程、不复制文件、不重启——用于真机校验安装器前端。',
+        "if ($env:CA_INSTALLER_UI_TEST -eq '1') {",
+        "    Set-Step '正在等待程序退出…' 10",
+        '    Start-Sleep -Milliseconds 250',
+        f'    Set-Step {_ps_quote(heading)} 55',
+        '    Start-Sleep -Milliseconds 250',
+        "    Set-Step '安装完成' 100",
+        '    Start-Sleep -Milliseconds 300',
+        '    $form.Close()',
+        "    Write-Output 'ui-self-test passed'",
+        '    exit 0',
+        '}',
         '',
         '# ---- 1. 等待主进程退出 ----',
         "Set-Step '正在等待程序退出…' 10",
@@ -418,11 +592,13 @@ _PYI_ENV_VARS = (
 
 
 def install_update(new_exe: str | Path, install_dir: str | Path,
-                   restart: bool = True, version: str = '') -> dict[str, Any]:
+                   restart: bool = True, version: str = '',
+                   dark: bool = False) -> dict[str, Any]:
     """启动图形安装器完成覆盖安装。
 
     - 只替换 exe，绝不动同目录的配置文件（tray_config.json / warp_exclusion_config.json）
     - 安装器独立运行，等当前进程退出后再复制，避免文件占用
+    - dark=True 时安装窗体按应用深色主题渲染
     - 返回 {'success': bool, 'message': str}
     """
     source = Path(new_exe)
@@ -435,7 +611,8 @@ def install_update(new_exe: str | Path, install_dir: str | Path,
         destination = directory / EXE_NAME
         if destination.exists() and not os.access(destination, os.W_OK):
             return {'success': False, 'message': f'没有写入权限：{destination}'}
-        script = _installer_script(source, directory, os.getpid(), restart, version)
+        script = _installer_script(source, directory, os.getpid(), restart, version,
+                                   dark=dark)
         creation_flags = 0
         if os.name == 'nt':
             # 只给 CREATE_NEW_PROCESS_GROUP：保证主进程退出后安装器继续运行。

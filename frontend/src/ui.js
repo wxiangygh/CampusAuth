@@ -1,14 +1,33 @@
-import { h, reactive } from 'vue'
+import { h, reactive, computed } from 'vue'
 import { createDiscreteApi } from 'naive-ui'
 import { naiveTheme, themeOverrides } from './theme'
 
 // 独立挂载的 message / dialog，可在任何模块（含非组件上下文）中调用
-// configProviderProps 传入响应式对象，随主题切换自动更新
-const { message, dialog } = createDiscreteApi(['message', 'dialog'], {
-  configProviderProps: {
-    theme: naiveTheme,
-    themeOverrides,
+// configProviderProps 必须传 computed：直接传 { theme: naiveTheme } 会让
+// naive-ui 拿到 Ref 对象本身而非取值，主题永远不生效（弹窗一直白底）。
+const configProviderProps = computed(() => ({
+  theme: naiveTheme.value,
+  themeOverrides: themeOverrides.value,
+}))
+
+// 消息提示定位到「内容展示区」上方居中（排除侧栏/标题栏/状态栏），
+// 而不是整个应用窗口顶部：容器固定在侧栏(184px)右侧、标题栏(40px)下方。
+const CONTENT_NAV_WIDTH = 184
+const CONTENT_TITLE_BAR_HEIGHT = 40
+
+const messageProviderProps = {
+  placement: 'top',
+  containerStyle: {
+    position: 'fixed',
+    top: `${CONTENT_TITLE_BAR_HEIGHT + 6}px`,
+    left: `${CONTENT_NAV_WIDTH}px`,
+    right: '0px',
   },
+}
+
+const { message, dialog } = createDiscreteApi(['message', 'dialog'], {
+  configProviderProps,
+  messageProviderProps,
 })
 
 // 自定义全屏操作遮罩（替代原 loadingMask）

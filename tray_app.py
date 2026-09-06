@@ -8,7 +8,7 @@ import ctypes.wintypes
 import threading
 import subprocess
 import logging
-from logging.handlers import RotatingFileHandler
+from core.newest_first_log import NewestFirstFileHandler
 import time
 import traceback
 import tempfile
@@ -27,7 +27,7 @@ from core.network import (
     scan_wifi_networks, get_wifi_interface_name, get_local_ip,
     get_mac_address, get_current_wifi_ssid, wait_for_network_ready,
     _wait_for_ipv6_ready, is_warp_connected, _check_internet,
-    has_public_ipv6,
+    has_public_ipv6, resolve_active_interface,
 )
 from core.warp_manager import (
     get_warp_cli, connect_warp, disconnect_warp,
@@ -35,6 +35,7 @@ from core.warp_manager import (
     update_tray_icon, update_tray_icon_restore,
 )
 from core.auth import (
+    preempt_auth_lock,
     portal_login, portal_logout, disable_ipv4, enable_ipv4,
     _push_auth_progress, _check_cancel, _interruptible_sleep,
     run_auth_task, run_restore_task, _js_escape, _is_cancelled,
@@ -44,7 +45,8 @@ from core.startup import (
     check_startup_status, register_wifi_event_task, unregister_wifi_event_task,
     wifi_event_monitor, start_wifi_event_monitor, cleanup_wifi_event,
     signal_wifi_event, _create_event_with_acl, check_startup_wifi_and_auth,
-    _update_tray_status, elevate_if_needed, hide_console, _build_schtasks_tr,
+    should_run_boot_auth, _update_tray_status, elevate_if_needed, hide_console,
+    _build_schtasks_tr,
 )
 from core.config import configure_config, get_config_store, DEFAULT_AUTH_WORKFLOW
 from core.app_state import app_state
@@ -53,6 +55,9 @@ from core.updater import (UpdateDownloader, check_for_update as _check_for_updat
                           resolve_install_dir, validate_install_dir)
 from core.version import __version__
 from core.status import network_status
+from core.native_theme import (set_menu_dark_mode, theme_popup_menu_window,
+                               destroy_menu_window)
+from core.native_window import enable_native_window_behaviors_with_retry
 from core.reconnect_watchdog import start_watchdog, stop_watchdog
 from core.auth_workflow import (
     apply_auto_tune, run_workflow_by_id, validate_auth_workflow, workflow_catalog,
@@ -87,7 +92,7 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] [%(funcName)s:%(lineno)d] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[
-        RotatingFileHandler(str(LOG_FILE), maxBytes=2*1024*1024, backupCount=3, encoding='utf-8'),
+        NewestFirstFileHandler(LOG_FILE, max_bytes=2*1024*1024),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -117,6 +122,20 @@ seed_default_configs()
 
 CONFIG_STORE = configure_config(CONFIG_FILE)
 CONFIG = CONFIG_STORE.snapshot()
+
+
+def _wf_label(workflow_id):
+    """日志里工作流的可读名：优先用户保存的名字，id 仅作补充。
+
+    配置里 id 和 name 可以完全不同（如 id=注销并重新认证_副本、
+    name=注销并校园网认证（有线）），只打 id 时用户在日志里对不上号。
+    """
+    try:
+        definition = (CONFIG_STORE.get('workflows') or {}).get(workflow_id) or {}
+        name = str(definition.get('name') or workflow_id)
+        return name if name == str(workflow_id) else f'{name}（{workflow_id}）'
+    except Exception:
+        return str(workflow_id)
 
 # 工作流节点计时统计（自动调优数据源），与配置文件同目录
 from core.workflow_tuning import configure_tuning  # noqa: E402
@@ -317,32 +336,42 @@ def is_admin():
     except Exception:
         return False
 
-def create_icon(color='orange'):
-    """CAuth 托盘图标：深色圆角方形徽章 + 粗体白色 "C" 字标 + 状态色指示点。
+# 托盘主题状态：dark 跟随前端保存的主题（ui_prefs.theme_dark），
+# last_color 记录最近一次的状态色，主题切换时按原状态色重绘
+_TRAY_THEME = {'dark': True, 'last_color': 'gray'}
 
-    与前端 LogoMark（C 字标）和黑白单色设计系统保持一致，
-    状态通过徽章描边与右下角指示点的颜色表达：
-      gray=待机 green=正常 orange=进行中 red=异常
+
+def apply_tray_theme(dark=None):
+    """同步托盘原生菜单配色跟随应用主题（图标固定黑底白字，不随主题）。"""
+    if dark is not None:
+        _TRAY_THEME['dark'] = bool(dark)
+        # 进程级菜单深色偏好（SetPreferredAppMode，老系统静默降级）
+        set_menu_dark_mode(_TRAY_THEME['dark'])
+        # 立即刷新已存在的菜单窗口，不等下一次右键显示
+        theme_popup_menu_window(_TRAY_THEME['dark'])
+        logger.info('[tray] 托盘菜单已按主题切换（dark=%s）', _TRAY_THEME['dark'])
+
+
+def create_icon(color='orange'):
+    """CAuth 托盘图标：满幅圆角方形徽章 + 粗体 "C" 字标，固定黑底白字。
+
+    参考现代开发工具（ZCode 等）的图标风格：满幅圆角徽章、粗壮几何字标、
+    无彩色描边与多余彩色元素——小尺寸（16px 任务栏）下饱满、简洁、大方。
+    图标不随应用主题变动（深浅任务栏上均清晰可辨）；
+    color 参数仅为兼容旧调用保留，运行状态由托盘提示文字（title/notify）表达。
     """
     size = (64, 64)
     img = Image.new('RGBA', size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    colors = {
-        'gray': (155, 155, 161),
-        'green': (34, 197, 94),
-        'orange': (245, 158, 11),
-        'red': (239, 68, 68)
-    }
-    status = colors.get(color, colors['orange'])
+    badge = (26, 26, 30, 255)
+    glyph = (255, 255, 255)
 
-    # 徽章：深色圆角方形 + 状态色描边（浅/深任务栏上都可辨识）
-    draw.rounded_rectangle([2, 2, 62, 62], radius=15,
-                           fill=(26, 26, 30, 255), outline=status, width=3)
-    # 粗体 "C" 字标：白色粗弧线，开口朝右
-    draw.arc([17, 17, 47, 47], start=45, end=315, fill=(255, 255, 255), width=9)
-    # 状态指示点：右下角，带深色衬圈
-    draw.ellipse([45, 45, 58, 58], fill=(26, 26, 30, 255))
-    draw.ellipse([48, 48, 55, 55], fill=status)
+    # 徽章：满幅圆角方形，无描边
+    draw.rounded_rectangle([1, 1, 63, 63], radius=16, fill=badge)
+    # 粗体 "C" 字标：占徽章约 2/3、笔画加粗，开口朝右。
+    # 相对徽章整体右移 3px：开口在右侧会让可见笔画的重心偏左，
+    # 右移后视觉上才是居中的（光学居中，而非几何居中）。
+    draw.arc([13, 10, 55, 52], start=40, end=320, fill=glyph, width=12)
     return img
 
 def ensure_app_icon():
@@ -371,6 +400,91 @@ def ensure_app_icon():
         f.write(header + dir_entries + b''.join(png_bufs))
     logger.info(f"App icon saved to {icon_path}")
     return str(icon_path)
+
+
+# ===== WiFi 持续扫描会话 =====
+# 设置页「扫描」改为持续扫描：后台线程逐轮触发 WlanScan 并把增量结果
+# 通过 evaluate_js 推给前端（onWifiScanUpdate），列表随之动态填充，
+# 直到用户点「停止」或达到时限。旧的一次性 scan_wifi API 保留兼容。
+WIFI_SCAN_MAX_SECONDS = 120   # 持续扫描时限，防止忘记停止长期占用无线网卡
+WIFI_SCAN_ROUND_PAUSE = 1.5   # 每轮主动扫描之间的间隔（秒）
+
+_WIFI_SCAN = {'thread': None, 'stop': None}
+_WIFI_SCAN_LOCK = threading.Lock()
+
+
+def _tray_workflow_ids(config):
+    """按托盘显示顺序返回工作流 id 列表（含托盘可见性与启用节点过滤）。
+
+    排序：tray_order 升序（未设置/0 视为排在最后）→ 内置优先 → id。
+    用户在设置页「托盘工作流顺序」弹窗中调整后，tray_order 会被整体
+    重排为 1..n；托盘原生菜单据此加序号展示。
+    """
+    tray = []
+    for workflow in (config.get('workflows') or {}).values():
+        if not workflow.get('tray_menu', True):
+            continue
+        steps = workflow.get('steps') or []
+        if not any(step.get('enabled', True) for step in steps if isinstance(step, dict)):
+            continue
+        tray.append(workflow)
+    tray.sort(key=lambda w: (int(w.get('tray_order') or 0) or 10 ** 9,
+                             not w.get('built_in', False), str(w.get('id', ''))))
+    return [w['id'] for w in tray]
+
+
+def _push_wifi_scan_event(payload: dict):
+    try:
+        instance = core.state._tray_app_instance
+        if instance and instance.settings_window:
+            js_code = f"onWifiScanUpdate({json.dumps(payload, ensure_ascii=False)})"
+            instance.settings_window.evaluate_js(js_code)
+    except Exception as e:
+        logger.debug(f"push wifi scan event failed: {e}")
+
+
+def _wifi_scan_loop(stop_event):
+    """持续扫描主循环：每轮触发一次真实扫描并推送合并后的去重列表。"""
+    seen = {}
+
+    def _current():
+        return list(seen.keys())
+
+    # 先把系统缓存中已有的网络立刻推给前端，用户不用等第一轮扫描
+    try:
+        for ssid in scan_wifi_networks(force_scan=False) or []:
+            seen.setdefault(ssid, True)
+    except Exception as exc:
+        logger.warning(f'wifi scan bootstrap failed: {exc}')
+    _push_wifi_scan_event({'status': 'scanning', 'networks': _current(),
+                           'new': _current(), 'count': len(seen)})
+
+    deadline = time.monotonic() + WIFI_SCAN_MAX_SECONDS
+    while not stop_event.is_set() and time.monotonic() < deadline:
+        try:
+            found = scan_wifi_networks(force_scan=True) or []
+        except Exception as exc:
+            logger.warning(f'wifi scan round failed: {exc}')
+            found = []
+        added = []
+        for ssid in found:
+            if ssid and ssid not in seen:
+                seen[ssid] = True
+                added.append(ssid)
+        if stop_event.is_set():
+            break
+        if found or added:
+            # 只在有新发现时推送；没有新网络时静默进入下一轮，避免事件轰炸
+            _push_wifi_scan_event({'status': 'scanning', 'networks': _current(),
+                                   'new': added, 'count': len(seen)})
+        stop_event.wait(WIFI_SCAN_ROUND_PAUSE)
+    reason = 'stopped' if stop_event.is_set() else 'timeout'
+    _push_wifi_scan_event({'status': 'done', 'networks': _current(), 'new': [],
+                           'count': len(seen), 'reason': reason})
+    with _WIFI_SCAN_LOCK:
+        _WIFI_SCAN['thread'] = None
+        _WIFI_SCAN['stop'] = None
+
 
 class ApiBridge:
     # 应用级单例：一次只进行一个下载任务
@@ -462,8 +576,10 @@ class ApiBridge:
         # 只决定开机自启时是否显示窗口，并不表示用户希望更新后应用不再起来——
         # 那样会让静默模式用户更新完就卡在没有进程、也没有界面的状态。
         # 重启时不带 --silent，因此会像普通启动一样弹出主窗口，便于确认更新结果。
+        # dark：安装器窗体与应用主题保持一致（托盘主题状态由前端 save_ui_prefs 同步）
         outcome = _install_update(result['file'], install_dir,
-                                  restart=True, version=pending_version)
+                                  restart=True, version=pending_version,
+                                  dark=_TRAY_THEME.get('dark', True))
         if not outcome.get('success'):
             self._update_downloader._set(status='error', pct=0,
                                          message=f"安装失败：{outcome.get('message')}",
@@ -546,12 +662,39 @@ class ApiBridge:
             return {'success': False, 'message': str(exc)}
 
     def minimize_window(self):
+        """最小化主窗口：直接调用 Win32 ShowWindow 走系统原生路径（含动画）。"""
         try:
-            if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
-                core.state._tray_app_instance.settings_window.minimize()
-                logger.info("Window minimized via title bar button")
+            hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
+            if hwnd:
+                SW_MINIMIZE = 6
+                ctypes.windll.user32.ShowWindow(hwnd, SW_MINIMIZE)
+                logger.info("Window minimized via native ShowWindow")
         except Exception as e:
             logger.error(f"minimize_window failed: {e}")
+
+    def maximize_window(self):
+        """切换主窗口最大化/还原（标题栏最大化按钮），返回切换后的状态。"""
+        try:
+            hwnd = ctypes.windll.user32.FindWindowW(None, 'CampusAuth')
+            if not hwnd:
+                return {'success': False, 'message': '未找到主窗口'}
+            WM_SYSCOMMAND = 0x0112
+            SC_MAXIMIZE = 0xF030
+            SC_RESTORE = 0xF120
+            command = SC_RESTORE if _is_window_zoomed() else SC_MAXIMIZE
+            ctypes.windll.user32.SendMessageW(hwnd, WM_SYSCOMMAND, command, 0)
+            time.sleep(0.15)
+            return {'success': True, 'maximized': bool(_is_window_zoomed())}
+        except Exception as e:
+            logger.error(f"maximize_window failed: {e}")
+            return {'success': False, 'message': str(e)}
+
+    def get_window_state(self):
+        """读取主窗口状态（最大化标记），供标题栏按钮回显。"""
+        try:
+            return {'success': True, 'maximized': bool(_is_window_zoomed())}
+        except Exception as e:
+            return {'success': False, 'maximized': False, 'message': str(e)}
 
     def close_window(self):
         try:
@@ -560,6 +703,8 @@ class ApiBridge:
                 # 主窗口关闭（隐藏到托盘）时联动关闭"当前分流配置"悬浮窗
                 core.state._tray_app_instance.close_config_viewer()
                 core.state._tray_app_instance.settings_window.hide()
+                # 隐藏到托盘：全局进入低功耗模式（状态探测/看门狗降频、前端暂停轮询）
+                network_status.set_ui_visible(False)
                 logger.info("Window hidden via title bar button")
         except Exception as e:
             logger.error(f"close_window failed: {e}")
@@ -578,8 +723,37 @@ class ApiBridge:
             app.close_config_viewer()
         return {'success': True}
 
+    def open_workflow_runner(self, workflow_id):
+        """打开「测试工作流」悬浮窗并开始测试（工作流 tab 按钮调用）。"""
+        app = core.state._tray_app_instance
+        if not app:
+            return {'success': False, 'message': '应用实例不可用'}
+        return app.open_workflow_runner(workflow_id)
+
     def scan_wifi(self):
         return scan_wifi_networks()
+
+    def start_wifi_scan(self):
+        """启动持续扫描会话：结果通过 onWifiScanUpdate 事件增量推送前端。"""
+        with _WIFI_SCAN_LOCK:
+            thread = _WIFI_SCAN.get('thread')
+            if thread and thread.is_alive():
+                return {'success': True, 'already_running': True}
+            stop_event = threading.Event()
+            _WIFI_SCAN['stop'] = stop_event
+            thread = threading.Thread(target=_wifi_scan_loop, args=(stop_event,),
+                                      name='wifi-scan', daemon=True)
+            _WIFI_SCAN['thread'] = thread
+            thread.start()
+        logger.info('持续 WiFi 扫描已启动')
+        return {'success': True, 'message': '持续扫描已启动'}
+
+    def stop_wifi_scan(self):
+        with _WIFI_SCAN_LOCK:
+            stop_event = _WIFI_SCAN.get('stop')
+            if stop_event:
+                stop_event.set()
+        return {'success': True, 'message': '已停止扫描'}
 
     def _sync_monitor_state(self, old_config, new_config):
         old_needed = bool(old_config.get('auto_auth') or old_config.get('auto_restore'))
@@ -588,7 +762,10 @@ class ApiBridge:
                            ('wifi_name', 'auto_auth', 'auto_restore'))
         if needed:
             start_wifi_event_monitor()
-            if task_changed and not register_wifi_event_task():
+            if task_changed and not new_config.get('wifi_name'):
+                # 纯有线场景：开机自动认证无需 WiFi，事件任务也不需要
+                unregister_wifi_event_task()
+            elif task_changed and not register_wifi_event_task():
                 logger.warning('WiFi event task could not be registered; in-process monitor remains active')
         elif old_needed:
             cleanup_wifi_event()
@@ -598,11 +775,16 @@ class ApiBridge:
             start_watchdog()
         else:
             stop_watchdog()
+        # 静默启动只影响开机自启（任务命令行是否带 --silent），改动后需重建任务
+        if new_config.get('auto_startup') and \
+                old_config.get('silent_startup') != new_config.get('silent_startup') \
+                and is_admin() and setup_startup_task():
+            logger.info('startup task re-registered for silent_startup change')
     def save_config(self, config):
         changes = dict(config or {})
         expected_revision = changes.pop('_revision', None)
-        if changes.get('auto_auth') and not str(changes.get('wifi_name', '')).strip():
-            return {'success': False, 'message': '请先选择或输入 WiFi 名称'}
+        # 开机自动认证不再强制要求 WiFi 名称：有线环境直接认证，
+        # 无线环境才会用到所配置的 WiFi（未配置时开机认证会跳过并提示）
         if 'auth_workflow' in changes:
             try:
                 validate_auth_workflow(changes['auth_workflow'])
@@ -648,7 +830,7 @@ class ApiBridge:
                 # 按配置绑定的工作流执行；绑定无效时回退到激活工作流
                 auth_wf_id = CONFIG_STORE.get('auth_button_workflow') or ''
                 if auth_wf_id and (CONFIG_STORE.get('workflows') or {}).get(auth_wf_id):
-                    logger.info(f"test_auth: running bound workflow {auth_wf_id}")
+                    logger.info(f"test_auth: running bound workflow {_wf_label(auth_wf_id)}")
                     success, msg = run_workflow_by_id(auth_wf_id)
                 else:
                     success, msg = run_auth_task()
@@ -680,7 +862,7 @@ class ApiBridge:
             'auto_enable_ipv4', 'auth_total_timeout', 'auth_workflow',
             'auth_button_workflow', 'restore_button_workflow', 'exit_hook_workflow',
             'auto_check_update', 'auto_tune_workflow',
-            'warp_auto_reconnect', 'warp_reconnect_delay',
+            'warp_auto_reconnect', 'warp_reconnect_delay', 'reconnect_workflow',
         }
         changes = {key: value for key, value in (form_data or {}).items() if key in allowed}
         old_config = CONFIG_STORE.snapshot()
@@ -752,6 +934,44 @@ class ApiBridge:
         return {'success': True, 'workflow_id': workflow_id,
                 'changed': bool(changes), 'changes': changes,
                 'revision': CONFIG_STORE.snapshot().get('_revision')}
+
+    def reset_workflow_tuning(self, scope='workflow', workflow_id=None, step_ids=None):
+        """重置调优记录（workflow_tuning.json 里的运行统计），分三级。
+
+        scope='all'       重置所有工作流的全部调优记录；
+        scope='workflow'  重置单个工作流的调优记录；
+        scope='step'      重置指定节点（step_ids 列表）的调优记录。
+
+        只清统计样本：建议停止产生、稳定度归零；已写回工作流配置的
+        超时/重试参数不动（可用「恢复内置」或手动改回）。
+        """
+        try:
+            if scope == 'all':
+                wf_count, step_count = TUNING_STORE.clear_all()
+                logger.info('[tuning] 已重置全部调优记录：%s 工作流 / %s 节点',
+                            wf_count, step_count)
+                return {'success': True, 'scope': 'all',
+                        'cleared_workflows': wf_count, 'cleared_steps': step_count,
+                        'message': f'已重置 {wf_count} 个工作流共 {step_count} 条节点调优记录'}
+            workflow_id = workflow_id or CONFIG_STORE.get('active_workflow_id',
+                                                           'default_auth')
+            if scope == 'step':
+                ids = [str(s).strip() for s in (step_ids or []) if str(s).strip()]
+                if not ids:
+                    return {'success': False, 'message': '未指定要重置的节点'}
+                cleared = [sid for sid in ids
+                           if TUNING_STORE.clear_step(workflow_id, sid)]
+                return {'success': True, 'scope': 'step', 'workflow_id': workflow_id,
+                        'steps': cleared, 'cleared_steps': len(cleared),
+                        'message': f'已重置 {len(cleared)} 个节点的调优记录'}
+            count = TUNING_STORE.clear_workflow(workflow_id)
+            logger.info('[tuning] 已重置工作流 %s 的调优记录（%s 节点）', _wf_label(workflow_id), count)
+            return {'success': True, 'scope': 'workflow', 'workflow_id': workflow_id,
+                    'cleared_steps': count,
+                    'message': f'已重置该工作流 {count} 个节点的调优记录'}
+        except Exception as exc:
+            logger.exception('reset_workflow_tuning failed')
+            return {'success': False, 'message': str(exc)}
 
     def list_workflows(self):
         return {'workflows': self._workflow_snapshot(),
@@ -830,7 +1050,7 @@ class ApiBridge:
                 'active_workflow_id': workflow_id,
                 'revision': saved['_revision']}
 
-    def update_workflow_meta(self, workflow_id, name=None, tray_menu=None):
+    def update_workflow_meta(self, workflow_id, name=None, tray_menu=None, shared=None):
         config = CONFIG_STORE.snapshot()
         workflows = copy.deepcopy(config.get('workflows') or {})
         target = workflows.get(workflow_id)
@@ -843,10 +1063,317 @@ class ApiBridge:
             target['name'] = clean_name
         if tray_menu is not None:
             target['tray_menu'] = bool(tray_menu)
+        if shared is not None:
+            target['shared'] = bool(shared)
         saved = CONFIG_STORE.patch({'workflows': workflows})
         return {'success': True, 'workflows': self._workflow_snapshot(saved),
                 'workflow': saved['workflows'][workflow_id],
                 'revision': saved['_revision']}
+
+    # ===== 工作流分享（导出 JSON / 导入） =====
+    # 分享只带当前各节点配置（steps，含参数/超时/重试），不带调优统计
+    # 记录（workflow_tuning.json 的运行数据按 workflow_id 本地存储，不随分享走）。
+    WORKFLOW_SHARE_TYPE = 'campusauth_workflow'
+    WORKFLOW_SHARE_VERSION = 1
+    # 分享文件允许携带的字段：多余字段（如本机状态）一律剥掉
+    _SHARE_STEP_KEYS = ('id', 'enabled', 'retries', 'timeout', 'retry_delay',
+                        'continue_on_error', 'params')
+
+    def _workflow_share_payload(self, workflow_id=None, scope='current'):
+        """构造分享 JSON 文本，返回 (json文本, 名称提示, 错误消息)。
+
+        scope='current' 只分享指定工作流；scope='all' 分享全部工作流
+        （内置 + 自定义，按托盘列表同序）。两种都只带节点配置，
+        不带调优统计记录（workflow_tuning.json 的运行数据不随分享走）。
+        """
+        if scope == 'all':
+            definitions = self._workflow_snapshot(CONFIG_STORE.snapshot())
+            if not definitions:
+                return None, None, '当前没有任何工作流可分享'
+            payload = {
+                'type': self.WORKFLOW_SHARE_TYPE,
+                'version': self.WORKFLOW_SHARE_VERSION,
+                'scope': 'all',
+                'exported_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'workflows': [
+                    {
+                        'name': str(item.get('name') or item.get('id') or '').strip(),
+                        'description': str(item.get('description') or '')[:200],
+                        'steps': copy.deepcopy(item.get('steps') or []),
+                    }
+                    for item in definitions
+                ],
+            }
+            count = len(payload['workflows'])
+            return json.dumps(payload, ensure_ascii=False, indent=2), f'{count} 个工作流', None
+        definition = (CONFIG_STORE.get('workflows') or {}).get(workflow_id)
+        if not definition:
+            return None, None, '工作流不存在'
+        name = str(definition.get('name') or workflow_id).strip() or workflow_id
+        payload = {
+            'type': self.WORKFLOW_SHARE_TYPE,
+            'version': self.WORKFLOW_SHARE_VERSION,
+            'scope': 'current',
+            'exported_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'workflow': {
+                'name': name,
+                'description': str(definition.get('description') or '')[:200],
+                'steps': copy.deepcopy(definition.get('steps') or []),
+            },
+        }
+        return json.dumps(payload, ensure_ascii=False, indent=2), name, None
+
+    def _run_file_dialog(self, ps_script, timeout=180):
+        """运行 WinForms 文件对话框脚本，返回所选路径（取消返回空串）。
+
+        脚本以 utf-8-sig（带 BOM）写入：Windows PowerShell 5.1 对无 BOM
+        的 .ps1 按 ANSI 解码，中文标题/过滤串会变乱码甚至破坏语法，
+        导致对话框根本弹不出来（用户实测「从文件导入没有选择器」）。
+        """
+        try:
+            tmp_ps = os.path.join(tempfile.gettempdir(),
+                                  f'cauth_share_dlg_{os.getpid()}.ps1')
+            with open(tmp_ps, 'w', encoding='utf-8-sig') as f:
+                f.write(ps_script)
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 0
+            result = subprocess.run(
+                ['powershell', '-ExecutionPolicy', 'Bypass', '-STA', '-File', tmp_ps],
+                capture_output=True, text=True, encoding='utf-8', errors='ignore',
+                timeout=timeout, startupinfo=si,
+                creationflags=subprocess.CREATE_NO_WINDOW)
+            try:
+                os.remove(tmp_ps)
+            except Exception:
+                pass
+            return result.stdout.strip() if result.returncode == 0 else ''
+        except subprocess.TimeoutExpired:
+            return ''
+        except Exception as e:
+            logger.error(f"file dialog failed: {e}")
+            return ''
+
+    def _save_file_dialog(self, title, default_name):
+        escaped_title = str(title).replace("'", "''")
+        escaped_name = str(default_name).replace("'", "''").replace('"', '')
+        ps_script = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$owner = New-Object System.Windows.Forms.Form; "
+            "$owner.TopMost = $true; $owner.ShowInTaskbar = $false; "
+            "$owner.Size = New-Object System.Drawing.Size(1, 1); "
+            "$owner.StartPosition = 'Manual'; "
+            "$owner.Location = New-Object System.Drawing.Point(-2000, -2000); "
+            "$d = New-Object System.Windows.Forms.SaveFileDialog; "
+            f"$d.Title = '{escaped_title}'; "
+            f"$d.FileName = '{escaped_name}'; "
+            "$d.Filter = '工作流分享文件 (*.json)|*.json|所有文件 (*.*)|*.*'; "
+            "$d.FilterIndex = 1; "
+            "$r = $d.ShowDialog($owner); $owner.Dispose(); "
+            "if ($r -eq [System.Windows.Forms.DialogResult]::OK) "
+            "{ Write-Output $d.FileName } else { Write-Output '' }"
+        )
+        return self._run_file_dialog(ps_script)
+
+    def _open_file_dialog(self, title):
+        escaped_title = str(title).replace("'", "''")
+        ps_script = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$owner = New-Object System.Windows.Forms.Form; "
+            "$owner.TopMost = $true; $owner.ShowInTaskbar = $false; "
+            "$owner.Size = New-Object System.Drawing.Size(1, 1); "
+            "$owner.StartPosition = 'Manual'; "
+            "$owner.Location = New-Object System.Drawing.Point(-2000, -2000); "
+            "$d = New-Object System.Windows.Forms.OpenFileDialog; "
+            f"$d.Title = '{escaped_title}'; "
+            "$d.Filter = '工作流分享文件 (*.json)|*.json|所有文件 (*.*)|*.*'; "
+            "$d.FilterIndex = 1; $d.CheckFileExists = $true; "
+            "$r = $d.ShowDialog($owner); $owner.Dispose(); "
+            "if ($r -eq [System.Windows.Forms.DialogResult]::OK) "
+            "{ Write-Output $d.FileName } else { Write-Output '' }"
+        )
+        return self._run_file_dialog(ps_script)
+
+    def set_clipboard_text(self, text):
+        """把纯文本写入系统剪贴板（分享 JSON 复制用）。"""
+        try:
+            tmp = os.path.join(tempfile.gettempdir(),
+                               f'cauth_clip_{os.getpid()}.txt')
+            with open(tmp, 'w', encoding='utf-8') as f:
+                f.write(str(text))
+            # 经临时文件传递，避免引号/换行转义问题
+            ps = ("Get-Content -Raw -Encoding UTF8 "
+                  f"'{tmp.replace(chr(39), chr(39) * 2)}' | Set-Clipboard")
+            code, _, err = run_command(
+                ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                 '-Command', ps], shell=False, timeout=10)
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+            if code != 0:
+                logger.warning(f"set_clipboard_text failed: {err[:160]}")
+            return code == 0
+        except Exception as e:
+            logger.error(f"set_clipboard_text failed: {e}")
+            return False
+
+    def get_clipboard_text(self):
+        """读取系统剪贴板纯文本（分享 JSON 导入用），失败返回空串。"""
+        code, output, err = run_command(
+            ['powershell', '-NoProfile', '-Command', 'Get-Clipboard -Raw'],
+            shell=False, timeout=10)
+        if code != 0:
+            logger.warning(f"get_clipboard_text failed: {err[:160]}")
+            return ''
+        return output
+
+    def export_workflow_shared(self, workflow_id=None, mode='clipboard', scope='current'):
+        """导出工作流分享 JSON。
+
+        mode='clipboard' 复制到剪贴板；'file' 另存为文件。
+        scope='current' 只分享指定工作流；'all' 分享全部工作流。
+        """
+        text, name, error = self._workflow_share_payload(workflow_id, scope=scope)
+        if error:
+            return {'success': False, 'message': error}
+        if mode == 'file':
+            if scope == 'all':
+                safe_name = 'CampusAuth_全部工作流分享'
+            else:
+                safe_name = ''.join(c for c in (name or '') if c not in '\\/:*?"<>|').strip() or 'workflow'
+            path = self._save_file_dialog('导出工作流分享文件', f'{safe_name}.json')
+            if not path:
+                return {'success': False, 'cancelled': True, 'message': '已取消导出'}
+            try:
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(text)
+            except OSError as exc:
+                return {'success': False, 'message': f'写入文件失败：{exc}'}
+            logger.info('工作流分享（scope=%s）已导出到 %s', scope, path)
+            return {'success': True, 'mode': 'file', 'path': path,
+                    'message': f'已导出到 {path}'}
+        if not self.set_clipboard_text(text):
+            return {'success': False, 'message': '复制到剪贴板失败，可改用「导出到文件」'}
+        return {'success': True, 'mode': 'clipboard',
+                'message': '分享 JSON 已复制到剪贴板'}
+
+    @staticmethod
+    def _sanitize_shared_steps(raw_steps):
+        """只保留节点配置白名单字段，过滤分享方本地的未知/敏感数据。"""
+        if not isinstance(raw_steps, list):
+            return []
+        steps = []
+        for item in raw_steps:
+            if not isinstance(item, dict):
+                continue
+            clean = {key: copy.deepcopy(item.get(key))
+                     for key in ApiBridge._SHARE_STEP_KEYS if key in item}
+            if clean.get('id'):
+                steps.append(clean)
+        return steps
+
+    def import_workflow_shared(self, text):
+        """从分享 JSON 导入为新的自定义工作流（剪贴板与文件导入共用）。
+
+        支持两种格式：单工作流 {workflow: {...}} 与
+        「分享所有工作流」导出的 {workflows: [{...}, ...]}。
+        """
+        raw = str(text or '').strip()
+        if not raw:
+            return {'success': False, 'message': '内容为空，未找到可导入的工作流'}
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            return {'success': False,
+                    'message': f'不是有效的工作流 JSON：{exc}'}
+        entries = []
+        if isinstance(payload, dict) and payload.get('type') == self.WORKFLOW_SHARE_TYPE:
+            if isinstance(payload.get('workflows'), list):
+                entries = payload['workflows']
+            elif isinstance(payload.get('workflow'), dict):
+                entries = [payload['workflow']]
+        elif isinstance(payload, dict):
+            # 宽松兼容直接导出的 {name, steps} 结构
+            if isinstance(payload.get('steps'), list):
+                entries = [payload]
+            elif isinstance(payload.get('workflows'), list):
+                entries = payload['workflows']
+            elif isinstance(payload.get('workflow'), dict):
+                entries = [payload['workflow']]
+        if not entries:
+            return {'success': False,
+                    'message': '未识别到工作流数据（需要 CampusAuth 分享格式）'}
+        config = CONFIG_STORE.snapshot()
+        workflows = copy.deepcopy(config.get('workflows') or {})
+        from core.config import workflow_id_from_name
+        imported_names, skipped = [], []
+        imported_id = None
+        for shared in entries:
+            if not isinstance(shared, dict):
+                continue
+            name = str(shared.get('name') or '').strip()[:60] or '导入的工作流'
+            steps = self._sanitize_shared_steps(shared.get('steps'))
+            if not steps:
+                skipped.append(f'{name}（无有效节点）')
+                continue
+            try:
+                steps = self._validate_workflow_steps(steps)
+            except Exception as exc:
+                skipped.append(f'{name}（{exc}）')
+                continue
+            base_id = workflow_id_from_name(name)
+            workflow_id = base_id
+            suffix = 2
+            while workflow_id in workflows:
+                workflow_id = f'{base_id}_{suffix}'
+                suffix += 1
+            workflows[workflow_id] = {
+                'id': workflow_id,
+                'name': name,
+                'description': str(shared.get('description') or '从分享导入的工作流')[:200],
+                'built_in': False,
+                'tray_menu': True,
+                'steps': steps,
+            }
+            imported_names.append(name)
+            imported_id = workflow_id
+        if not imported_names:
+            detail = '；'.join(skipped[:3]) if skipped else '分享内容为空'
+            return {'success': False, 'message': f'导入失败：{detail}'}
+        saved = CONFIG_STORE.patch({'workflows': workflows})
+        message = f'已导入工作流：{"、".join(imported_names)}'
+        if skipped:
+            message += f'（跳过 {"、".join(skipped)}）'
+        logger.info('已从分享导入工作流：%s', imported_names)
+        result = {'success': True, 'message': message,
+                  'workflow_names': imported_names,
+                  'workflows': self._workflow_snapshot(saved),
+                  'revision': saved['_revision']}
+        # 单个导入时把该工作流带回给前端直接选中
+        if len(imported_names) == 1 and imported_id:
+            result['workflow_id'] = imported_id
+            result['workflow'] = saved['workflows'][imported_id]
+            result['workflow_name'] = imported_names[0]
+        return result
+
+    def import_workflow_shared_clipboard(self):
+        text = self.get_clipboard_text()
+        return self.import_workflow_shared(text)
+
+    def import_workflow_shared_file(self):
+        path = self._open_file_dialog('选择工作流分享文件')
+        if not path:
+            return {'success': False, 'cancelled': True, 'message': '已取消导入'}
+        try:
+            # utf-8-sig 兼容带 BOM 的导出文件
+            text = Path(path).read_text(encoding='utf-8-sig')
+        except (OSError, UnicodeDecodeError) as exc:
+            return {'success': False, 'message': f'读取文件失败：{exc}'}
+        result = self.import_workflow_shared(text)
+        if result.get('success'):
+            result['path'] = path
+        return result
 
     def select_workflow(self, workflow_id):
         config = CONFIG_STORE.snapshot()
@@ -860,6 +1387,7 @@ class ApiBridge:
                 'workflow': saved['workflows'][workflow_id],
                 'active_workflow_id': workflow_id,
                 'revision': saved['_revision']}
+
 
     def delete_workflow(self, workflow_id):
         config = CONFIG_STORE.snapshot()
@@ -879,6 +1407,100 @@ class ApiBridge:
         return {'success': True, 'message': '工作流已删除',
                 'workflows': self._workflow_snapshot(saved),
                 'active_workflow_id': saved['active_workflow_id'],
+                'revision': saved['_revision']}
+
+    # ===== 节点全局配置（全局/独立双模式） =====
+    _NODE_GLOBAL_KEYS = ('retries', 'timeout', 'retry_delay', 'continue_on_error', 'params')
+
+    @staticmethod
+    def _sanitize_node_global_config(config):
+        clean = {key: copy.deepcopy(config.get(key))
+                 for key in ApiBridge._NODE_GLOBAL_KEYS
+                 if key in (config or {})}
+        if 'timeout' in clean:
+            clean['timeout'] = max(1.0, min(180.0, float(clean['timeout'])))
+        if 'retries' in clean:
+            clean['retries'] = max(0, min(5, int(clean['retries'])))
+        if 'retry_delay' in clean:
+            clean['retry_delay'] = max(0.0, min(30.0, float(clean['retry_delay'])))
+        if 'continue_on_error' in clean:
+            clean['continue_on_error'] = bool(clean['continue_on_error'])
+        if 'params' in clean and not isinstance(clean['params'], dict):
+            clean.pop('params', None)
+        return clean
+
+    def get_node_globals(self):
+        """全部节点类型全局配置：{step_id: {'config','source'}}。"""
+        return {'success': True, 'node_globals': CONFIG_STORE.get('node_globals') or {}}
+
+    def set_node_global(self, step_id, config, workflow_id=None):
+        """设置/覆盖某节点类型的全局配置（覆盖确认由前端完成）。
+
+        source 记录该全局配置当前来自哪个工作流的节点，用于 UI 提示；
+        新节点被设为全局时即「接任」全局配置来源。
+        """
+        step_id = str(step_id or '').strip()
+        if not step_id:
+            return {'success': False, 'message': '缺少节点类型'}
+        clean = self._sanitize_node_global_config(config)
+        source = {}
+        if workflow_id:
+            definition = (CONFIG_STORE.get('workflows') or {}).get(workflow_id)
+            source = {'workflow_id': str(workflow_id),
+                      'workflow_name': str(definition.get('name') or workflow_id)}
+        node_globals = copy.deepcopy(CONFIG_STORE.get('node_globals') or {})
+        node_globals[step_id] = {'config': clean, 'source': source}
+        saved = CONFIG_STORE.patch({'node_globals': node_globals})
+        logger.info('[node-global] 已设置 %s 的全局配置（来源 %s）', step_id, source)
+        return {'success': True, 'node_globals': node_globals,
+                'revision': saved.get('_revision')}
+
+    def clear_node_global(self, step_id):
+        """移除某节点类型的全局配置（其来源节点切换为独立模式时调用）。"""
+        step_id = str(step_id or '').strip()
+        node_globals = copy.deepcopy(CONFIG_STORE.get('node_globals') or {})
+        if step_id not in node_globals:
+            return {'success': True, 'node_globals': node_globals}
+        del node_globals[step_id]
+        saved = CONFIG_STORE.patch({'node_globals': node_globals})
+        logger.info('[node-global] 已移除 %s 的全局配置', step_id)
+        return {'success': True, 'node_globals': node_globals,
+                'revision': saved.get('_revision')}
+
+    # ===== 托盘工作流顺序（设置页弹窗调整，原生托盘菜单按序号展示） =====
+    def get_tray_menu_data(self):
+        """托盘菜单数据：按托盘顺序的工作流 + 开机自启/管理员状态。"""
+        config = CONFIG_STORE.snapshot()
+        workflows = config.get('workflows') or {}
+        items = []
+        for position, workflow_id in enumerate(_tray_workflow_ids(config), start=1):
+            workflow = workflows.get(workflow_id) or {}
+            items.append({'id': workflow_id,
+                          'name': str(workflow.get('name') or workflow_id),
+                          'tray_order': position})
+        return {
+            'workflows': items,
+            'startup_enabled': bool(config.get('auto_startup', False)),
+            'is_admin': bool(is_admin()),
+        }
+
+    def set_tray_workflow_order(self, order_ids):
+        """提交托盘工作流的完整顺序（设置页弹窗拖动排序后调用）。"""
+        config = CONFIG_STORE.snapshot()
+        tray_ids = _tray_workflow_ids(config)
+        requested = [str(x) for x in (order_ids or [])]
+        if sorted(requested) != sorted(tray_ids):
+            return {'success': False,
+                    'message': '排序列表与托盘工作流不一致，已忽略本次调整'}
+        workflows = copy.deepcopy(config.get('workflows') or {})
+        for order, wid in enumerate(requested, start=1):
+            workflows[wid]['tray_order'] = order
+        saved = CONFIG_STORE.patch({'workflows': workflows})
+        logger.info('[tray] 工作流托盘顺序已调整：%s', requested)
+        return {'success': True, 'message': '托盘顺序已调整',
+                'tray_order': requested,
+                'menu_data': self.get_tray_menu_data(),
+                'workflows': self._workflow_snapshot(saved),
                 'revision': saved['_revision']}
 
     def reset_workflow(self, workflow_id=None):
@@ -904,15 +1526,17 @@ class ApiBridge:
         workflow = (CONFIG_STORE.get('workflows') or {}).get(workflow_id)
         if not workflow:
             return {'success': False, 'message': '工作流不存在'}
+        name = str(workflow.get('name') or workflow_id)
+        # 最新请求优先：打断在途的认证/恢复/工作流并接管锁
+        acquired, interrupted = preempt_auth_lock(f'运行工作流「{name}」')
+        if not acquired:
+            return {'success': False, 'message': '当前操作无法中断，请稍后重试'}
+        if interrupted:
+            logger.info('run_workflow: 已中断「%s」，开始执行 %s', interrupted, _wf_label(workflow_id))
         # 分配新操作纪元，保证进度事件归属于本次启动的工作流
         app_state.start_operation('auth')
 
         def _do_run():
-            if not _auth_lock.acquire(blocking=False):
-                js_code = f"onAuthProgress({{step:1,total:1,message:{_js_escape('工作流正在进行中，请稍候')},status:{_js_escape('error')}}})"
-                if core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
-                    core.state._tray_app_instance.settings_window.evaluate_js(js_code)
-                return
             try:
                 success, message = run_workflow_by_id(workflow_id)
                 if not _auth_cancelled.is_set() and core.state._tray_app_instance and core.state._tray_app_instance.settings_window:
@@ -923,7 +1547,10 @@ class ApiBridge:
                 _auth_cancelled.clear()
                 _auth_lock.release()
         threading.Thread(target=_do_run, daemon=True).start()
-        return {'success': True, 'message': f'工作流 {workflow.get("name", workflow_id)} 已启动'}
+        msg = f'工作流 {name} 已启动'
+        if interrupted:
+            msg = f'已中断「{interrupted}」；{msg}'
+        return {'success': True, 'message': msg}
     def restore_network(self):
         logger.info("restore_network called")
         # 分配新操作纪元：旧操作滞后的进度/终态事件将被前端整体忽略
@@ -944,11 +1571,12 @@ class ApiBridge:
                 # 按配置绑定的工作流执行；未绑定（空串）时使用内置恢复逻辑
                 restore_wf_id = CONFIG_STORE.get('restore_button_workflow') or ''
                 if restore_wf_id and (CONFIG_STORE.get('workflows') or {}).get(restore_wf_id):
-                    logger.info(f"restore_network: running bound workflow {restore_wf_id}")
+                    logger.info(f"restore_network: running bound workflow {_wf_label(restore_wf_id)}")
                     success, msg = run_workflow_by_id(restore_wf_id)
                 else:
                     success, msg = run_restore_task()
                 app_state.update_operation(kind='restore', status='success' if success else 'error', message=msg)
+                network_status.invalidate()
                 network_status.request_refresh()
                 if _auth_cancelled.is_set():
                     logger.info("restore_network: operation was cancelled, skipping final notification")
@@ -961,6 +1589,7 @@ class ApiBridge:
             except Exception as e:
                 logger.error(f"restore_network thread error: {e}")
                 app_state.update_operation(kind='restore', status='error', message=str(e))
+                network_status.invalidate()
                 network_status.request_refresh()
                 if not _auth_cancelled.is_set():
                     update_tray_icon_restore(False, str(e))
@@ -1007,7 +1636,8 @@ class ApiBridge:
                 "{ Write-Output $d.FileName } else { Write-Output '' }"
             )
             tmp_ps = os.path.join(tempfile.gettempdir(), f'wifi_browse_{os.getpid()}.ps1')
-            with open(tmp_ps, 'w', encoding='utf-8') as f:
+            # utf-8-sig：PowerShell 5.1 无 BOM 时按 ANSI 解码，中文标题会乱码
+            with open(tmp_ps, 'w', encoding='utf-8-sig') as f:
                 f.write(ps_script)
             si = subprocess.STARTUPINFO()
             si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -1052,7 +1682,8 @@ class ApiBridge:
             )
             tmp_ps = os.path.join(tempfile.gettempdir(),
                                   f'cauth_browse_dir_{os.getpid()}.ps1')
-            with open(tmp_ps, 'w', encoding='utf-8') as f:
+            # utf-8-sig：PowerShell 5.1 无 BOM 时按 ANSI 解码，中文标题会乱码
+            with open(tmp_ps, 'w', encoding='utf-8-sig') as f:
                 f.write(ps_script)
             si = subprocess.STARTUPINFO()
             si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -1349,13 +1980,19 @@ class ApiBridge:
     def save_ui_prefs(self, prefs):
         """保存界面偏好，包括分页、视图模式、详情折叠状态、当前标签页和主题。"""
         try:
-            allowed = {'page_size', 'traffic_subview', 'network_detail_collapsed', 'active_tab', 'theme'}
+            allowed = {'page_size', 'traffic_subview', 'network_detail_collapsed',
+                       'active_tab', 'theme', 'theme_dark'}
             clean = {key: value for key, value in (prefs or {}).items() if key in allowed}
             if clean.get('theme') not in ('light', 'dark', 'system'):
                 clean.pop('theme', None)
+            if 'theme_dark' in clean and not isinstance(clean['theme_dark'], bool):
+                clean.pop('theme_dark', None)
             current = CONFIG_STORE.get('ui_prefs') or {}
             current.update(clean)
             saved = CONFIG_STORE.patch({'ui_prefs': current})
+            # 主题切换 → 托盘图标配色跟随（深色徽章 / 浅色徽章）
+            if 'theme_dark' in clean:
+                apply_tray_theme(clean['theme_dark'])
             logger.info(f"[save_ui_prefs] Saved: {clean}, merged: {current}")
             return {'success': True, 'revision': saved.get('_revision')}
         except Exception as e:
@@ -1395,14 +2032,25 @@ class ApiBridge:
         Returns:
             dict: {'ipv4': str, 'ipv6': str, 'ipv6_status': str,
                    'mac': str, 'wifi_ssid': str, 'interface': str,
-                   'warp_connected': bool}
+                   'warp_connected': bool, 'link_type': 'wireless'|'wired',
+                   'wired_interface': str}
         """
         result = {
             'ipv4': '', 'ipv6': '', 'ipv6_status': 'none',
             'mac': '', 'wifi_ssid': '', 'interface': '',
-            'warp_connected': False
+            'warp_connected': False, 'link_type': '', 'wired_interface': ''
         }
         try:
+            # 链路类型与对应网卡：无线/有线统一判定，主页据此分别展示
+            try:
+                link_type, active_iface = resolve_active_interface()
+                result['link_type'] = link_type
+                if link_type == 'wired':
+                    result['interface'] = active_iface
+                    result['wired_interface'] = active_iface
+            except Exception as e:
+                logger.warning(f"[get_network_detail] resolve_active_interface failed: {e}")
+
             # IPv4 地址
             try:
                 result['ipv4'] = get_local_ip() or ''
@@ -1424,27 +2072,34 @@ class ApiBridge:
             except Exception as e:
                 logger.warning(f"[get_network_detail] get_mac_address failed: {e}")
 
-            # WiFi SSID
+            # WiFi SSID（有线联网时保持为空，主页按链路类型展示）
             try:
                 result['wifi_ssid'] = get_current_wifi_ssid() or ''
             except Exception as e:
                 logger.warning(f"[get_network_detail] get_current_wifi_ssid failed: {e}")
 
-            # 网络接口名
-            try:
-                result['interface'] = get_wifi_interface_name() or ''
-            except Exception as e:
-                logger.warning(f"[get_network_detail] get_wifi_interface_name failed: {e}")
+            # 网络接口名：有线时上面已填，无线/未知时按原逻辑取 WLAN
+            if not result['interface']:
+                try:
+                    result['interface'] = get_wifi_interface_name() or ''
+                except Exception as e:
+                    logger.warning(f"[get_network_detail] get_wifi_interface_name failed: {e}")
 
             # WARP 连接状态（复用 check_network_status 逻辑）
             try:
                 status = self.check_network_status()
                 # status 为 'connected' 或 'partial' 时认为 WARP 已连接
                 result['warp_connected'] = status.get('status') in ('connected', 'partial')
+                # 免流判定透传：前端详情面板区分「IPv6 底层免流」与「IPv4 底层计费」
+                result['warp_free'] = bool(status.get('warp_free'))
+                result['warp_underlay'] = status.get('warp_underlay') or ''
+                # IPv4 绑定状态透传：状态条区分「已禁用」与「未取到地址」
+                result['ipv4_disabled'] = bool(status.get('ipv4_disabled'))
             except Exception as e:
                 logger.warning(f"[get_network_detail] check_network_status failed: {e}")
 
-            logger.info(f"[get_network_detail] Returning: ipv4={result['ipv4']}, ipv6_status={result['ipv6_status']}, warp={result['warp_connected']}")
+            logger.info(f"[get_network_detail] Returning: ipv4={result['ipv4']}, ipv6_status={result['ipv6_status']}, "
+                        f"warp={result['warp_connected']}, link={result['link_type']}")
             return result
         except Exception as e:
             logger.error(f"[get_network_detail] FAILED: {e}\n{traceback.format_exc()}")
@@ -1470,12 +2125,15 @@ def _start_tray_workflow(workflow_id, icon=None):
 
 
 def _run_tray_workflow(workflow_id, icon, name):
-    if not _auth_lock.acquire(blocking=False):
+    acquired, interrupted = preempt_auth_lock(f'执行工作流「{name}」')
+    if not acquired:
         if icon:
-            icon.notify('工作流正在进行中，请稍候', '校园网助手')
+            icon.notify('当前操作无法中断，请稍后重试', '校园网助手')
             icon.icon = create_icon('green')
             icon.title = '校园网助手'
         return
+    if interrupted and icon:
+        icon.notify(f'已中断「{interrupted}」，开始执行：{name}', '校园网助手')
     try:
         success, msg = run_workflow_by_id(workflow_id)
         if icon:
@@ -1488,7 +2146,7 @@ def _run_tray_workflow(workflow_id, icon, name):
                 icon.title = '工作流失败'
                 icon.notify(f'失败: {msg}', '校园网助手')
     except Exception as e:
-        logger.exception("Workflow %s error", workflow_id)
+        logger.exception("Workflow %s error", _wf_label(workflow_id))
         if icon:
             icon.icon = create_icon('red')
             icon.title = '错误'
@@ -1504,9 +2162,12 @@ def on_restore(icon, item):
     threading.Thread(target=_run_restore, args=(icon,), daemon=True).start()
 
 def _run_restore(icon):
-    if not _auth_lock.acquire(blocking=False):
-        icon.notify('操作正在进行中，请稍候', '校园网助手')
+    acquired, interrupted = preempt_auth_lock('托盘恢复网络')
+    if not acquired:
+        icon.notify('当前操作无法中断，请稍后重试', '校园网助手')
         return
+    if interrupted:
+        icon.notify(f'已中断「{interrupted}」，开始恢复网络', '校园网助手')
     try:
         success, msg = run_restore_task()
         if success:
@@ -1548,7 +2209,7 @@ def _run_exit_hook():
     if not wf_id:
         return
     if not (CONFIG_STORE.get('workflows') or {}).get(wf_id):
-        logger.warning(f"exit hook: bound workflow {wf_id!r} not found, skipping")
+        logger.warning(f"exit hook: bound workflow {_wf_label(wf_id)!r} not found, skipping")
         return
 
     logger.info(f"exit hook: requesting cancel of in-flight operation, then acquiring lock")
@@ -1558,7 +2219,7 @@ def _run_exit_hook():
         _auth_cancelled.clear()
         return
     try:
-        logger.info(f"exit hook: running workflow {wf_id} before exit")
+        logger.info(f"exit hook: running workflow {_wf_label(wf_id)} before exit")
         result = {}
 
         def _run():
@@ -1575,7 +2236,7 @@ def _run_exit_hook():
                            f"{EXIT_HOOK_TIMEOUT}s, exiting anyway")
             return
         ok, msg = result.get('out', (False, 'no result'))
-        logger.info(f"exit hook: workflow {wf_id} finished: {'ok' if ok else 'FAILED'} - {msg}")
+        logger.info(f"exit hook: workflow {_wf_label(wf_id)} finished: {'ok' if ok else 'FAILED'} - {msg}")
     finally:
         _auth_cancelled.clear()
         _auth_lock.release()
@@ -1629,9 +2290,26 @@ class TrayApp:
         self._webview_start_event = threading.Event()
         self._init_done = False
         self._state_unsubscribe = None
+        # 免流失效监测：WARP 断开/底层切到 IPv4 时气泡 + 前端 toast 提醒（计费风险）
+        network_status.on_free_dropped = self._notify_free_loss
         # "当前分流配置"悬浮窗（独立子窗口，主窗口关闭时联动销毁）
         self._config_viewer_window = None
         self._html_url = None
+
+    def _notify_free_loss(self, reason):
+        """免流失效提醒：托盘气泡 + 前端 toast（流量正在走 IPv4 计费，需及时处理）。"""
+        logger.warning('[free-loss] notify: %s', reason)
+        try:
+            if self.icon:
+                self.icon.notify(reason, '校园网助手')
+        except Exception as exc:
+            logger.debug('free-loss tray notify failed: %s', exc)
+        try:
+            if self.settings_window:
+                js_code = f'onToast({{message:{_js_escape(reason)}, kind:"error"}})'
+                self.settings_window.evaluate_js(js_code)
+        except Exception as exc:
+            logger.debug('free-loss toast failed: %s', exc)
 
     # ------------------------------------------------------------------
     # "当前分流配置"悬浮窗（分流规则 tab 的实时状态展示）
@@ -1708,6 +2386,91 @@ class TrayApp:
             logger.info('config viewer window closed')
         except Exception as e:
             logger.debug(f'close_config_viewer: {e}')
+
+    # ------------------------------------------------------------------
+    # 「测试工作流」：主窗口工作流 tab 的底部测试面板
+    # （节点列表高亮执行进度 + 面板内详细日志，无独立窗口）
+    # ------------------------------------------------------------------
+    def open_workflow_runner(self, workflow_id):
+        """测试指定工作流：抢占式启动，事件实时推送到主窗口测试面板。"""
+        definition = (CONFIG_STORE.get('workflows') or {}).get(workflow_id)
+        if not definition:
+            return {'success': False, 'message': '工作流不存在'}
+        name = str(definition.get('name') or workflow_id)
+        # 最新请求优先：与主页/托盘按钮一致，打断在途操作
+        acquired, interrupted = preempt_auth_lock(f'测试工作流「{name}」')
+        if not acquired:
+            return {'success': False, 'message': '当前操作无法中断，请稍后重试'}
+        if interrupted:
+            logger.info('runner: 已中断「%s」，开始测试 %s', interrupted, _wf_label(workflow_id))
+        # 节点映射：runnerIndex（运行器序号，仅启用节点，与事件 step 序号一致）
+        # → arrayIndex（编辑器节点数组下标，用于高亮定位）
+        from core.auth_workflow import WORKFLOW_CATALOG
+        steps = []
+        for arr_idx, step in enumerate(definition.get('steps') or []):
+            if not step.get('enabled', True):
+                continue
+            sid = str(step.get('id', ''))
+            steps.append({'runnerIndex': len(steps) + 1, 'arrayIndex': arr_idx,
+                          'id': sid,
+                          'name': (WORKFLOW_CATALOG.get(sid) or {}).get('name', sid)})
+        epoch = app_state.start_operation('auth')
+        self._push_runner_js({'type': 'init', 'epoch': epoch,
+                              'workflowId': str(workflow_id), 'workflowName': name,
+                              'steps': steps, 'interrupted': interrupted,
+                              'operationId': epoch})
+        threading.Thread(target=self._run_runner_workflow,
+                         args=(workflow_id, name, epoch), daemon=True).start()
+        msg = f'已开始测试：{name}'
+        if interrupted:
+            msg = f'已中断「{interrupted}」；{msg}'
+        return {'success': True, 'message': msg, 'epoch': epoch}
+
+    def _push_runner_js(self, payload):
+        """把测试面板事件推送到主窗口（SPA 常驻加载，直接 evaluate_js）。"""
+        import json as _json
+        instance = core.state._tray_app_instance
+        win = instance.settings_window if instance else None
+        if win is None:
+            return
+        try:
+            win.evaluate_js('onRunnerEvent && onRunnerEvent('
+                            + _json.dumps(payload, ensure_ascii=False) + ')')
+        except Exception as e:
+            logger.debug(f'_push_runner_js failed: {e}')
+
+    def _run_runner_workflow(self, workflow_id, name, epoch):
+        """测试线程：跑工作流并推送 done 事件（含每节点耗时/重试统计）。"""
+        try:
+            success, message = run_workflow_by_id(workflow_id)
+        except Exception as exc:
+            logger.exception('runner workflow %s error', _wf_label(workflow_id))
+            success, message = False, f'执行异常：{exc}'
+        result = getattr(core.state, 'last_workflow_result', None)
+        step_stats, elapsed = {}, None
+        if result is not None:
+            try:
+                step_stats = result.step_stats or {}
+                elapsed = round(float(result.elapsed), 2)
+            except Exception:
+                step_stats, elapsed = {}, None
+        self._push_runner_js({'type': 'done', 'epoch': epoch,
+                              'workflowId': str(workflow_id), 'workflowName': name,
+                              'success': bool(success), 'message': str(message),
+                              'elapsed': elapsed, 'stepStats': step_stats,
+                              'operationId': epoch})
+        # 主窗口终态提示（与 run_workflow 的行为一致）
+        try:
+            if not _auth_cancelled.is_set() and core.state._tray_app_instance\
+                    and core.state._tray_app_instance.settings_window:
+                status = 'success' if success else 'error'
+                js_code = f"onAuthProgress({{step:1,total:1,message:{_js_escape(message)},status:{_js_escape(status)}}})"
+                core.state._tray_app_instance.settings_window.evaluate_js(js_code)
+        except Exception:
+            pass
+        finally:
+            _auth_cancelled.clear()
+            _auth_lock.release()
 
     def calc_initial_window_geometry(self):
         """计算初始窗口几何（含最大化标记），支持多显示器坐标并在屏幕拔出时安全回退。
@@ -1824,7 +2587,8 @@ class TrayApp:
             else:
                 status = network.get('status', 'unknown')
                 color = {
-                    'connected': 'orange', 'partial': 'orange', 'normal': 'green',
+                    # 免流成功 = 应用的核心目标状态 → 绿；未免流（WARP 走 IPv4）→ 橙警示
+                    'connected': 'green', 'partial': 'orange', 'normal': 'green',
                     'broken': 'red', 'disconnected': 'gray', 'unknown': 'gray',
                 }.get(status, 'gray')
                 title = network.get('message') or '校园网助手'
@@ -1863,19 +2627,15 @@ class TrayApp:
         return handler
 
     def _workflow_menu_items(self):
+        """托盘菜单的工作流条目：按用户排序展示，并加序号便于快速定位。"""
+        config = load_config()
+        workflows = config.get('workflows') or {}
         items = []
-        workflows = list((load_config().get('workflows') or {}).values())
-        workflows.sort(key=lambda item: (not item.get('built_in', False), item.get('id', '')))
-        for workflow in workflows:
-            if not workflow.get('tray_menu', True):
-                continue
-            steps = workflow.get('steps') or []
-            if not any(step.get('enabled', True) for step in steps if isinstance(step, dict)):
-                continue
-            workflow_id = workflow['id']
-
+        for position, workflow_id in enumerate(_tray_workflow_ids(config), start=1):
+            workflow = workflows.get(workflow_id) or {}
+            name = str(workflow.get('name') or workflow_id)
             items.append(pystray.MenuItem(
-                str(workflow.get('name') or workflow_id),
+                f'{position}. {name}',
                 self._make_workflow_handler(workflow_id)))
         return items
 
@@ -1904,7 +2664,15 @@ class TrayApp:
         return menu_items
 
     def create_tray(self):
-
+        # 启动时先按已保存的主题渲染托盘图标（前端就绪后也会推送一次 theme_dark）
+        try:
+            prefs = CONFIG_STORE.get('ui_prefs') or {}
+            if isinstance(prefs.get('theme_dark'), bool):
+                _TRAY_THEME['dark'] = prefs['theme_dark']
+        except Exception:
+            pass
+        # 原生托盘菜单按应用主题渲染深色（前端就绪后 save_ui_prefs 会再同步）
+        set_menu_dark_mode(_TRAY_THEME.get('dark', True))
         self.icon = pystray.Icon('wifi_auto_auth')
         self.icon.icon = create_icon('gray')
         self.icon.title = '校园网助手'
@@ -1938,9 +2706,24 @@ class TrayApp:
                     logger.info("[pystray_patch] Left click detected, showing window")
                     app_ref.show_settings()
                     return
+                if lparam == win32.WM_RBUTTONUP:
+                    # 显示前对弹出菜单窗口应用当前主题（深色/浅色）
+                    theme_popup_menu_window(_TRAY_THEME.get('dark', True))
                 original_on_notify(wparam, lparam)
 
             self.icon._message_handlers[WM_NOTIFY] = patched_on_notify
+
+            # 包装 TrackPopupMenuEx：显示前一刻对弹出菜单窗口应用主题
+            # （菜单窗口由系统按线程复用，首次创建后才能被 FindWindow 找到）
+            original_tpm = win32.TrackPopupMenuEx
+
+            def themed_track_popup_menu(hmenu, flags, x, y, hwnd_, prc):
+                dark = _TRAY_THEME.get('dark', True)
+                theme_popup_menu_window(dark)  # 确保创建钩子就绪并重刷已存在窗口
+                destroy_menu_window()          # 销毁旧窗口：本次显示强制以当前主题重建
+                return original_tpm(hmenu, flags, x, y, hwnd_, prc)
+
+            win32.TrackPopupMenuEx = themed_track_popup_menu
             logger.info("[pystray_patch] Successfully patched pystray _on_notify on instance")
         except Exception as e:
             logger.warning(f"[pystray_patch] Failed to patch pystray: {e}")
@@ -2000,6 +2783,8 @@ class TrayApp:
         if self.settings_window:
             try:
                 self.settings_window.show()
+                # 窗口回到用户视角：恢复正常轮询频率并立即刷新一次状态
+                network_status.set_ui_visible(True)
                 # 最大化状态下不要 restore（会把最大化窗口还原成普通大小）
                 if not _is_window_zoomed():
                     self.settings_window.restore()
@@ -2057,14 +2842,22 @@ class TrayApp:
             if cfg.get('auto_auth') or cfg.get('auto_restore'):
                 start_wifi_event_monitor()
                 if is_admin():
-                    if register_wifi_event_task():
+                    if not cfg.get('wifi_name'):
+                        logger.info('未配置 WiFi：跳过 WiFi 事件任务注册（开机自动认证按有线直接执行）')
+                    elif register_wifi_event_task():
                         logger.info("WiFi event task registered on startup")
                     else:
                         logger.warning("Failed to register WiFi event task on startup")
                 else:
                     logger.info("Not admin, skipping WiFi event task registration")
+                # 开机自动认证只在开机自启（--silent）时执行；
+                # 用户主动启动不代做网络动作，交给主页「开始认证」。
                 if cfg.get('auto_auth'):
-                    check_startup_wifi_and_auth()
+                    if should_run_boot_auth(cfg, silent=self._silent):
+                        check_startup_wifi_and_auth()
+                    else:
+                        logger.info('手动启动：不执行开机自动认证')
+                        _update_tray_status()
                 else:
                     _update_tray_status()
             else:
@@ -2131,6 +2924,10 @@ class TrayApp:
             logger.error(f"run: create_window failed: {e}\n{traceback.format_exc()}")
             return
 
+        # 静默启动时窗口直接隐藏：立即进入托盘低功耗模式
+        #（非静默启动由 ensure_visible / show_settings 恢复正常频率）
+        network_status.set_ui_visible(not self._silent)
+
         def on_closing():
             logger.info("[on_closing] Window closing event triggered")
             try:
@@ -2145,6 +2942,8 @@ class TrayApp:
             logger.info("[on_closing] Hiding window to tray (not closing)")
             try:
                 self.settings_window.hide()
+                # 隐藏到托盘：状态服务进入低频模式，前端轮询由 document.hidden 暂停
+                network_status.set_ui_visible(False)
                 logger.info("[on_closing] Window hidden successfully")
             except Exception as e:
                 logger.error(f"[on_closing] Hide failed: {e}")
@@ -2159,6 +2958,9 @@ class TrayApp:
         self.settings_window.events.restored += lambda *args: self._schedule_geometry_save()
         self.settings_window.events.maximized += lambda *args: self._schedule_geometry_save()
         self.settings_window.events.minimized += lambda *args: self._schedule_geometry_save()
+        # 窗口显示后启用原生窗口行为：原生动画 / 系统贴靠 / 系统命令
+        # （吞掉非客户区，白边不再出现；后台重试应对标题注册延迟）
+        self.settings_window.events.shown += lambda *args:             enable_native_window_behaviors_with_retry('CampusAuth')
 
         _icon_handles = []
 
@@ -2223,6 +3025,8 @@ class TrayApp:
                     time.sleep(0.5)
                     if self.settings_window:
                         self.settings_window.show()
+                        # 非静默启动：窗口可见，恢复正常轮询频率
+                        network_status.set_ui_visible(True)
                         # 最大化状态下不要 restore（会撤销 restore_maximized_state）
                         if not _is_window_zoomed():
                             self.settings_window.restore()

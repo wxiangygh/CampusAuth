@@ -13,10 +13,19 @@ const STATUS_META = {
 const statusMeta = computed(() => STATUS_META[store.status.state] || STATUS_META.idle)
 
 const detail = computed(() => store.detail || {})
-const ipv4Text = computed(() => detail.value.ipv4 || '—')
+// IPv4 有地址就显示地址（让用户看到 IPv4 还在线）；绑定被禁用时明确显示"已禁用"
+const ipv4Text = computed(() =>
+  detail.value.ipv4 || (detail.value.ipv4_disabled ? '已禁用' : '—'))
 const ipv6Text = computed(() => (detail.value.ipv6 ? '可用' : '无'))
 const warpText = computed(() => (detail.value.warp_connected ? '已连接' : '未连接'))
-const wifiText = computed(() => detail.value.wifi_ssid || '未连接')
+// 链路适配：有线联网时显示 有线+网卡名，无线时显示 WiFi SSID（与主页一致）
+const wired = computed(() => detail.value.link_type === 'wired')
+const linkLabel = computed(() => (wired.value ? '有线' : 'WiFi'))
+const linkText = computed(() => {
+  const d = detail.value
+  if (wired.value) return d.wired_interface ? `已连接 · ${d.wired_interface}` : '已连接'
+  return d.wifi_ssid || '未连接'
+})
 </script>
 
 <template>
@@ -26,7 +35,7 @@ const wifiText = computed(() => detail.value.wifi_ssid || '未连接')
       <span class="sb-status">{{ store.status.title }}</span>
     </div>
     <div class="sb-right">
-      <span class="sb-item">WiFi <span class="sb-val">{{ wifiText }}</span></span>
+      <span class="sb-item">{{ linkLabel }} <span class="sb-val">{{ linkText }}</span></span>
       <span class="sb-sep"></span>
       <span class="sb-item">IPv4 <span class="sb-val mono">{{ ipv4Text }}</span></span>
       <span class="sb-sep"></span>

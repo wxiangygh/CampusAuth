@@ -18,7 +18,7 @@ import time
 import core.state
 from core.app_state import app_state
 from core.config import get_config
-from core.warp_manager import connect_warp_result, probe_warp_status
+from core.warp_manager import probe_warp_status
 
 logger = logging.getLogger('wifi_tray')
 
@@ -65,6 +65,9 @@ class ReconnectWatchdog:
 
     def __init__(self, check_interval: float = 5.0):
         self.check_interval = check_interval
+        # 主窗口隐藏到托盘时的降频间隔：warp-cli 探测虽轻，5s 一次的进程
+        # 开销在托盘长期驻留场景下不必要；15s 内感知掉线足够及时
+        self.hidden_check_interval = max(self.check_interval, 15.0)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._disconnected_since: float | None = None
@@ -91,7 +94,10 @@ class ReconnectWatchdog:
                 self._tick()
             except Exception:
                 logger.exception('Reconnect watchdog tick failed')
-            self._stop.wait(self.check_interval)
+            # 窗口隐藏到托盘时降频（共享 UI 可见标志，随 show/hide 实时切换）
+            interval = (self.check_interval if core.state.is_ui_visible()
+                        else self.hidden_check_interval)
+            self._stop.wait(interval)
 
     def _tick(self) -> None:
         cfg = get_config()
@@ -110,21 +116,28 @@ class ReconnectWatchdog:
         if not should:
             return
 
-        logger.info('WARP 意外断开超过 %.0f 秒（%s），尝试自动重连', delay, status.code)
+        wf_id = str(cfg.get('reconnect_workflow') or 'default_auth')
+        logger.info('WARP 意外断开超过 %.0f 秒（%s），运行重连工作流 %s',
+                    delay, status.code, wf_id)
         if not core.state._auth_lock.acquire(blocking=False):
             logger.info('Auth lock busy, skip auto-reconnect this round')
             self._disconnected_since = time.monotonic()
             return
         try:
-            result = connect_warp_result(timeout=30, max_attempts=1)
-            if result.success:
-                logger.info('WARP 自动重连成功')
-                app_state.update_network('connected', 'WARP 已自动重连', warp_connected=True)
+            from core.auth_workflow import run_workflow_by_id
+            # 开启新操作纪元：前端进度归属本次自动重连（与手动认证一致地显示进度）
+            app_state.start_operation('auth')
+            success, message = run_workflow_by_id(wf_id)
+            if success:
+                logger.info('自动重连工作流成功：%s', message)
                 self._refresh_status()
             else:
-                logger.warning('WARP 自动重连失败：%s', result.code)
+                logger.warning('自动重连工作流失败：%s', message)
                 # 重连失败重新计时，避免风暴式重试。
                 self._disconnected_since = time.monotonic()
+        except Exception:
+            logger.exception('自动重连工作流异常')
+            self._disconnected_since = time.monotonic()
         finally:
             core.state._auth_lock.release()
 

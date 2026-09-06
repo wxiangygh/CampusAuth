@@ -228,6 +228,39 @@ class WorkflowTuningStore:
             return {step_id: self.stats(workflow_id, step_id)
                     for step_id in steps}
 
+    # ===== 重置 =====
+    def clear_step(self, workflow_id: str, step_id: str) -> bool:
+        """清空单个节点的调优记录，返回是否确有数据被清除。"""
+        workflow_id, step_id = str(workflow_id), str(step_id)
+        with self._lock:
+            workflow = self._data.get(workflow_id)
+            if not workflow or step_id not in workflow:
+                return False
+            del workflow[step_id]
+            if not workflow:
+                self._data.pop(workflow_id, None)
+            self._save()
+            return True
+
+    def clear_workflow(self, workflow_id: str) -> int:
+        """清空单个工作流全部节点的调优记录，返回清除的节点数。"""
+        workflow_id = str(workflow_id)
+        with self._lock:
+            workflow = self._data.pop(workflow_id, None)
+            if not workflow:
+                return 0
+            self._save()
+            return len(workflow)
+
+    def clear_all(self) -> tuple[int, int]:
+        """清空所有工作流的调优记录，返回 (工作流数, 节点数)。"""
+        with self._lock:
+            wf_count = len(self._data)
+            step_count = sum(len(steps) for steps in self._data.values())
+            self._data = {}
+            self._save()
+            return wf_count, step_count
+
     # ===== 应用调优 =====
     def apply_to_workflow(self, workflow_id: str,
                           steps: list[dict[str, Any]]) -> bool:

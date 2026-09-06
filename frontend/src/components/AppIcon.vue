@@ -35,6 +35,10 @@ const ICONS = {
   warn: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   // 最小化
   minus: '<line x1="5" y1="12" x2="19" y2="12"/>',
+  // 最大化（方框）
+  maximize: '<rect x="5" y="5" width="14" height="14" rx="1.5"/>',
+  // 还原（两层叠框）
+  restore: '<path d="M8 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2"/><rect x="4" y="8" width="12" height="12" rx="2"/>',
   // 关闭
   x: '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>',
   // 排序：升序 A→Z（短→长，配合文字标签 A→Z 使用）
@@ -45,6 +49,8 @@ const ICONS = {
   expandAll: '<polyline points="8 9 12 5 16 9"/><polyline points="8 15 12 19 16 15"/>',
   // 全部折叠（两组箭头朝内）
   collapseAll: '<polyline points="8 5 12 9 16 5"/><polyline points="8 19 12 15 16 19"/>',
+  // 中断/停止（实心圆角方块，与描边风格并存更醒目）
+  stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor" stroke="none"/>',
 }
 </script>
 

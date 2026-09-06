@@ -137,7 +137,12 @@ DEFAULT_CONFIG = {
     "warp_auto_reconnect": False,
     # 判定"意外断开"的持续时长（秒），低于该值视为正常抖动/切换
     "warp_reconnect_delay": 20,
+    # 自动重连触发时执行的工作流（必选，默认完整认证）
+    "reconnect_workflow": "default_auth",
     "portal_ip": "10.21.221.98", "portal_port": "801",
+    # WARP 连接模式：auto=先「流量和DNS」失败再退「仅流量」；
+    # warp=Traffic and DNS（校园网推荐）；tunnel_only=Traffic only
+    "warp_connect_mode": "auto",
     "warp_cli_path": "", "silent_startup": False,
     # 启动时自动检测 GitHub Releases 更新
     "auto_check_update": True,
@@ -149,6 +154,12 @@ DEFAULT_CONFIG = {
     "active_workflow_id": "default_auth",
     "workflows": _builtin_workflows(),
     "auth_workflow": DEFAULT_AUTH_WORKFLOW,
+    # 节点全局配置（按节点类型 step_id 分组，每类型最多一份）：
+    #   { step_id: { 'config': {timeout,retries,retry_delay,continue_on_error,params},
+    #                'source': {'workflow_id','workflow_name'} } }
+    # 工作流中 node_mode='global' 的节点运行时使用这里的配置；
+    # node_mode='independent'（默认）的节点使用自己 steps 里的配置。
+    "node_globals": {},
     # 主页按钮绑定的工作流：开始认证 / 恢复网络
     # restore_button_workflow 为空串时使用内置恢复逻辑（run_restore_task）
     "auth_button_workflow": "default_auth",
@@ -184,6 +195,13 @@ def _normalize_workflow(value: Any, workflow_id: str,
     result["name"] = name[:60]
     result["description"] = str(value.get("description") or base.get("description") or "")[:200]
     result["tray_menu"] = bool(value.get("tray_menu", base.get("tray_menu", True)))
+    # 托盘菜单显示顺序（工作流页可调 ↑/↓）：0/缺失 = 未手动排序，按内置优先兜底
+    try:
+        result["tray_order"] = int(value.get("tray_order", base.get("tray_order", 0)) or 0)
+    except (TypeError, ValueError):
+        result["tray_order"] = 0
+    # 分享标记：仅表示"该工作流已通过分享功能导出"，随配置持久化
+    result["shared"] = bool(value.get("shared", base.get("shared", False)))
     result["built_in"] = bool(base.get("built_in", value.get("built_in", False)))
     customized = bool(value.get("customized", False))
     result["customized"] = customized
@@ -262,6 +280,8 @@ def _merge_defaults(raw: dict[str, Any], *, auth_workflow_is_source: bool | None
         active_override=legacy_active)
     data["workflows"] = workflows
     data["active_workflow_id"] = active_id
+    if not isinstance(data.get("node_globals"), dict):
+        data["node_globals"] = {}
     try:
         data["auth_total_timeout"] = max(30, min(int(data.get("auth_total_timeout", 90)), 300))
     except (TypeError, ValueError):

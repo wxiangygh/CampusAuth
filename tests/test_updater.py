@@ -254,6 +254,100 @@ class InstallerScriptTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0,
                          f'生成的安装器脚本存在 PowerShell 语法错误：\n{done.stdout}')
 
+    def test_dark_installer_matches_app_theme(self):
+        # 深色主题安装器：与应用黑白单色设计系统同色（card/文本/进度条）
+        tmp_dir = Path(tempfile.mkdtemp())
+        new_exe = tmp_dir / 'CampusAuth_update_123.exe'
+        new_exe.write_bytes(b'x')
+        install_dir = tmp_dir / 'install'
+        install_dir.mkdir()
+        script = updater._installer_script(new_exe, install_dir, 4321, True,
+                                           '1.2.1', dark=True)
+        self.addCleanup(lambda: script.unlink(missing_ok=True))
+        content = script.read_text(encoding='utf-8-sig')
+        self.assertIn("'#131316'", content)       # 深色背景
+        self.assertIn("'#E8E8EA'", content)       # 近白文本/进度填充
+        self.assertIn("'#1E1E22'", content)       # 进度条轨道
+        self.assertNotIn("'#FFFFFF'", content)    # 不应残留浅色背景
+
+    def test_light_installer_stays_native_light(self):
+        tmp_dir = Path(tempfile.mkdtemp())
+        new_exe = tmp_dir / 'CampusAuth_update_123.exe'
+        new_exe.write_bytes(b'x')
+        install_dir = tmp_dir / 'install'
+        install_dir.mkdir()
+        script = updater._installer_script(new_exe, install_dir, 4321, True,
+                                           '1.2.1', dark=False)
+        self.addCleanup(lambda: script.unlink(missing_ok=True))
+        content = script.read_text(encoding='utf-8-sig')
+        self.assertIn("'#FFFFFF'", content)
+        self.assertIn("'#111113'", content)
+
+    def test_installer_is_rounded_with_modern_progress(self):
+        # 圆角窗体（Region 裁切）+ 圆角平滑进度条（非块状 ProgressBar）。
+        # 填充必须是子 Panel 宽度变化（原生重绘），不能依赖 Paint 事件里
+        # 读脚本变量自绘——事件重绘链路曾静默失效（百分比在动、条不动）
+        _, content, _, _ = self._script(restart=True)
+        self.assertIn('New-RoundedPath', content)
+        self.assertIn('$form.Region = New-Object System.Drawing.Region', content)
+        self.assertIn('FormBorderStyle]::None', content)
+        self.assertIn('$barPanel.Add_Paint', content)
+        self.assertIn('$fillPanel.Width = $newW', content)
+        self.assertIn('$fillPanel.Region = New-Object System.Drawing.Region', content)
+        self.assertNotIn('$g.SetClip', content)
+        self.assertNotIn('New-Object System.Windows.Forms.ProgressBar', content)
+
+    def test_installer_uses_zcode_style_layout(self):
+        # 参考 ZCode（electron-builder）更新安装器：品牌图标头部 + 产品名、
+        # 版本行、头部下分隔线；不放多余说明文字
+        _, content, _, _ = self._script(restart=True)
+        self.assertIn('[System.Drawing.Image]::FromStream($iconStream)', content)
+        self.assertIn('$iconBox.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Zoom', content)
+        self.assertIn('$g.DrawLine($pen, 24, 70', content)          # 头部分隔线
+        self.assertIn('正在更新到 1.2.1', content)                    # 版本行
+        self.assertIn(f"'{updater.APP_NAME}'", content)              # 品牌名标题
+        self.assertNotIn('仅替换程序文件', content)                   # 不展示保留配置说明
+
+    def test_installer_embeds_app_icon(self):
+        # 品牌图标从 app.ico 渲染 48px PNG 嵌入；仓库内必有该资源
+        _, content, _, _ = self._script(restart=True)
+        b64 = updater._icon_png_base64()
+        self.assertTrue(b64, 'app.ico 未找到或渲染失败')
+        self.assertIn(b64[:48], content)
+
+    def _run_ui_self_test(self, dark):
+        """真机运行安装器前端（CA_INSTALLER_UI_TEST=1 只演示动画后退出）。"""
+        if os.name != 'nt':
+            self.skipTest('仅 Windows 可运行 WinForms 安装器')
+        tmp_dir = Path(tempfile.mkdtemp())
+        new_exe = tmp_dir / 'CampusAuth_update_123.exe'
+        new_exe.write_bytes(b'x')
+        install_dir = tmp_dir / 'install'
+        install_dir.mkdir()
+        script = updater._installer_script(new_exe, install_dir, 999999, True,
+                                           '1.2.1', dark=dark)
+        self.addCleanup(lambda: script.unlink(missing_ok=True))
+        env = dict(os.environ)
+        env['CA_INSTALLER_UI_TEST'] = '1'
+        try:
+            done = subprocess.run(
+                ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                 '-STA', '-WindowStyle', 'Hidden', '-File', str(script)],
+                capture_output=True, text=True, encoding='utf-8',
+                errors='replace', timeout=90, env=env)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self.skipTest(f'无法启动 PowerShell 运行安装器自检: {exc}')
+        self.assertEqual(done.returncode, 0,
+                         f'安装器前端自检失败：\n{done.stdout}\n{done.stderr}')
+        self.assertIn('ui-self-test passed', done.stdout + done.stderr)
+
+    def test_installer_frontend_runs_dark(self):
+        # 深色主题安装器前端真机冒烟：圆角窗体 + 现代进度条动画走完并正常退出
+        self._run_ui_self_test(dark=True)
+
+    def test_installer_frontend_runs_light(self):
+        self._run_ui_self_test(dark=False)
+
 
 if __name__ == '__main__':
     unittest.main()

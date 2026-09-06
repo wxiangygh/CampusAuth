@@ -1,8 +1,9 @@
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
-import { NButton } from 'naive-ui'
-import { store, startAuth, startRestore, cancelOperation, updateStatusFromCheck, refreshNetworkDetail, setParticleCanvas } from '../store'
+import { ref, computed, watch, h, onMounted, onBeforeUnmount } from 'vue'
+import { NButton, NDropdown } from 'naive-ui'
+import { store, startAuth, startRestore, cancelOperation, updateStatusFromCheck, refreshNetworkDetail, setParticleCanvas, doAutoSave } from '../store'
 import { api } from '../bridge'
+import { ui } from '../ui'
 
 const STATUS_ICONS = {
   wifi: '<path d="M1 1l22 22"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/>',
@@ -25,14 +26,40 @@ function toggleDetail() {
   }
 }
 
-const DETAIL_ITEMS = [
-  { key: 'ipv4', label: 'IPv4', get: (d) => d.ipv4 || '—', cls: (d) => (d.ipv4 ? '' : 'empty') },
-  { key: 'ipv6', label: 'IPv6', get: (d) => d.ipv6 || '无公网IPv6', cls: (d) => (d.ipv6 ? 'success' : 'warning') },
-  { key: 'mac', label: 'MAC', get: (d) => d.mac || '—', cls: (d) => (d.mac ? '' : 'empty') },
-  { key: 'wifi', label: 'WiFi', get: (d) => d.wifi_ssid || '未连接', cls: (d) => (d.wifi_ssid ? '' : 'warning') },
-  { key: 'iface', label: '接口', get: (d) => d.interface || '未知', cls: () => '' },
-  { key: 'warp', label: 'WARP', get: (d) => (d.warp_connected ? '已连接' : '未连接'), cls: (d) => (d.warp_connected ? 'success' : 'warning') },
-]
+// 链路感知的详情项：有线联网时 WiFi 行明确显示"未使用（有线）"而非警告，
+// 并新增 连接方式 / 有线网卡 两行；无线时保持原有展示
+const detailItems = computed(() => {
+  const d = store.detail || {}
+  const wired = d.link_type === 'wired'
+  return [
+    {
+      key: 'link', label: '连接方式',
+      get: () => (d.link_type ? (wired ? '有线' : '无线') : '未知'),
+      cls: () => (d.link_type ? 'success' : 'empty'),
+    },
+    { key: 'ipv4', label: 'IPv4', get: (x) => x.ipv4 || (x.ipv4_disabled ? '已禁用' : '—'), cls: (x) => (x.ipv4 ? '' : 'empty') },
+    { key: 'ipv6', label: 'IPv6', get: (x) => x.ipv6 || '无公网IPv6', cls: (x) => (x.ipv6 ? 'success' : 'warning') },
+    { key: 'mac', label: 'MAC', get: (x) => x.mac || '—', cls: (x) => (x.mac ? '' : 'empty') },
+    {
+      key: 'wifi', label: 'WiFi',
+      get: (x) => (wired ? '未使用（有线联网）' : (x.wifi_ssid || '未连接')),
+      cls: () => (wired ? 'empty' : (d.wifi_ssid ? '' : 'warning')),
+    },
+    {
+      key: 'wired', label: '有线网卡',
+      get: (x) => x.wired_interface || '未连接',
+      cls: () => (d.wired_interface ? (wired ? 'success' : '') : 'empty'),
+    },
+    { key: 'iface', label: '接口', get: (x) => x.interface || '未知', cls: () => '' },
+    {
+      key: 'warp', label: 'WARP / 免流',
+      get: (x) => (x.warp_connected
+        ? (x.warp_underlay === 'ipv4' ? '已连接（IPv4底层·未免流）' : '已连接（IPv6底层·免流）')
+        : '未连接'),
+      cls: (x) => (x.warp_connected ? (x.warp_underlay === 'ipv4' ? 'warning' : 'success') : 'warning'),
+    },
+  ]
+})
 
 // ===== 初始化与轮询 =====
 async function initStatus() {
@@ -44,11 +71,118 @@ async function initStatus() {
   }
 }
 
+// ===== 按钮竖直分割下拉：快速切换按钮绑定的工作流 =====
+// 按钮主体照常触发认证/恢复；右侧窄条（或右键按钮）只开下拉选择，选择后立即保存绑定。
+// 两个下拉互斥：打开一个会关闭另一个；菜单位于按钮下方；选中项用图形对勾标记。
+const workflows = ref([])
+const authMenu = ref(false)
+const restoreMenu = ref(false)
+
+// 图形对勾（SVG）：选中标记，未选中时以透明占位保持各行对齐
+const CheckIcon = () =>
+  h('svg', {
+    viewBox: '0 0 24 24', width: '13px', height: '13px', fill: 'none',
+    stroke: 'currentColor', 'stroke-width': '3.4',
+    'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+  }, [h('polyline', { points: '20 6 9 17 4 12' })])
+
+// 下拉箭头（SVG chevron）：分割按钮上的图案下拉标记
+const CaretDown = () =>
+  h('svg', {
+    viewBox: '0 0 24 24', width: '15px', height: '15px', fill: 'none',
+    stroke: 'currentColor', 'stroke-width': '2.6',
+    'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+  }, [h('polyline', { points: '6 9 12 15 18 9' })])
+
+function optionIcon(checked) {
+  const base = 'width:15px;display:inline-flex;justify-content:center;align-items:center;'
+  return () =>
+    h('span', { style: checked ? base + 'color:var(--success);' : base + 'opacity:0;' },
+      [h(CheckIcon)])
+}
+
+function wfOption(w, boundId) {
+  return {
+    label: (w.name || w.id) + (w.built_in ? '（内置）' : ''),
+    key: w.id,
+    icon: optionIcon(w.id === boundId),
+  }
+}
+
+const authWfOptions = computed(() =>
+  workflows.value.map((w) => wfOption(w, store.form.auth_button_workflow))
+)
+
+const restoreWfOptions = computed(() => [
+  {
+    label: '内置恢复流程（断开 WARP 并启用 IPv4）',
+    key: '',
+    icon: optionIcon(store.form.restore_button_workflow === ''),
+  },
+  ...workflows.value.map((w) => wfOption(w, store.form.restore_button_workflow)),
+])
+
+// 互斥展开：打开一个先收起另一个
+function toggleAuthMenu() {
+  authMenu.value = !authMenu.value
+  if (authMenu.value) restoreMenu.value = false
+}
+
+function toggleRestoreMenu() {
+  restoreMenu.value = !restoreMenu.value
+  if (restoreMenu.value) authMenu.value = false
+}
+
+function closeAllMenus() {
+  authMenu.value = false
+  restoreMenu.value = false
+}
+
+// 按钮悬停提示：当前绑定的工作流名
+const boundAuthName = computed(() =>
+  workflows.value.find((w) => w.id === store.form.auth_button_workflow)?.name
+  || store.form.auth_button_workflow || 'default_auth')
+const boundRestoreName = computed(() => {
+  if (!store.form.restore_button_workflow) return '内置恢复流程'
+  return workflows.value.find((w) => w.id === store.form.restore_button_workflow)?.name
+    || store.form.restore_button_workflow
+})
+
+async function loadWorkflows() {
+  try {
+    const data = await api().list_workflows()
+    workflows.value = data.workflows || []
+  } catch (e) {
+    console.warn('list_workflows failed:', e)
+  }
+}
+
+async function onSelectAuthWf(key) {
+  closeAllMenus()
+  if (String(key) === store.form.auth_button_workflow) return
+  store.form.auth_button_workflow = String(key)
+  doAutoSave()
+  const name = workflows.value.find((w) => w.id === key)?.name || key
+  ui.toast(`「开始认证」已绑定：${name}`, 'success')
+}
+
+async function onSelectRestoreWf(key) {
+  closeAllMenus()
+  if (String(key) === store.form.restore_button_workflow) return
+  store.form.restore_button_workflow = String(key)
+  doAutoSave()
+  const name = key === '' ? '内置恢复流程'
+    : (workflows.value.find((w) => w.id === key)?.name || key)
+  ui.toast(`「恢复网络」已绑定：${name}`, 'success')
+}
+
 let statusCheckTimer = null
 
 function startStatusPolling() {
   stopStatusPolling()
   statusCheckTimer = setInterval(() => {
+    // 资源守卫：窗口隐藏到托盘时状态由后端低频推送兜底，不再主动全量探测
+    if (document.hidden) return
     if (!store.authRunning && api()) {
       api()
         .check_network_status()
@@ -73,6 +207,7 @@ watch(
   (name) => {
     if (name === 'home') {
       refreshNetworkDetail()
+      loadWorkflows() // 重新拉取工作流列表：绑定可能在设置页/工作流页被修改
       if (api() && !store.authRunning) {
         api()
           .check_network_status()
@@ -94,17 +229,28 @@ watch(
     if (!ready) return
     initStatus()
     refreshNetworkDetail()
+    loadWorkflows()
     startStatusPolling()
   },
   { immediate: true }
 )
 
+// 窗口从托盘恢复可见：立即补一次状态与详情刷新（隐藏期间轮询被守卫暂停）
+function onVisibilityChange() {
+  if (!document.hidden && store.activeTab === 'home') {
+    initStatus()
+    refreshNetworkDetail()
+  }
+}
+
 onMounted(() => {
   if (particleRef.value) setParticleCanvas(particleRef.value)
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onBeforeUnmount(() => {
   stopStatusPolling()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
 
@@ -144,8 +290,31 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="status-actions">
-        <n-button type="primary" size="large" :disabled="store.authDisabled" @click="startAuth">开始认证</n-button>
-        <n-button size="large" :disabled="store.restoreDisabled" @click="startRestore">恢复网络</n-button>
+        <!-- 分割按钮（WinUI 风格）：文字按「主体+下拉区」整体宽度居中；
+             右侧窄条只负责下拉，主体照常触发；右键按钮同样可弹出工作流列表。
+             两个下拉互斥，向下弹出，选中项带图形对勾。 -->
+        <div class="split-btn">
+          <n-button type="primary" size="large" :disabled="store.authDisabled"
+            :title="`开始认证执行：${boundAuthName}（右键可切换绑定的工作流）`" @click="startAuth"
+            @contextmenu.prevent="toggleAuthMenu">开始认证</n-button>
+          <n-dropdown trigger="manual" size="small" placement="bottom" :show="authMenu"
+            :options="authWfOptions" @select="onSelectAuthWf" @clickoutside="closeAllMenus">
+            <span class="split-caret split-caret-primary" :class="{ open: authMenu, disabled: store.authDisabled }"
+              title="选择「开始认证」执行的工作流" @click.stop.prevent="toggleAuthMenu"><i
+                class="caret-glyph"><CaretDown /></i></span>
+          </n-dropdown>
+        </div>
+        <div class="split-btn">
+          <n-button size="large"
+            :title="`恢复网络执行：${boundRestoreName}（右键可切换绑定的工作流）`" @click="startRestore"
+            @contextmenu.prevent="toggleRestoreMenu">恢复网络</n-button>
+          <n-dropdown trigger="manual" size="small" placement="bottom" :show="restoreMenu"
+            :options="restoreWfOptions" @select="onSelectRestoreWf" @clickoutside="closeAllMenus">
+            <span class="split-caret" :class="{ open: restoreMenu }"
+              title="选择「恢复网络」执行的工作流" @click.stop.prevent="toggleRestoreMenu"><i
+                class="caret-glyph"><CaretDown /></i></span>
+          </n-dropdown>
+        </div>
         <n-button size="large" type="error" secondary v-if="store.authRunning" @click="cancelOperation">取消</n-button>
       </div>
     </section>
@@ -158,7 +327,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="detail-body">
         <div class="detail-grid" v-if="store.detail">
-          <div class="detail-item" v-for="item in DETAIL_ITEMS" :key="item.key">
+          <div class="detail-item" v-for="item in detailItems" :key="item.key">
             <div class="detail-label">{{ item.label }}</div>
             <div class="detail-value" :class="item.cls(store.detail)">{{ item.get(store.detail) }}</div>
           </div>
@@ -420,6 +589,87 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
+/* ===== 分割按钮（借鉴 WinUI SplitButton）=====
+   一个整体按钮 + 右缘窄条（下拉热区）的竖直分割：
+   - 文字按「主体+下拉区」的整体宽度居中：两侧对称加宽内边距，
+     文字既居中又不会压到下拉热区；
+   - 分割线是上下留边的 1px 细线，不是通高粗线；
+   - 窄条宽度收窄到 21px，动画只旋转箭头图标本身。 */
+.split-btn {
+  position: relative;
+  display: inline-flex;
+}
+
+.split-btn :deep(.n-button) {
+  padding-left: 30px;
+  padding-right: 30px;
+}
+
+.split-caret {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 21px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  border-radius: 0 6px 6px 0;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* 分割线：上下各留 9px 的细竖线，随窄条文字色淡化 */
+.split-caret::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 1px;
+  background: var(--border-strong);
+}
+
+.split-caret:hover {
+  background-color: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.split-caret.disabled {
+  color: var(--text-tertiary);
+}
+
+/* 动画只作用于箭头图标，窄条与分割线保持不动 */
+.caret-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease;
+}
+
+.split-caret.open .caret-glyph {
+  transform: rotate(180deg);
+}
+
+/* 主按钮（开始认证）上的窄条：颜色与主按钮文字一致。
+   浅色主题主按钮是深底白字；深色主题主按钮是白底黑字（见 theme.js overrides） */
+.split-caret-primary {
+  color: #ffffff;
+}
+
+.split-caret-primary::before {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+:global([data-theme='dark']) .split-caret-primary {
+  color: #0d0d0d;
+}
+
+:global([data-theme='dark']) .split-caret-primary::before {
+  background: rgba(0, 0, 0, 0.2);
+}
+
 /* ===== 网络详情 ===== */
 .detail-card {
   overflow: hidden;
@@ -463,14 +713,20 @@ onBeforeUnmount(() => {
   max-height: 0;
 }
 
+/* 网格：flex 居中排布——不足一整行时（如 8 个格子的最后 2 个）
+   自动水平居中，而不是靠在左侧 */
 .detail-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 10px;
   padding: 2px 16px 16px;
 }
 
 .detail-item {
+  flex: 0 0 calc((100% - 20px) / 3);
+  min-width: 200px;
+  box-sizing: border-box;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 8px;

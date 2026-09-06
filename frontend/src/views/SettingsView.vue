@@ -6,6 +6,14 @@ import { api } from '../bridge'
 import { ui } from '../ui'
 import { sortBy } from '../utils/sortlists'
 import SortToggle from '../components/SortToggle.vue'
+import TrayMenuOrderModal from '../components/TrayMenuOrderModal.vue'
+
+// ===== 托盘工作流顺序（类托盘菜单弹窗，拖动调整原生托盘菜单顺序）=====
+const trayOrderVisible = ref(false)
+
+function openTrayOrder() {
+  trayOrderVisible.value = true
+}
 
 // ===== 应用信息（版本 / 安装位置）=====
 const appInfo = ref({ version: '', install_dir: '', exe: '' })
@@ -78,36 +86,67 @@ const exitHookOptions = computed(() => [
 ])
 
 // ===== WiFi 扫描 =====
-// 扫描是异步的：先下发扫描请求，等系统拿到新结果后再读取并展开候选列表。
+// 持续扫描：点击「扫描」后由后端逐轮触发真实扫描，结果经 onWifiScanUpdate
+// 事件增量推送到 store.wifiScan，这里合并去重后动态填充候选列表；
+// 再点一次「停止」或达到时限即结束。
 const wifiOptions = ref([])
 // WiFi 候选列表排序方向：1 = A→Z，-1 = Z→A（扫描结果默认按信号强度返回）
 const wifiSortDir = ref(1)
-const scanning = ref(false)
 const wifiInputRef = ref(null)
+const scanning = computed(() => store.wifiScan.active)
 
 const sortedWifiOptions = computed(() =>
   sortBy(wifiOptions.value, (o) => o.label, wifiSortDir.value)
 )
 
-async function refreshWifi() {
-  if (scanning.value) return
-  scanning.value = true
+// 扫描事件 → 增量合并（去重），不覆盖用户已输入的内容
+watch(
+  () => store.wifiScan,
+  (s) => {
+    if (!s || !Array.isArray(s.networks)) return
+    const known = new Set(wifiOptions.value.map((o) => o.value))
+    let added = false
+    for (const name of s.networks) {
+      if (name && !known.has(name)) {
+        wifiOptions.value.push({ label: name, value: name })
+        known.add(name)
+        added = true
+      }
+    }
+    if (added) wifiOptions.value = [...wifiOptions.value]
+    if (s.status === 'done') {
+      const reason = s.reason === 'timeout' ? '已达到扫描时限' : '已停止扫描'
+      ui.toast(`${reason}，共发现 ${wifiOptions.value.length} 个网络`,
+        wifiOptions.value.length ? 'success' : 'warning')
+    }
+  }
+)
+
+async function toggleWifiScan() {
+  if (scanning.value) {
+    try {
+      await api().stop_wifi_scan()
+    } catch (e) {
+      console.error('stop_wifi_scan failed:', e)
+    }
+    return
+  }
   wifiOptions.value = []
+  store.wifiScan = { active: true, networks: [], count: 0, status: 'scanning' }
   try {
-    const networks = await api().scan_wifi()
-    wifiOptions.value = (networks || []).map((s) => ({ label: s, value: s }))
-    if (!wifiOptions.value.length) {
-      ui.toast('未扫描到 WiFi，请确认无线网卡已启用且 WLAN 服务已启动', 'warning')
+    const result = await api().start_wifi_scan()
+    if (result && result.success === false) {
+      store.wifiScan = { active: false, networks: [], count: 0, status: '' }
+      ui.toast(result.message || '启动扫描失败', 'error')
       return
     }
-    // 聚焦输入框，让扫描结果直接弹出（输入框为空时也能展示全部候选）
+    // 聚焦输入框：候选下拉随扫描结果逐步弹出、动态填充
     await nextTick()
     wifiInputRef.value?.focus?.()
   } catch (e) {
+    store.wifiScan = { active: false, networks: [], count: 0, status: '' }
     console.error('Failed to start wifi scan:', e)
     ui.toast('扫描 WiFi 失败：' + e.message, 'error')
-  } finally {
-    scanning.value = false
   }
 }
 
@@ -128,7 +167,7 @@ let autoSaveTimer = null
 
 // 文本输入：防抖 500ms
 watch(
-  () => [store.form.wifi_name, store.form.username, store.form.password, store.form.warp_cli_path, store.form.portal_ip, store.form.portal_port],
+  () => [store.form.wifi_name, store.form.username, store.form.password, store.form.warp_cli_path],
   () => {
     if (!store.configLoaded) return
     clearTimeout(autoSaveTimer)
@@ -158,7 +197,7 @@ watch(
 
 // 按钮绑定工作流：立即保存
 watch(
-  () => [store.form.auth_button_workflow, store.form.restore_button_workflow, store.form.exit_hook_workflow],
+  () => [store.form.auth_button_workflow, store.form.restore_button_workflow, store.form.exit_hook_workflow, store.form.reconnect_workflow],
   () => {
     if (!store.configLoaded) return
     clearTimeout(autoSaveTimer)
@@ -218,6 +257,7 @@ async function initSettings() {
     f.auth_total_timeout = config.auth_total_timeout || 90
     f.warp_auto_reconnect = config.warp_auto_reconnect || false
     f.warp_reconnect_delay = config.warp_reconnect_delay || 20
+    f.reconnect_workflow = config.reconnect_workflow || 'default_auth'
     f.auth_button_workflow = config.auth_button_workflow || 'default_auth'
     f.restore_button_workflow = config.restore_button_workflow || ''
     f.exit_hook_workflow = config.exit_hook_workflow || ''
@@ -252,6 +292,7 @@ async function initSettings() {
     // 绑定的 id 已被删除时回退到默认，避免按钮指向不存在的工作流
     const ids = new Set(workflows.value.map((w) => w.id))
     if (!ids.has(store.form.auth_button_workflow)) store.form.auth_button_workflow = 'default_auth'
+    if (!ids.has(store.form.reconnect_workflow)) store.form.reconnect_workflow = 'default_auth'
     if (store.form.restore_button_workflow && !ids.has(store.form.restore_button_workflow)) {
       store.form.restore_button_workflow = ''
     }
@@ -281,6 +322,11 @@ window.addEventListener('beforeunload', onBeforeUnload)
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
   clearTimeout(autoSaveTimer)
+  // 离开设置页时结束仍在进行的持续扫描，避免无线网卡被长期占用
+  if (store.wifiScan.active) {
+    api()?.stop_wifi_scan()?.catch?.(() => {})
+    store.wifiScan = { active: false, networks: [], count: 0, status: '' }
+  }
 })
 </script>
 
@@ -296,29 +342,25 @@ onBeforeUnmount(() => {
             <n-input-group class="wifi-input-group">
               <n-auto-complete ref="wifiInputRef" v-model:value="store.form.wifi_name" :options="sortedWifiOptions"
                 :get-show="() => wifiOptions.length > 0" placeholder="选择或输入WiFi名称" style="flex: 1" />
-              <n-button :loading="scanning" @click="refreshWifi">扫描</n-button>
+              <n-button :loading="scanning" @click="toggleWifiScan">{{ scanning ? '停止' : '扫描' }}</n-button>
             </n-input-group>
             <SortToggle v-model:dir="wifiSortDir" compact subject="WiFi 名称" />
           </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">认证账号</label>
-          <n-input v-model:value="store.form.username" placeholder="输入上网账号" />
+          <div class="scan-hint" v-if="scanning">
+            正在持续扫描并自动填充列表…已发现 {{ wifiOptions.length }} 个网络，点击「停止」结束
+          </div>
         </div>
       </div>
 
       <div class="form-row">
         <div class="form-group">
+          <label class="form-label">认证账号</label>
+          <n-input v-model:value="store.form.username" placeholder="输入上网账号" />
+        </div>
+        <div class="form-group">
           <label class="form-label">认证密码</label>
           <n-input v-model:value="store.form.password" type="password" show-password-on="click"
             placeholder="输入账号密码" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">校园网认证服务器</label>
-          <n-input-group>
-            <n-input v-model:value="store.form.portal_ip" placeholder="服务器 IP" style="flex: 1" />
-            <n-input v-model:value="store.form.portal_port" placeholder="端口" style="max-width: 110px" />
-          </n-input-group>
         </div>
       </div>
 
@@ -348,15 +390,29 @@ onBeforeUnmount(() => {
           <label class="form-label">退出时执行的工作流（托盘「退出」触发）</label>
           <n-select v-model:value="store.form.exit_hook_workflow" :options="exitHookOptions" />
         </div>
+        <div class="form-group">
+          <label class="form-label">自动重连执行的工作流</label>
+          <n-select v-model:value="store.form.reconnect_workflow" :options="workflowOptions" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">托盘菜单</label>
+          <div class="tray-order-row">
+            <n-button secondary @click="openTrayOrder">设置工作流顺序…</n-button>
+            <span class="tray-order-hint">托盘菜单中的工作流带序号显示，点击可在类托盘菜单中拖动调整顺序</span>
+          </div>
+        </div>
       </div>
 
       <div class="toggle-grid">
         <div class="toggle-card">
           <div class="toggle-head">
-            <span class="toggle-title">自动认证</span>
+            <span class="toggle-title">开机自动认证</span>
             <n-switch v-model:value="store.form.auto_auth" size="small" />
           </div>
-          <div class="toggle-tip">连接 WiFi 后自动认证</div>
+          <div class="toggle-tip">仅开机自启时执行：无线先连接所配 WiFi，有线直接认证</div>
         </div>
         <div class="toggle-card">
           <div class="toggle-head">
@@ -377,7 +433,7 @@ onBeforeUnmount(() => {
             <span class="toggle-title">静默启动</span>
             <n-switch v-model:value="store.form.silent_startup" size="small" />
           </div>
-          <div class="toggle-tip">开机自启时不显示主窗口</div>
+          <div class="toggle-tip">仅开机自启时静默不显示主窗口；手动启动始终显示</div>
         </div>
         <div class="toggle-card">
           <div class="toggle-head">
@@ -416,6 +472,9 @@ onBeforeUnmount(() => {
         <div class="about-tip">更新时会覆盖安装到上述位置（可自定义目录），仅替换程序文件，配置文件始终保留</div>
       </div>
     </section>
+
+    <!-- 托盘工作流顺序（类托盘菜单弹窗） -->
+    <TrayMenuOrderModal v-model:show="trayOrderVisible" />
   </div>
 </template>
 
@@ -463,6 +522,25 @@ onBeforeUnmount(() => {
 .wifi-input-group {
   flex: 1;
   min-width: 0;
+}
+
+/* 持续扫描进行中的动态提示 */
+.scan-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* 托盘菜单顺序设置入口 */
+.tray-order-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tray-order-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
 }
 
 .toggle-grid {

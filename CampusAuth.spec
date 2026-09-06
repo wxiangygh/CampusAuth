@@ -18,6 +18,7 @@ a = Analysis(
         'core.warp_manager', 'core.auth', 'core.startup',
         'core.config', 'core.secrets', 'core.app_state', 'core.workflow', 'core.auth_workflow', 'core.status',
         'core.updater', 'core.version', 'core.reconnect_watchdog',
+        'core.newest_first_log', 'core.portal_web',
     ],
     hookspath=[],
     hooksconfig={},

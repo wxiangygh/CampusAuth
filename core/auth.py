@@ -13,7 +13,7 @@ from core.command import run_command, run_elevated_powershell
 from core.network import (
     get_wifi_interface_name, get_local_ip, get_mac_address,
     wait_for_network_ready, _wait_for_ipv6_ready, is_warp_connected,
-    has_public_ipv6,
+    has_public_ipv6, resolve_active_interface,
 )
 from core.warp_manager import (
     connect_warp, disconnect_warp, get_warp_cli,
@@ -214,6 +214,51 @@ def _push_auth_progress(step, total, message, status='running', action='auth'):
     except Exception as e:
         logger.error(f"push_auth_progress failed: {e}")
 
+def push_runner_event(event):
+    """把工作流原始事件转发给主窗口的「测试工作流」底部面板。
+
+    事件带当前操作纪元（operationId），面板按纪元过滤，
+    与主页进度推送的防串扰机制一致；主窗口未打开时忽略。
+    """
+    try:
+        from core.app_state import app_state
+        instance = core.state._tray_app_instance
+        if not instance or not getattr(instance, 'settings_window', None):
+            return
+        payload = dict(event or {})
+        payload['operationId'] = app_state.snapshot().get('operation', {}).get('operation_id', 0)
+        instance._push_runner_js(payload)
+    except Exception as e:
+        logger.debug(f"push_runner_event failed: {e}")
+
+def preempt_auth_lock(new_desc, wait=3.0):
+    """打断当前在途操作并接管 _auth_lock（最新请求优先）。
+
+    主页按钮、托盘按钮、测试工作流等所有执行入口统一走这里：
+    先设置取消标志让在途工作流尽快退出（其 finally 会释放锁），
+    再限时等锁。返回 (是否拿到锁, 被打断操作的可读描述或 None)。
+    """
+    from core.app_state import app_state
+    interrupted = None
+    if core.state._auth_lock.acquire(blocking=False):
+        return True, None
+    op = app_state.snapshot().get('operation') or {}
+    if op.get('status') == 'running':
+        kind_label = {'auth': '认证', 'restore': '恢复网络'}.get(op.get('kind'), '操作')
+        message = str(op.get('message') or '').strip()
+        # 「准备执行」是 start_operation 的占位文案，对用户没有信息量；
+        # 执行中则会带上当前步骤名（如"校园网 Portal 注销"）
+        interrupted = kind_label + (f'（{message}）' if message and message != '准备执行' else '')
+    logger.info('preempt: %s 请求打断在途操作（%s）', new_desc, interrupted or '未知')
+    _auth_cancelled.set()
+    app_state.update_operation(status='cancelled',
+                               message=f'已被新的请求取代：{new_desc}')
+    if not core.state._auth_lock.acquire(timeout=wait):
+        logger.warning('preempt: 在途操作 %s 秒内未退出，%s 请求失败', wait, new_desc)
+        _auth_cancelled.clear()
+        return False, interrupted
+    return True, interrupted
+
 
 def run_restore_task():
     """执行恢复任务，返回 (bool, str) 表示 (是否成功, 消息)"""
@@ -221,10 +266,19 @@ def run_restore_task():
     logger.info("Restoring normal network mode")
     logger.info("=" * 60)
     _auth_cancelled.clear()
-    interface_name = get_wifi_interface_name()
+    # 链路适配：网线直连时启用/校验 IPv4、重置 IPv6 DNS 都要落在有线网卡上，
+    # 而不是无脑操作 WLAN（有线机器上 WLAN 甚至没有连接）
+    link_type, detected = resolve_active_interface()
+    if detected:
+        interface_name = detected
+    elif link_type == 'wired':
+        interface_name = get_wired_interface_name() or ''
+    else:
+        interface_name = get_wifi_interface_name() or ''
     if not interface_name:
-        interface_name = "WLAN"
-    logger.info(f"WiFi interface: {interface_name}")
+        # 双类型都没拿到（极端）：按"无线接口不存在则用有线"的优先级兜底
+        interface_name = get_wired_interface_name() or get_wifi_interface_name() or "WLAN"
+    logger.info("Restore link=%s interface: %s", link_type, interface_name)
     # 3 个固定阶段，total 恒为 3，进度单调递增不回退：
     # 1=断开WARP+启用IPv4  2=验证IPv4地址  3=验证互联网连通
     _push_auth_progress(1, 3, '断开 WARP 并启用 IPv4...', action='restore')

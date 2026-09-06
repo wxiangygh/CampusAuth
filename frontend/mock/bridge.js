@@ -52,6 +52,11 @@ let workflows = [
 let activeId = 'default_auth'
 let revision = 1
 let autoTune = false
+let mockScanTimer = null
+let mockScanStop = false
+let mockMaximized = false
+// 节点类型全局配置（全局/独立双模式）
+const mockNodeGlobals = {}
 
 // 模拟各节点的累计运行统计：覆盖绿/橙/红三档与"无数据"状态
 const STATS = {
@@ -76,6 +81,8 @@ const api = {
   save_ui_prefs: () => delay({}),
   get_workflow_catalog: () =>
     delay({ steps: clone(CATALOG), workflows: clone(workflows), active_workflow_id: activeId }),
+  list_workflows: () =>
+    delay({ workflows: clone(workflows), active_workflow_id: activeId }),
   select_workflow: (id) => {
     activeId = id
     return delay({ success: true, ...snapshot() })
@@ -95,11 +102,12 @@ const api = {
     activeId = wf.id
     return delay({ success: true, workflow: clone(wf), ...snapshot() })
   },
-  update_workflow_meta: (id, name, trayMenu) => {
+  update_workflow_meta: (id, name, trayMenu, shared) => {
     const wf = workflows.find((item) => item.id === id)
     if (wf) {
       if (name) wf.name = name
-      wf.tray_menu = !!trayMenu
+      if (trayMenu != null) wf.tray_menu = !!trayMenu
+      if (shared != null) wf.shared = !!shared
     }
     return delay({ success: true, ...snapshot() })
   },
@@ -112,6 +120,59 @@ const api = {
     const wf = workflows.find((item) => item.id === id)
     if (wf) wf.customized = false
     return delay({ success: true, workflow: clone(wf), ...snapshot() })
+  },
+  // ===== 托盘菜单悬浮窗 =====
+  get_tray_menu_data: () => {
+    const tray = workflows.filter((w) => w.tray_menu !== false)
+      .sort((a, b) => ((a.tray_order || 0) || 1e9) - ((b.tray_order || 0) || 1e9)
+        || (b.built_in ? 1 : 0) - (a.built_in ? 1 : 0))
+    return delay({
+      workflows: tray.map((w, i) => ({ id: w.id, name: w.name, tray_order: i + 1 })),
+      startup_enabled: false,
+      is_admin: true,
+    })
+  },
+  set_tray_workflow_order: (ids) => {
+    ids.forEach((id, i) => {
+      const wf = workflows.find((w) => w.id === id)
+      if (wf) wf.tray_order = i + 1
+    })
+    const tray = workflows.filter((w) => w.tray_menu !== false)
+      .sort((a, b) => ((a.tray_order || 0) || 1e9) - ((b.tray_order || 0) || 1e9))
+    return delay({ success: true, menu_data: {
+      workflows: tray.map((w, i) => ({ id: w.id, name: w.name, tray_order: i + 1 })),
+      startup_enabled: false, is_admin: true,
+    } })
+  },
+  hide_tray_menu: () => delay({ success: true }),
+  open_main_window: () => delay({ success: true }),
+  open_log_file: () => delay({ success: true }),
+  elevate_admin: () => delay({ success: true }),
+  exit_app: () => delay({ success: true }),
+  // 标题栏最大化/还原（dev 预览仅切换内存状态）
+  maximize_window: () => {
+    mockMaximized = !mockMaximized
+    return delay({ success: true, maximized: mockMaximized })
+  },
+  get_window_state: () => delay({ success: true, maximized: mockMaximized }),
+  minimize_window: () => delay({ success: true }),
+  close_window: () => delay({ success: true }),
+  // 托盘菜单排序：交换相邻 tray_order 并整体重排为 1..n
+  move_workflow_tray_order: (id, direction) => {
+    const tray = workflows.filter((w) => w.tray_menu !== false)
+      .sort((a, b) => ((a.tray_order || 0) || 1e9) - ((b.tray_order || 0) || 1e9)
+        || (b.built_in ? 1 : 0) - (a.built_in ? 1 : 0)
+        || String(a.id).localeCompare(String(b.id)))
+    const index = tray.findIndex((w) => w.id === id)
+    if (index < 0) return delay({ success: false, message: '该工作流未显示在托盘菜单' })
+    const target = index + (direction < 0 ? -1 : 1)
+    if (target < 0) return delay({ success: true, message: '已经在最上面', ...snapshot() })
+    if (target >= tray.length) return delay({ success: true, message: '已经在最下面', ...snapshot() })
+    ;[tray[index], tray[target]] = [tray[target], tray[index]]
+    tray.forEach((w, i) => { w.tray_order = i + 1 })
+    const wf = workflows.find((item) => item.id === id)
+    return delay({ success: true, message: '托盘顺序已调整', tray_order: tray.map((w) => w.id),
+      workflow: clone(wf), ...snapshot() })
   },
   get_workflow_stats: (id) =>
     delay({ workflow_id: id, auto_tune: autoTune, steps: clone(STATS[id] || {}) }, 80),
@@ -140,9 +201,117 @@ const api = {
     }
     return delay({ success: true, workflow_id: wfId, changed: changes.length > 0, changes, revision: ++revision })
   },
+  // ===== WiFi 持续扫描（模拟逐轮发现网络的增量推送）=====
+  start_wifi_scan: () => {
+    const pool = [
+      'CMCC_BJUT_SUSHE_H0910', 'BJUT_SUSHE_2.4G', 'BJUT_SUSHE_5G', 'CMCC-kuandai',
+      'CMCC_BJUT_SUSHE_H1009-5G', 'BJUT-PUBLIC', 'eduroam', 'ChinaNet-5G', 'Xiaomi_Router_Guest',
+    ]
+    const found = []
+    mockScanStop = false
+    const push = (status, reason) =>
+      window.onWifiScanUpdate?.({ status, networks: [...found], new: [], count: found.length, reason })
+    let i = 0
+    mockScanTimer = setInterval(() => {
+      if (mockScanStop || i >= pool.length) {
+        clearInterval(mockScanTimer)
+        push('done', mockScanStop ? 'stopped' : 'timeout')
+        return
+      }
+      found.push(pool[i++])
+      push('scanning')
+    }, 700)
+    return delay({ success: true })
+  },
+  stop_wifi_scan: () => {
+    mockScanStop = true
+    return delay({ success: true })
+  },
+  // ===== 重置调优（清空运行统计）=====
+  reset_workflow_tuning: (scope, workflowId, stepIds) => {
+    if (scope === 'all') {
+      const wfCount = Object.keys(STATS).length
+      let stepCount = 0
+      for (const key of Object.keys(STATS)) {
+        stepCount += Object.keys(STATS[key]).length
+        delete STATS[key]
+      }
+      return delay({ success: true, scope, cleared_workflows: wfCount, cleared_steps: stepCount,
+        message: `已重置 ${wfCount} 个工作流共 ${stepCount} 条节点调优记录` })
+    }
+    if (scope === 'step') {
+      const ids = stepIds || []
+      const stats = STATS[workflowId] || {}
+      const cleared = ids.filter((sid) => delete stats[sid])
+      return delay({ success: true, scope, steps: cleared, cleared_steps: cleared.length,
+        message: `已重置 ${cleared.length} 个节点的调优记录` })
+    }
+    const count = Object.keys(STATS[workflowId] || {}).length
+    delete STATS[workflowId]
+    return delay({ success: true, scope, workflow_id: workflowId, cleared_steps: count,
+      message: `已重置该工作流 ${count} 个节点的调优记录` })
+  },
+  // ===== 工作流分享 / 导入 =====
+  export_workflow_shared: (id, mode, scope) => {
+    const targets = scope === 'all'
+      ? workflows
+      : [workflows.find((item) => item.id === (id || activeId))].filter(Boolean)
+    if (!targets.length) return delay({ success: false, message: '工作流不存在' })
+    const payload = JSON.stringify({
+      type: 'campusauth_workflow', version: 1, scope: scope === 'all' ? 'all' : 'current',
+      exported_at: new Date().toLocaleString(),
+      workflows: targets.map((wf) => ({ name: wf.name, description: '', steps: clone(wf.steps) })),
+      workflow: scope === 'all' ? undefined : {
+        name: targets[0].name, description: '', steps: clone(targets[0].steps),
+      },
+    }, null, 2)
+    if (mode === 'file') {
+      return delay({ success: true, mode, path: 'D:\\Downloads\\工作流分享.json',
+        message: '已导出到 D:\\Downloads\\工作流分享.json' })
+    }
+    try { navigator.clipboard?.writeText(payload) } catch (e) { /* dev 预览尽力而为 */ }
+    return delay({ success: true, mode, message: '分享 JSON 已复制到剪贴板' })
+  },
+  import_workflow_shared_clipboard: () => {
+    const wf = { id: 'wf_import_' + Date.now(), name: '导入的工作流', built_in: false,
+      tray_menu: true, shared: false, description: '从分享导入的工作流', steps: clone(workflows[0].steps) }
+    workflows.push(wf)
+    return delay({ success: true, message: '已导入工作流：导入的工作流',
+      workflow_id: wf.id, workflow_name: wf.name, workflow: clone(wf), ...snapshot() })
+  },
+  import_workflow_shared_file: () => {
+    const wf = { id: 'wf_import_' + Date.now(), name: '导入的工作流', built_in: false,
+      tray_menu: true, shared: false, description: '从分享导入的工作流', steps: clone(workflows[1].steps) }
+    workflows.push(wf)
+    return delay({ success: true, message: '已导入工作流：导入的工作流',
+      workflow_id: wf.id, workflow_name: wf.name, workflow: clone(wf), ...snapshot() })
+  },
   auto_save_form: () => delay({ success: true, revision: ++revision }),
+  // ===== 节点全局/独立配置 =====
+  get_node_globals: () => delay({ success: true, node_globals: clone(mockNodeGlobals) }),
+  set_node_global: (stepId, config, workflowId) => {
+    mockNodeGlobals[stepId] = {
+      config: clone(config || {}),
+      source: { workflow_id: workflowId || 'default_auth', workflow_name: '当前工作流' },
+    }
+    return delay({ success: true, node_globals: clone(mockNodeGlobals), revision: ++revision })
+  },
+  clear_node_global: (stepId) => {
+    delete mockNodeGlobals[stepId]
+    return delay({ success: true, node_globals: clone(mockNodeGlobals) })
+  },
   check_network_status: () => delay({ status: 'idle' }),
-  get_network_detail: () => delay(null),
+  get_network_detail: () => delay({
+    ipv4: '10.24.96.37',
+    ipv6: '2001:da8:208::3d1f',
+    ipv6_status: 'public',
+    mac: 'A1B2C3D4E5F6',
+    wifi_ssid: 'BJUT_SUSHE_5G',
+    interface: 'WLAN',
+    warp_connected: true,
+    link_type: 'wireless',
+    wired_interface: '',
+  }),
   get_traffic_status_fast: () =>
     delay({
       warp_underlay: 'ipv4',

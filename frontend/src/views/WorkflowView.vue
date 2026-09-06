@@ -1,15 +1,25 @@
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { NButton, NInput, NInputNumber, NSelect, NCheckbox, NSwitch, NTooltip } from 'naive-ui'
+import { ref, reactive, computed, watch, h, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { NButton, NInput, NInputNumber, NSelect, NCheckbox, NSwitch, NTooltip, NModal, NDropdown, NRadioGroup, NRadioButton, NTag } from 'naive-ui'
 import { api } from '../bridge'
 import { store, doAutoSave } from '../store'
 import { ui } from '../ui'
+import PortalNodeConfig from '../components/PortalNodeConfig.vue'
+import AppIcon from '../components/AppIcon.vue'
 
 // ===== 状态 =====
+// 多选项按钮右侧的下拉标记（SVG chevron 图案，展开时旋转 180°）
+const CaretDown = () =>
+  h('svg', {
+    viewBox: '0 0 24 24', width: '11px', height: '11px', fill: 'none',
+    stroke: 'currentColor', 'stroke-width': '2.6',
+    'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+  }, [h('polyline', { points: '6 9 12 15 18 9' })])
+
 const catalog = ref(new Map())
 const workflows = ref([])
 const currentId = ref(null)
-const workflow = ref({ id: '', name: '', steps: [], tray_menu: true, built_in: false })
+const workflow = ref({ id: '', name: '', steps: [], tray_menu: true, built_in: false, shared: false })
 const message = ref('')
 const messageError = ref(false)
 const selectedStep = ref('')
@@ -18,6 +28,132 @@ const inited = ref(false)
 const dirty = ref(false)
 // 保存/复制进行中：防止双击连发创建出重复副本
 const saving = ref(false)
+
+// ===== 节点配置弹窗 =====
+// configIndex 指向 workflow.steps 中正在编辑的节点；弹窗居中、不可移动。
+const configVisible = ref(false)
+const configIndex = ref(-1)
+const configStep = computed(() =>
+  configIndex.value >= 0 ? workflow.value.steps[configIndex.value] || null : null
+)
+const configMeta = computed(() =>
+  configStep.value ? catalog.value.get(configStep.value.id) : null
+)
+const isPortal = computed(() => configMeta.value?.config_kind === 'portal')
+
+// ===== 节点全局/独立配置 =====
+// 概念模型（两个独立的概念）：
+// 1) node_mode（读取来源）：'global' 运行时读取该类型的全局配置，
+//    'independent'（默认）读取节点自身配置。切换只影响本节点读哪份配置，
+//    不产生任何写入。
+// 2) 全局节点（配置来源）：每类型仅一份全局配置；只有点击「保存为全局」
+//    才会把当前停留模式的配置写入该类型全局配置，本节点成为来源节点；
+//    已存在不同全局配置时需确认覆盖，原来源节点让位。
+const nodeGlobals = ref({})
+const cfgDraft = ref({})
+
+const nodeMode = computed(() => (configStep.value?.node_mode === 'global' ? 'global' : 'independent'))
+const hasGlobalEntry = computed(() =>
+  !!nodeGlobals.value[configStep.value?.id]?.config)
+const globalSourceName = computed(() =>
+  nodeGlobals.value[configStep.value?.id]?.source?.workflow_name || '未知')
+const isGlobalSource = computed(() =>
+  nodeGlobals.value[configStep.value?.id]?.source?.workflow_id === currentId.value)
+
+function cfgKey(cfg) {
+  return JSON.stringify([Number(cfg?.timeout ?? 15), Number(cfg?.retries ?? 0),
+    Number(cfg?.retry_delay ?? 1), !!cfg?.continue_on_error, cfg?.params || {}])
+}
+
+// 生成弹窗草稿：global 模式读该类型全局配置（无则回退节点自身），独立模式读节点自身
+function seedDraft(step, mode) {
+  const entry = nodeGlobals.value[step.id]
+  const base = (mode === 'global' && entry?.config) ? entry.config : step
+  return {
+    timeout: Number(base.timeout ?? step.timeout ?? 15),
+    retries: Number(base.retries ?? step.retries ?? 0),
+    retry_delay: Number(base.retry_delay ?? step.retry_delay ?? 1),
+    continue_on_error: !!base.continue_on_error,
+    params: base.params ? JSON.parse(JSON.stringify(base.params)) : {},
+  }
+}
+
+async function loadNodeGlobals() {
+  try {
+    const result = await api()?.get_node_globals?.()
+    if (result?.node_globals) nodeGlobals.value = result.node_globals
+  } catch (e) {
+    console.warn('get_node_globals failed:', e)
+  }
+}
+
+// 弹窗内字段编辑：独立模式同步写节点自身配置；全局模式只改草稿，
+// 点击「保存为全局」后才写入该类型的全局配置（不碰节点自身配置）
+function applyFieldChange(key, value) {
+  cfgDraft.value[key] = value
+  if (nodeMode.value !== 'global') {
+    updateStep(configIndex.value, key, value)
+  }
+}
+
+// 模式切换：仅改变运行时读取哪份配置，重新播种弹窗草稿
+function setNodeMode(mode) {
+  const step = configStep.value
+  if (!step || mode === nodeMode.value) return
+  updateStep(configIndex.value, 'node_mode', mode)
+  cfgDraft.value = seedDraft(step, mode)
+  if (mode === 'global') {
+    setMessage('已切换为读取全局配置：运行时使用该类型的全局配置（不改变全局配置本身）')
+  } else {
+    setMessage('已切换为独立配置：运行时使用节点自身配置')
+  }
+}
+
+// 「保存为全局」：把当前停留模式的配置写入该类型全局配置，本节点成为来源节点
+// （独立模式 = 节点自身配置；全局模式 = 弹窗草稿，可直接编辑后保存）
+async function promoteToGlobal() {
+  const step = configStep.value
+  if (!step) return
+  const mine = {
+    timeout: Number(cfgDraft.value.timeout || 15),
+    retries: Number(cfgDraft.value.retries || 0),
+    retry_delay: Number(cfgDraft.value.retry_delay ?? 1),
+    continue_on_error: !!cfgDraft.value.continue_on_error,
+    params: cfgDraft.value.params || {},
+  }
+  const entry = nodeGlobals.value[step.id]
+  if (entry?.config && cfgKey(entry.config) !== cfgKey(mine)) {
+    const name = catalog.value.get(step.id)?.name || step.id
+    const ok = await ui.confirm(
+      `「${name}」类型已存在全局配置（来自工作流「${entry.source?.workflow_name || '未知'}」）。
+`
+      + '是否用当前配置覆盖全局配置？覆盖后，其他使用全局配置的节点将采用新配置，'
+      + '原全局节点不再作为配置来源。',
+      '覆盖全局配置')
+    if (!ok) return
+  }
+  try {
+    const result = await api()?.set_node_global?.(step.id,
+      JSON.parse(JSON.stringify(mine)), currentId.value)
+    if (result?.success === false) return setMessage(result.message || '保存全局配置失败', true)
+    if (result?.node_globals) nodeGlobals.value = result.node_globals
+  } catch (e) {
+    return setMessage('保存全局配置失败：' + e.message, true)
+  }
+  setMessage(`已保存为全局配置：「${catalog.value.get(step.id)?.name || step.id}」类型的全局配置已更新为当前配置`)
+  ui.toast('已保存为全局配置', 'success')
+}
+
+// 全局 portal_ip:portal_port，作为 Portal 节点 HTTP 方式留空时的回退提示
+const configTitle = computed(() =>
+  configStep.value ? `编辑节点：${configMeta.value?.name || configStep.value.id}` : '编辑节点'
+)
+const defaultServer = computed(() => {
+  const ip = String(store.form.portal_ip || '').trim()
+  const port = String(store.form.portal_port || '').trim()
+  if (!ip) return ''
+  return port ? `${ip}:${port}` : ip
+})
 
 // ===== 计时统计 / 自动调优 =====
 // {step_id: {runs, avg_elapsed, avg_retries, score, suggested_timeout, suggested_retries}}
@@ -82,6 +218,18 @@ const workflowOptions = computed(() => {
 // 一键应用调优建议的加载态
 const applyingTune = ref(false)
 
+// ===== 重置调优（三级：选中节点 / 当前工作流 / 全部） =====
+// 只清 workflow_tuning.json 的运行统计；已写回配置的超时/重试参数不动。
+const resetTuneOptions = computed(() => [
+  {
+    label: selCount.value ? `重置选中节点的调优记录（${selCount.value} 个）` : '重置选中节点的调优记录',
+    key: 'step',
+    disabled: !currentId.value || !selCount.value,
+  },
+  { label: '重置当前工作流的调优记录', key: 'workflow', disabled: !currentId.value },
+  { label: '重置全部工作流的调优记录', key: 'all' },
+])
+
 function setMessage(msg, isError = false) {
   message.value = msg || ''
   messageError.value = isError
@@ -89,7 +237,7 @@ function setMessage(msg, isError = false) {
 
 function defaultStep(stepId) {
   const meta = catalog.value.get(stepId)
-  return {
+  const step = {
     id: stepId,
     enabled: true,
     retries: Number(meta?.default_retries || 0),
@@ -97,6 +245,13 @@ function defaultStep(stepId) {
     retry_delay: 1,
     continue_on_error: false,
   }
+  if (meta?.config_kind === 'portal') {
+    // 新建 Portal 节点默认网页点击方式，待用户填写认证网址与按钮名称；
+    // 网页加载+点击比直连 HTTP 更耗时，给一个更宽裕的默认超时。
+    step.params = { link_mode: 'auto', wireless: { method: 'web' }, wired: { method: 'web' } }
+    step.timeout = Math.max(step.timeout, 20)
+  }
+  return step
 }
 
 // ===== 初始化 / 加载 =====
@@ -105,6 +260,7 @@ async function init(activeId) {
     const data = await api().get_workflow_catalog()
     catalog.value = new Map((data.steps || []).map((step) => [step.id, step]))
     workflows.value = data.workflows || []
+    await loadNodeGlobals()
     if (stepOptions.value.length && stepOptions.value[0].children?.length) {
       selectedStep.value = stepOptions.value[0].children[0].value
     }
@@ -121,6 +277,8 @@ function resetEditorState() {
   lastUndoTag = ''
   anchorIndex = null
   dropIndex.value = null
+  configVisible.value = false
+  configIndex.value = -1
 }
 
 async function load(id, makeActive = true) {
@@ -268,6 +426,67 @@ async function applyTuning() {
   }
 }
 
+async function onResetTuning(key) {
+  if (key === 'all') {
+    const ok = await ui.confirm(
+      '将清空所有工作流的节点运行统计（稳定度、平均耗时、调优建议都会归零）。\n'
+      + '已写回工作流配置的超时/重试参数不会被改动。确定重置全部调优记录吗？',
+      '重置全部调优记录'
+    )
+    if (!ok) return
+    try {
+      const result = await api().reset_workflow_tuning('all')
+      if (result.success === false) return setMessage(result.message || '重置失败', true)
+      setMessage(result.message || '已重置全部调优记录')
+      ui.toast(result.message || '已重置全部调优记录', 'success')
+      await refreshStats()
+      if (!dirty.value) await syncWorkflowDefinitions()
+    } catch (e) {
+      setMessage('重置调优失败：' + e.message, true)
+    }
+    return
+  }
+  if (key === 'workflow') {
+    if (!currentId.value) return
+    const name = workflow.value.name || currentId.value
+    const ok = await ui.confirm(
+      `将清空「${name}」全部节点的运行统计（稳定度、平均耗时、调优建议都会归零）。\n`
+      + '已写回配置的超时/重试参数不会被改动。确定重置吗？',
+      '重置工作流调优记录'
+    )
+    if (!ok) return
+    try {
+      const result = await api().reset_workflow_tuning('workflow', currentId.value)
+      if (result.success === false) return setMessage(result.message || '重置失败', true)
+      setMessage(result.message || '已重置当前工作流的调优记录')
+      ui.toast(result.message || '已重置当前工作流的调优记录', 'success')
+      await refreshStats()
+      if (!dirty.value) await syncWorkflowDefinitions()
+    } catch (e) {
+      setMessage('重置调优失败：' + e.message, true)
+    }
+    return
+  }
+  // 单节点：对当前选中的全部节点生效
+  if (!selCount.value) return
+  const names = selSteps.value.map((s) => catalog.value.get(s.id)?.name || s.id).join('、')
+  const ok = await ui.confirm(
+    `将清空以下节点的运行统计：\n${names}\n确定重置吗？`,
+    '重置节点调优记录'
+  )
+  if (!ok) return
+  try {
+    const result = await api().reset_workflow_tuning('step', currentId.value,
+      selSteps.value.map((s) => s.id))
+    if (result.success === false) return setMessage(result.message || '重置失败', true)
+    setMessage(result.message || '已重置选中节点的调优记录')
+    ui.toast(result.message || '已重置选中节点的调优记录', 'success')
+    await refreshStats()
+  } catch (e) {
+    setMessage('重置调优失败：' + e.message, true)
+  }
+}
+
 // ===== 撤销栈 =====
 // tag 相同且间隔 <900ms 的连续编辑（如在数字框里连点箭头）合并为一步，
 // 否则撤销栈会被单次参数微调刷满。
@@ -288,6 +507,8 @@ function undo() {
   if (!prev) return setMessage('没有可撤销的操作')
   workflow.value.steps = prev
   selection.value.clear()
+  configVisible.value = false
+  configIndex.value = -1
   lastUndoTag = ''
   dirty.value = true
   setMessage('已撤销上一步操作')
@@ -311,6 +532,7 @@ const stepRows = computed(() =>
       elapsed: st ? fmtSec(st.avg_elapsed) : '',
       retries: st ? fmtNum(st.avg_retries) : '',
       selected: selection.value.has(uidOf(step)),
+      testStatus: runnerPanel.nodeStatus[index] || '',
     }
   })
 )
@@ -353,6 +575,29 @@ function updateStep(index, key, value) {
   pushUndo(`p:${uidOf(workflow.value.steps[index])}:${key}`)
   workflow.value.steps[index][key] = value
   markDirty()
+}
+
+// ===== 节点配置弹窗：编辑按钮 / 双击节点 =====
+function openConfig(index) {
+  if (index == null || index < 0 || index >= workflow.value.steps.length) return
+  const step = workflow.value.steps[index]
+  configIndex.value = index
+  configVisible.value = true
+  // 草稿：全局模式展示该类型的全局配置（只读），独立模式展示节点自身
+  cfgDraft.value = seedDraft(step, step.node_mode === 'global' ? 'global' : 'independent')
+  // 同步选中该节点，底部操作区与弹窗保持一致
+  selection.value = new Set([uidOf(step)])
+  anchorIndex = index
+}
+
+function closeConfig() {
+  configVisible.value = false
+}
+
+// 双击行内数字框/复选框等交互元素时不弹窗，只有双击节点空白区才进入配置编辑
+function onRowDblClick(e, index) {
+  if (isInteractive(e.target)) return
+  openConfig(index)
 }
 
 function onNameUpdate(value) {
@@ -609,6 +854,8 @@ function onStepsMouseDown(e) {
 }
 
 // 点到列表与节点操作栏之外的其他区域：取消选中（下拉面板、弹窗除外）
+// 顶部操作卡（wf-top-card：保存/复制/重置调优/分享等）不算"外部"——
+// 否则点「重置调优→重置选中节点」前选区会先被清掉，节点级重置没法用
 function onDocMouseDown(e) {
   if (e.button !== 0) return
   if (store.activeTab !== 'workflow') return
@@ -617,7 +864,7 @@ function onDocMouseDown(e) {
   if (!t || !t.closest) return
   if (
     t.closest(
-      '.wf-steps, .wf-node-bar, .n-base-select-menu, .v-binder-follower-container, .n-modal, .n-drawer, .n-card'
+      '.wf-steps, .wf-node-bar, .wf-top-card, .n-base-select-menu, .v-binder-follower-container, .n-modal, .n-drawer, .n-card'
     )
   ) {
     return
@@ -811,7 +1058,7 @@ async function toggleTray(enabled) {
   if (result.success === false) return setMessage(result.message, true)
   workflows.value = result.workflows || workflows.value
   if (result.revision) store.configRevision = result.revision
-  setMessage(enabled ? '该工作流将显示在托盘菜单' : '已从托盘菜单隐藏')
+  setMessage(enabled ? '该工作流将显示在托盘菜单（可在托盘菜单中拖动排序）' : '已从托盘菜单隐藏')
 }
 
 // ===== 工作流操作 =====
@@ -822,12 +1069,13 @@ function newWorkflow() {
     name: '新工作流',
     built_in: false,
     tray_menu: true,
+    shared: false,
     steps: [defaultStep('refresh_status')],
   }
   dirty.value = true
   stepStats.value = {}
   resetEditorState()
-  setMessage('正在编辑新工作流，点击“另存为独立功能”保存')
+  setMessage('正在编辑新工作流，填写名称后点击「保存」')
 }
 
 function applyResult(result, successMessage) {
@@ -851,14 +1099,26 @@ function applyResult(result, successMessage) {
 }
 
 async function save() {
-  if (!currentId.value) return saveAs()
   if (saving.value) return
   saving.value = true
-  setMessage('正在保存...')
   try {
-    // 名称与步骤一并提交：修复"改名后点保存，名称未持久化"的问题
-    const result = await api().save_workflow(workflow.value.steps, currentId.value, workflow.value.name)
-    applyResult(result)
+    if (currentId.value) {
+      setMessage('正在保存...')
+      // 名称与步骤一并提交：修复"改名后点保存，名称未持久化"的问题
+      const result = await api().save_workflow(workflow.value.steps, currentId.value, workflow.value.name)
+      applyResult(result)
+    } else {
+      // 新工作流：用名称栏中的名字保存为独立工作流（原「另存为」逻辑并入保存）
+      const name = String(workflow.value.name || '').trim()
+      if (!name) {
+        setMessage('请输入工作流名称', true)
+        return
+      }
+      setMessage('正在保存为独立工作流...')
+      const tray = workflow.value.tray_menu !== false
+      const result = await api().save_workflow_as(name, workflow.value.steps, tray)
+      applyResult(result)
+    }
   } catch (e) {
     setMessage('保存失败：' + e.message, true)
   } finally {
@@ -866,20 +1126,166 @@ async function save() {
   }
 }
 
-async function saveAs() {
-  if (saving.value) return
-  const name = String(workflow.value.name || '').trim()
-  if (!name) return setMessage('请输入工作流名称', true)
-  const tray = workflow.value.tray_menu !== false
-  saving.value = true
-  setMessage('正在保存为独立工作流...')
+// ===== 测试工作流（底部拉起面板，参考 IDE 终端）=====
+// 运行进度直接高亮在节点列表上：执行中的节点绿色背景、失败节点暗红色背景；
+// 详细日志显示在从底部拉起的面板里，面板高度可拖拽调整、日志区独立滚动。
+// 关闭面板会清除节点背景；工作流继续在后台执行，再次点击「测试工作流」
+// 会抢占当前测试并开始新一轮（事件按纪元过滤，不会串扰）。
+const runnerPanel = reactive({
+  visible: false,
+  height: 240,
+  running: false,
+  done: null,        // {success, message, elapsed}
+  workflowName: '',
+  logs: [],          // {time, text, level: sys|run|ok|warn|err}
+  nodeStatus: {},    // {arrayIndex: running|retrying|success|error|cancelled}
+  stepMap: [],       // init 下发的 {runnerIndex, arrayIndex, id, name}
+  epoch: null,
+  detached: false,   // 关闭面板后脱离事件流：不再更新高亮与日志
+})
+const runnerLogBox = ref(null)
+
+function runnerNow() {
+  const d = new Date()
+  const p = (x) => String(x).padStart(2, '0')
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+function addRunnerLog(text, level = 'run') {
+  runnerPanel.logs.push({ time: runnerNow(), text, level })
+  if (runnerPanel.logs.length > 500) runnerPanel.logs.splice(0, 100)
+  nextTick(() => {
+    const el = runnerLogBox.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
+}
+
+function applyRunnerInit(p) {
+  runnerPanel.detached = false
+  runnerPanel.epoch = p.epoch ?? p.operationId ?? null
+  runnerPanel.workflowName = p.workflowName || ''
+  runnerPanel.stepMap = p.steps || []
+  runnerPanel.nodeStatus = {}
+  runnerPanel.done = null
+  runnerPanel.running = true
+  runnerPanel.logs = []
+  runnerPanel.visible = true
+  addRunnerLog(`开始测试工作流「${p.workflowName}」（共 ${runnerPanel.stepMap.length} 个启用节点）`, 'sys')
+  if (p.interrupted) addRunnerLog(`已中断在途操作：「${p.interrupted}」`, 'warn')
+}
+
+// 执行到某节点时，把节点列表滚动到该节点（IDE 调试式的跟随高亮）。
+// 不用 scrollIntoView：它对嵌套滚动容器的处理不可控；直接量出节点与
+// 滚动容器（.app-content）视口边界的差值，手动改 scrollTop 最可靠。
+function scrollNodeIntoView(arrayIndex) {
+  nextTick(() => {
+    const el = stepsWrap.value?.querySelector(`.wf-row[data-idx="${arrayIndex}"]`)
+    if (!el) return
+    const container = el.closest('.app-content')
+    if (!container) {
+      el.scrollIntoView({ block: 'nearest' })
+      return
+    }
+    const er = el.getBoundingClientRect()
+    const cr = container.getBoundingClientRect()
+    const margin = 72
+    const fullyVisible = er.top >= cr.top + margin && er.bottom <= cr.bottom - margin
+    if (!fullyVisible) {
+      // 统一对齐到视口顶部：跳转后的高亮节点出现在窗口顶部。
+      // 底部日志面板遮挡的恰是视口底部，对齐到底部边缘会被盖住；
+      // 收尾节点滚动到底也只会停在面板上方（面板为 sticky 常规流末尾），不受影响
+      container.scrollTop += er.top - cr.top - margin
+    }
+  })
+}
+
+function applyRunnerEvent(e) {
+  if (!e) return
+  // init = 新一轮测试：无论面板是否被关闭过，都重新接管并拉起面板
+  if (e.type === 'init') return applyRunnerInit(e)
+  if (runnerPanel.detached) return
+  if (runnerPanel.epoch != null && e.operationId != null
+    && Number(e.operationId) !== Number(runnerPanel.epoch)) return
+  if (e.type === 'done') {
+    runnerPanel.running = false
+    runnerPanel.done = { success: !!e.success, message: e.message || '', elapsed: e.elapsed }
+    const tail = e.elapsed != null ? `（总耗时 ${e.elapsed}s）` : ''
+    addRunnerLog(`执行${e.success ? '成功' : '失败'}：${e.message || ''}${tail}`,
+      e.success ? 'ok' : 'err')
+    return
+  }
+  const stepInfo = runnerPanel.stepMap[(e.step || 1) - 1]
+  if (stepInfo && e.status) {
+    runnerPanel.nodeStatus[stepInfo.arrayIndex] = e.status
+    if (e.status === 'running') scrollNodeIntoView(stepInfo.arrayIndex)
+  }
+  const prefix = `[${e.step || '?'}/${e.total || runnerPanel.stepMap.length}]`
+  const mark = e.status === 'success' ? '✓ ' : (e.status === 'error' || e.status === 'cancelled') ? '✗ '
+    : e.status === 'retrying' ? '↻ ' : ''
+  const level = e.status === 'success' ? 'ok' : (e.status === 'error' || e.status === 'cancelled') ? 'err'
+    : e.status === 'retrying' ? 'warn' : 'run'
+  addRunnerLog(`${prefix} ${mark}${e.message || ''}${e.status === 'error' && e.code ? ` (${e.code})` : ''}`, level)
+}
+
+// 后端 evaluate_js 入口（契约保持，勿改名）
+window.onRunnerInit = applyRunnerInit
+window.onRunnerEvent = applyRunnerEvent
+
+async function interruptRunner() {
   try {
-    const result = await api().save_workflow_as(name, workflow.value.steps, tray)
-    applyResult(result)
+    const result = await api()?.cancel_operation?.()
+    if (result && result.success === false) {
+      addRunnerLog(result.message || '中断失败', 'err')
+      return
+    }
+    addRunnerLog('已请求中断，等待当前节点退出…', 'warn')
   } catch (e) {
-    setMessage('保存失败：' + e.message, true)
-  } finally {
-    saving.value = false
+    addRunnerLog(`中断失败：${e.message || e}`, 'err')
+  }
+}
+
+function closeRunnerPanel() {
+  runnerPanel.visible = false
+  // 清除列表项的测试背景；工作流继续后台执行，
+  // 面板脱离事件流（重新点击「测试工作流」会开始新一轮并重新拉起面板）
+  runnerPanel.detached = true
+  runnerPanel.nodeStatus = {}
+  runnerPanel.epoch = null
+}
+
+function startRunnerResize(ev) {
+  ev.preventDefault()
+  const startY = ev.clientY
+  const startH = runnerPanel.height
+  const onMove = (e) => {
+    runnerPanel.height = Math.min(560, Math.max(120, startH + (startY - e.clientY)))
+  }
+  const onUp = () => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
+// 有未保存的修改时先自动保存，保证"测的就是编辑器里看到的"
+async function testWorkflow() {
+  if (saving.value) return
+  if (dirty.value) await save()
+  const bridge = api()
+  if (!bridge || typeof bridge.open_workflow_runner !== 'function') {
+    setMessage('测试工作流功能需要重启应用后生效', true)
+    return
+  }
+  try {
+    const result = await bridge.open_workflow_runner(currentId.value)
+    if (result?.success === false) {
+      setMessage(result.message || '无法开始测试', true)
+      return
+    }
+    setMessage(result?.message || '测试已开始')
+  } catch (e) {
+    setMessage('启动测试失败：' + e.message, true)
   }
 }
 
@@ -945,6 +1351,105 @@ async function reset() {
     applyResult(result)
   } catch (e) {
     setMessage('恢复失败：' + e.message, true)
+  }
+}
+
+// ===== 分享 / 导入 =====
+// 分享 = 把各节点配置（steps：节点、参数、超时、重试）导出为 JSON；
+// 调优统计记录（workflow_tuning.json）不随分享走。导入生成新的自定义工作流。
+// 分享两种粒度：当前工作流 / 全部工作流，通过下拉选择后经弹窗导出。
+const shareOpen = ref(false)
+const importing = ref(false)
+const importOpen = ref(false)
+const resetTuneOpen = ref(false)
+
+const shareOptions = [
+  { label: '分享当前工作流', key: 'current' },
+  { label: '分享所有工作流', key: 'all' },
+]
+
+// 弹窗当前分享的粒度：'current' | 'all'
+const shareScope = ref('current')
+const shareVisible = ref(false)
+const shareBusy = ref(false)
+
+const importOptions = [
+  { label: '从剪贴板导入', key: 'clipboard' },
+  { label: '从文件导入', key: 'file' },
+]
+
+function onShareSelect(key) {
+  if (key === 'current') {
+    if (!currentId.value) {
+      setMessage('请先保存工作流再分享', true)
+      return
+    }
+    if (dirty.value) {
+      setMessage('有未保存的更改，请先「保存」再分享', true)
+      return
+    }
+  }
+  shareScope.value = key
+  shareVisible.value = true
+}
+
+function closeShare() {
+  if (!shareBusy.value) shareVisible.value = false
+}
+
+async function doShare(mode) {
+  if (shareBusy.value) return
+  shareBusy.value = true
+  setMessage(shareScope.value === 'all'
+    ? (mode === 'file' ? '正在导出全部工作流分享文件...' : '正在复制全部工作流分享 JSON...')
+    : (mode === 'file' ? '正在导出分享文件...' : '正在复制分享 JSON...'))
+  try {
+    const result = await api().export_workflow_shared(
+      shareScope.value === 'current' ? currentId.value : null, mode, shareScope.value)
+    if (result.success === false) {
+      if (!result.cancelled) setMessage(result.message || '分享失败', true)
+      return
+    }
+    shareVisible.value = false
+    setMessage(result.message || '分享成功')
+    ui.toast(result.message || '分享成功', 'success')
+  } catch (e) {
+    setMessage('分享失败：' + e.message, true)
+  } finally {
+    shareBusy.value = false
+  }
+}
+
+async function onImportSelect(key) {
+  if (importing.value) return
+  importing.value = true
+  setMessage(key === 'file' ? '请选择分享文件...' : '正在从剪贴板读取分享内容...')
+  try {
+    const result = key === 'file'
+      ? await api().import_workflow_shared_file()
+      : await api().import_workflow_shared_clipboard()
+    if (result.success === false) {
+      if (!result.cancelled) setMessage(result.message || '导入失败', true)
+      else setMessage('')
+      return
+    }
+    workflows.value = result.workflows || workflows.value
+    if (result.workflow) {
+      currentId.value = result.workflow.id
+      workflow.value = JSON.parse(JSON.stringify(result.workflow))
+      workflow.value.steps = workflow.value.steps || []
+      dirty.value = false
+      resetEditorState()
+    }
+    if (result.revision) store.configRevision = result.revision
+    stepStats.value = {}
+    setMessage(`已导入工作流「${result.workflow_name}」（不含调优记录）`)
+    ui.toast(`已导入工作流「${result.workflow_name}」`, 'success')
+    refreshStats()
+  } catch (e) {
+    setMessage('导入失败：' + e.message, true)
+  } finally {
+    importing.value = false
   }
 }
 
@@ -1033,14 +1538,35 @@ watch(
             <n-button size="small" secondary :loading="applyingTune" @click="applyTuning">
               一键应用调优
             </n-button>
+            <n-dropdown trigger="click" :options="resetTuneOptions" @select="onResetTuning"
+              @update:show="(v) => (resetTuneOpen = v)">
+              <n-button size="small" secondary title="清空调优统计记录（不影响已写回配置的参数）">
+                重置调优<span class="wf-caret" :class="{ open: resetTuneOpen }"><CaretDown /></span>
+              </n-button>
+            </n-dropdown>
           </div>
 
           <div class="wf-actions">
             <n-button size="small" @click="duplicateWorkflow" :disabled="saving"
               title="复制当前工作流为副本，可在此基础上修改">复制</n-button>
             <n-button size="small" @click="newWorkflow">新建</n-button>
-            <n-button size="small" @click="saveAs" :disabled="saving">另存为</n-button>
+            <n-dropdown trigger="click" :options="importOptions" @select="onImportSelect"
+              @update:show="(v) => (importOpen = v)">
+              <n-button size="small" :loading="importing"
+                title="从剪贴板或分享文件导入工作流（不含调优记录）">
+                导入<span v-if="!importing" class="wf-caret" :class="{ open: importOpen }"><CaretDown /></span>
+              </n-button>
+            </n-dropdown>
+            <n-dropdown trigger="click" :options="shareOptions" @select="onShareSelect"
+              @update:show="(v) => (shareOpen = v)">
+              <n-button size="small" :disabled="saving"
+                title="把工作流节点配置导出为 JSON 分享（不含调优记录）">
+                分享<span class="wf-caret" :class="{ open: shareOpen }"><CaretDown /></span>
+              </n-button>
+            </n-dropdown>
             <n-button size="small" type="primary" @click="save" :disabled="saving">保存</n-button>
+            <n-button size="small" type="primary" secondary @click="testWorkflow"
+              title="在悬浮窗中运行当前工作流：可视化节点进度 + 详细日志，方便定位出错环节">测试工作流</n-button>
             <n-button size="small" @click="reset">恢复内置</n-button>
             <n-button size="small" type="error" secondary @click="removeWorkflow">删除</n-button>
           </div>
@@ -1094,9 +1620,12 @@ watch(
       @mousedown="onStepsMouseDown" @mousemove="onListMouseMove" @mouseenter="onListMouseEnter"
       @mouseleave="onListMouseLeave">
       <template v-if="workflow.steps.length">
-        <div v-for="row in stepRows" :key="row.uid" class="wf-row"
-          :class="{ 'is-selected': row.selected, 'is-off': row.step.enabled === false }"
-          :style="row.rail ? { borderLeftColor: row.rail } : {}" @mousedown="onRowMouseDown($event, row.index)">
+        <div v-for="row in stepRows" :key="row.uid" class="wf-row" :data-idx="row.index"
+          :class="{ 'is-selected': row.selected, 'is-off': row.step.enabled === false,
+            'is-test-running': row.testStatus === 'running' || row.testStatus === 'retrying',
+            'is-test-error': row.testStatus === 'error' || row.testStatus === 'cancelled' }"
+          :style="row.rail ? { borderLeftColor: row.rail } : {}" @mousedown="onRowMouseDown($event, row.index)"
+          @dblclick="onRowDblClick($event, row.index)" title="双击编辑该节点参数">
           <span class="wf-grip" title="按住拖动可调整顺序" @mousedown="onGripMouseDown($event, row.index)">⠿</span>
           <n-checkbox class="wf-en" size="small" :checked="row.step.enabled !== false"
             @update:checked="(v) => updateStep(row.index, 'enabled', v)" title="启用该节点" />
@@ -1105,6 +1634,8 @@ watch(
             <span class="wf-name" :title="row.desc">{{ row.name }}</span>
             <span v-if="row.step.continue_on_error" class="wf-skip-tag"
               title="该节点失败时跳过，继续执行后续节点（在底部操作区批量设置）">跳过</span>
+            <span v-if="row.step.node_mode === 'global'" class="wf-global-tag"
+              title="全局配置节点：运行时使用该类型的全局配置，与其他工作流中的全局节点共享">全局</span>
           </div>
 
           <!-- 步进按钮关闭：按钮会挤占宽度导致数值截断；聚焦后仍可用 ↑/↓ 键步进 -->
@@ -1186,6 +1717,8 @@ watch(
           <template v-if="selCount === 1">
             <n-select v-model:value="selectedStep" :options="stepOptions" filterable placeholder="选择节点类型"
               class="wf-picker" />
+            <n-button size="small" type="primary" secondary @click="openConfig(selIndices[0])"
+              title="编辑该节点的参数（也可双击节点）">编辑</n-button>
             <n-button size="small" secondary @click="addAt(selIndices[0])">在此节点前添加</n-button>
             <n-button size="small" secondary @click="addAt(selIndices[0] + 1)">在此节点后添加</n-button>
             <span class="wf-sep"></span>
@@ -1208,6 +1741,126 @@ watch(
           <span class="wf-sel-count">已选 {{ selCount }} 个</span>
           <n-button size="tiny" quaternary @click="clearSelection" title="Esc">取消</n-button>
         </template>
+      </div>
+    </div>
+
+    <!-- ===== 节点配置弹窗（naive-ui 模态默认居中、不可拖动） ===== -->
+    <n-modal v-model:show="configVisible" preset="card" :title="configTitle"
+      style="width: 580px; max-width: 92vw" :bordered="false" transform-origin="center">
+      <template v-if="configStep">
+        <div class="cfg-common">
+          <!-- 配置模式：独立 = 仅此节点；全局 = 与该类型所有全局节点共享一份配置 -->
+          <div class="cfg-mode">
+            <span class="cfg-mode-label">配置模式</span>
+            <n-radio-group :value="nodeMode" size="small" @update:value="setNodeMode">
+              <n-radio-button value="independent">独立配置</n-radio-button>
+              <n-radio-button value="global">全局配置</n-radio-button>
+            </n-radio-group>
+            <n-button size="tiny" type="primary" secondary @click="promoteToGlobal"
+              title="把当前停留模式的配置保存为该类型的全局配置，本节点成为全局来源（覆盖已有配置时会确认）">保存为全局</n-button>
+          </div>
+          <div class="cfg-mode-hint" v-if="nodeMode === 'global' && hasGlobalEntry">
+            运行时读取全局配置 · 来源：{{ isGlobalSource ? '本节点（全局节点）' : globalSourceName }}。
+            此处可直接编辑，点击「保存为全局」写入该类型的全局配置（含 Portal 的有线/无线与认证网址等参数）
+          </div>
+          <div class="cfg-mode-hint" v-else-if="nodeMode === 'global'">
+            该类型还没有全局配置：运行时将回退使用节点自身配置；点击「保存为全局」即可发布
+          </div>
+          <div class="cfg-mode-hint" v-else>
+            运行时读取节点自身配置，仅此节点生效；点击「保存为全局」可把当前配置发布为该类型的全局配置
+          </div>
+          <div class="cfg-checks">
+            <n-checkbox size="small" :checked="configStep.enabled !== false"
+              @update:checked="(v) => updateStep(configIndex, 'enabled', v)">启用该节点</n-checkbox>
+            <n-checkbox size="small" :checked="!!cfgDraft.continue_on_error"
+              @update:checked="(v) => applyFieldChange('continue_on_error', v)">失败时跳过</n-checkbox>
+          </div>
+          <div class="cfg-grid">
+            <div class="cfg-field">
+              <label>超时（秒）</label>
+              <n-input-number size="small" :show-button="false" :value="Number(cfgDraft.timeout || 15)"
+                :min="1" :max="180" @update:value="(v) => applyFieldChange('timeout', Number(v))" />
+            </div>
+            <div class="cfg-field">
+              <label>重试</label>
+              <n-input-number size="small" :show-button="false" :value="Number(cfgDraft.retries || 0)"
+                :min="0" :max="5" @update:value="(v) => applyFieldChange('retries', Number(v))" />
+            </div>
+            <div class="cfg-field">
+              <label>间隔（秒）</label>
+              <n-input-number size="small" :show-button="false" :value="Number(cfgDraft.retry_delay ?? 1)"
+                :min="0" :max="30" :step="0.5" @update:value="(v) => applyFieldChange('retry_delay', Number(v))" />
+            </div>
+          </div>
+        </div>
+
+        <template v-if="isPortal">
+          <div class="cfg-divider"></div>
+          <div class="cfg-portal-wrap">
+            <PortalNodeConfig :params="cfgDraft.params || {}" :default-server="defaultServer"
+              :kind="configStep.id === 'portal_logout' ? 'logout' : 'login'"
+              @update:params="(v) => applyFieldChange('params', v)" />
+          </div>
+        </template>
+
+        <div class="cfg-note">独立配置的改动需点击顶部「保存」后生效；全局配置在点击「保存为全局」后即时保存，并对所有「全局」节点生效（含 Portal 的有线/无线、认证网址等参数）。</div>
+      </template>
+    </n-modal>
+
+    <!-- ===== 分享工作流弹窗（导出 JSON，不含调优记录） ===== -->
+    <n-modal v-model:show="shareVisible" preset="card"
+      :title="shareScope === 'all' ? '分享所有工作流' : '分享当前工作流'"
+      style="width: 460px; max-width: 92vw" :bordered="false" transform-origin="center"
+      :mask-closable="!shareBusy" @update:show="(v) => { if (!v) closeShare() }">
+      <div class="share-body">
+        <div class="share-tip">
+          <template v-if="shareScope === 'all'">
+            将分享<b>全部工作流</b>（内置 + 自定义）当前的各节点配置
+            （节点、参数、超时、重试）。
+          </template>
+          <template v-else>
+            将分享<b>「{{ workflow.name || '未命名工作流' }}」</b>当前的各节点配置
+            （节点、参数、超时、重试）。
+          </template>
+          <br />
+          调优统计记录属于本机运行数据，不会包含在分享内容中。
+        </div>
+        <div class="share-actions">
+          <n-button type="primary" secondary :loading="shareBusy" @click="doShare('clipboard')">
+            复制 JSON 到剪贴板
+          </n-button>
+          <n-button secondary :loading="shareBusy" @click="doShare('file')">
+            导出为 JSON 文件...
+          </n-button>
+        </div>
+        <div class="share-note">对方收到后在「工作流 → 导入」中选择剪贴板或文件即可完成导入。</div>
+      </div>
+    </n-modal>
+
+    <!-- ===== 测试工作流面板：从底部拉起，可拖拽调整高度（参考 IDE 终端） ===== -->
+    <div v-show="runnerPanel.visible" class="runner-panel" :style="{ height: runnerPanel.height + 'px' }">
+      <div class="runner-resize" title="拖动调整面板高度" @mousedown="startRunnerResize"></div>
+      <div class="runner-head">
+        <span class="runner-title">测试运行</span>
+        <n-tag size="small" :bordered="false"
+          :type="runnerPanel.running ? 'info' : (runnerPanel.done ? (runnerPanel.done.success ? 'success' : 'error') : 'default')">
+          {{ runnerPanel.running ? '运行中' : (runnerPanel.done ? (runnerPanel.done.success ? '已成功' : '失败') : '待执行') }}
+        </n-tag>
+        <span class="runner-wf-name" :title="runnerPanel.workflowName">{{ runnerPanel.workflowName }}</span>
+        <span class="runner-meta" v-if="runnerPanel.done && runnerPanel.done.elapsed != null">
+          总耗时 {{ runnerPanel.done.elapsed }}s
+        </span>
+        <button class="runner-interrupt" title="中断当前测试（工作流在当前节点退出）"
+          :disabled="!runnerPanel.running" @click="interruptRunner">
+          <AppIcon name="stop" :size="13" />
+        </button>
+        <button class="runner-close" title="关闭面板并清除节点高亮" @click="closeRunnerPanel">✕ 关闭</button>
+      </div>
+      <div class="runner-log mono" ref="runnerLogBox">
+        <div v-for="(line, i) in runnerPanel.logs" :key="i" class="runner-line" :class="'lv-' + line.level">
+          <span class="runner-time">{{ line.time }}</span>{{ line.text }}
+        </div>
+        <div v-if="!runnerPanel.logs.length" class="runner-empty">暂无日志</div>
       </div>
     </div>
   </div>
@@ -1384,6 +2037,50 @@ watch(
   font-size: 12px;
 }
 
+/* 多选项按钮的右侧下拉标记：展开时旋转 180°（分享/导入/重置调优） */
+.wf-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 5px;
+  margin-right: -2px;
+  color: var(--text-tertiary);
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.wf-caret.open {
+  transform: rotate(180deg);
+  color: var(--text-secondary);
+}
+
+/* ===== 分享弹窗 ===== */
+.share-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.share-tip {
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+
+.share-tip b {
+  color: var(--text-primary);
+}
+
+.share-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.share-note {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.6;
+}
+
 .we-timeout {
   display: flex;
   flex-direction: column;
@@ -1498,6 +2195,18 @@ watch(
   font-size: 10px;
   color: var(--text-tertiary);
   border: 1px dashed var(--border-strong);
+  border-radius: 4px;
+}
+
+/* 全局配置节点标记 */
+.wf-global-tag {
+  flex: none;
+  height: 16px;
+  line-height: 14px;
+  padding: 0 5px;
+  font-size: 10px;
+  color: var(--accent);
+  border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
   border-radius: 4px;
 }
 
@@ -1654,9 +2363,196 @@ watch(
   white-space: nowrap;
 }
 
+/* ===== 节点配置弹窗内容 ===== */
+.cfg-common {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 配置模式切换（独立/全局） */
+.cfg-mode {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cfg-mode-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.cfg-mode-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+.cfg-checks {
+  display: flex;
+  gap: 18px;
+}
+
+.cfg-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.cfg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.cfg-field label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.cfg-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 14px 0 12px;
+}
+
+.cfg-note {
+  margin-top: 14px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
 @media (max-width: 1180px) {
   .wf-stats {
     margin-left: 0;
   }
+}
+
+/* ===== 测试工作流面板（IDE 终端风格：底部停靠、可调高度、日志独立滚动） ===== */
+.runner-panel {
+  position: sticky;
+  bottom: 0;
+  z-index: 21; /* 覆盖底部节点操作区（z-index 20） */
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  border-radius: 8px 8px 0 0;
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.22);
+}
+.runner-resize {
+  height: 6px;
+  flex-shrink: 0;
+  cursor: ns-resize;
+}
+.runner-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px 6px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.runner-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.runner-wf-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.runner-meta {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.runner-close {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+.runner-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.runner-interrupt {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  padding: 0;
+  cursor: pointer;
+  background: transparent;
+  color: var(--danger, #f87171);
+}
+.runner-interrupt:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.12);
+  color: var(--danger, #f87171);
+}
+.runner-interrupt:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.runner-log {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 12px 10px;
+  font-size: 11px;
+  line-height: 1.65;
+}
+.runner-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-secondary);
+}
+.runner-time {
+  color: var(--text-tertiary);
+  margin-right: 8px;
+}
+.lv-sys { color: var(--text-primary); }
+.lv-ok { color: var(--success, #4ade80); }
+.lv-warn { color: var(--warning, #fbbf24); }
+.lv-err { color: var(--danger, #f87171); }
+.runner-empty {
+  padding: 12px 0;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+/* 测试高亮：执行中=绿色背景选中，失败=暗红色背景（置于默认/选中样式之后覆盖） */
+.wf-steps .wf-row.is-test-running {
+  background: color-mix(in srgb, var(--success, #4ade80) 18%, transparent);
+}
+.wf-steps .wf-row.is-test-running.is-selected {
+  background: color-mix(in srgb, var(--success, #4ade80) 26%, transparent);
+}
+.wf-steps .wf-row.is-test-error {
+  background: color-mix(in srgb, #7f1d1d 38%, transparent);
+}
+.wf-steps .wf-row.is-test-error.is-selected {
+  background: color-mix(in srgb, #7f1d1d 48%, transparent);
+}
+
+.mono {
+  font-family: Consolas, 'Cascadia Mono', monospace;
 }
 </style>

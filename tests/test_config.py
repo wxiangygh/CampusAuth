@@ -99,6 +99,24 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertNotIn('secret-value', stored)
         self.assertEqual(ConfigStore(self.path).get('password'), 'secret-value')
 
+    def test_step_params_survive_patch_reload_and_validate(self):
+        """节点自定义 params 必须经保存 → 重载 → runner 校验全程不丢。"""
+        from core.workflow import StepSpec
+        params = {'link_mode': 'auto',
+                  'wireless': {'method': 'web', 'auth_url': 'http://p/a', 'button_name': '登录'},
+                  'wired': {'method': 'http', 'server': '10.0.0.1:801'}}
+        workflows = self.store.get('workflows')
+        workflows['web_auth'] = {
+            'id': 'web_auth', 'name': '网页认证', 'built_in': False,
+            'tray_menu': True, 'steps': [{'id': 'portal_login', 'params': params}],
+        }
+        self.store.patch({'workflows': workflows})
+        reloaded = ConfigStore(self.path).snapshot()
+        self.assertEqual(reloaded['workflows']['web_auth']['steps'][0]['params'], params)
+        # runner 校验路径（StepSpec.from_dict）同样保留 params
+        spec = StepSpec.from_dict(reloaded['workflows']['web_auth']['steps'][0])
+        self.assertEqual(spec.params, params)
+
     def test_workflow_rename_survives_patch_and_reload(self):
         """改名后保存：名称必须在 patch 与重新加载后都保留（回归：改名不生效）。"""
         workflows = self.store.get('workflows')
@@ -107,6 +125,19 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertEqual(self.store.get('workflows')['default_auth']['name'], '我的认证流程')
         reloaded = ConfigStore(self.path).snapshot()
         self.assertEqual(reloaded['workflows']['default_auth']['name'], '我的认证流程')
+
+    def test_workflow_shared_flag_survives_patch_and_reload(self):
+        """分享标记需随配置持久化；未标记的工作流默认 shared=False。"""
+        snapshot = self.store.snapshot()
+        self.assertFalse(snapshot['workflows']['default_auth'].get('shared'))
+        workflows = snapshot['workflows']
+        workflows['default_auth'] = {**workflows['default_auth'], 'shared': True}
+        self.store.patch({'workflows': workflows})
+        self.assertTrue(self.store.get('workflows')['default_auth']['shared'])
+        reloaded = ConfigStore(self.path).snapshot()
+        self.assertTrue(reloaded['workflows']['default_auth']['shared'])
+        # 未带 shared 的工作流规范化后补 False，不报错
+        self.assertFalse(reloaded['workflows']['portal_logout'].get('shared'))
 
     def test_window_geometry_maximized_flag_roundtrip(self):
         """窗口几何需能保存 maximized 标记并在重启（reload）后保留。"""

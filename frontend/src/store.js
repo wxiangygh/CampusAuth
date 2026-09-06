@@ -16,7 +16,6 @@ export const store = reactive({
   status: { state: 'idle', title: '一键认证', subtitle: '点击下方按钮开始认证', icon: 'wifi' },
   progress: { visible: false, pct: 0, label: '' },
   authDisabled: false,
-  restoreDisabled: false,
 
   // 设置表单（auto_save_form 契约字段；auto_startup 走独立 API）
   form: {
@@ -35,6 +34,8 @@ export const store = reactive({
     // WARP 意外断开自动重连（仅对非主动断开生效）
     warp_auto_reconnect: false,
     warp_reconnect_delay: 20,
+    // 自动重连触发时执行的工作流（必选）
+    reconnect_workflow: 'default_auth',
     // 主页按钮绑定的工作流：'' = 恢复按钮使用内置恢复逻辑
     auth_button_workflow: 'default_auth',
     restore_button_workflow: '',
@@ -61,6 +62,9 @@ export const store = reactive({
   detailCollapsed: true,
   detailUserCollapsed: false,
 
+  // WiFi 持续扫描（设置页）：后端 onWifiScanUpdate 事件驱动增量填充
+  wifiScan: { active: false, networks: [], count: 0, status: '' },
+
   // UI 偏好
   pageSize: 20,
 })
@@ -83,26 +87,29 @@ function hideProgress() {
 export function updateStatusFromCheck(status) {
   if (!status || store.authRunning) return
   hideProgress()
+  // 恢复网络按钮始终可点：任何网络状态下都允许主动恢复（后端有操作抢占）
   if (status.status === 'connected') {
-    setStatus('success', 'WARP已连接', status.message || '', 'check')
-    store.authDisabled = true
-    store.restoreDisabled = false
+    // 本应用核心目标是免流：WARP 走 IPv6 底层才算免流成功
+    const free = status.warp_free !== false && status.warp_underlay !== 'ipv4'
+    if (free) {
+      setStatus('success', '免流中', status.message || '', 'check')
+      store.authDisabled = true
+    } else {
+      setStatus('running', 'WARP已连接·未免流', status.message || '', 'warn')
+      store.authDisabled = false  // 允许重新认证纠正底层
+    }
   } else if (status.status === 'partial') {
-    setStatus('running', '部分连接', status.message || '', 'warn')
+    setStatus('running', '未免流', status.message || '', 'warn')
     store.authDisabled = false
-    store.restoreDisabled = false
   } else if (status.status === 'broken') {
     setStatus('error', '网络异常', status.message || '', 'cross')
     store.authDisabled = false
-    store.restoreDisabled = false
   } else if (status.status === 'normal') {
     setStatus('normal', '正常模式', status.message || '', 'check')
     store.authDisabled = false
-    store.restoreDisabled = true
   } else {
     setStatus('idle', '校园网助手', '点击下方按钮开始认证', 'wifi')
     store.authDisabled = false
-    store.restoreDisabled = true
   }
 }
 
@@ -126,7 +133,6 @@ export function finishAuth(success, message, action, opId) {
   stopParticles()
   // 操作结束后立即可交互（按钮不再长时间禁用），随后由状态检查细化
   store.authDisabled = false
-  store.restoreDisabled = false
 
   const isCancelled = message === '已取消'
   if (success) {
@@ -189,7 +195,6 @@ export function handleAuthProgress(data) {
     store.authRunning = true
     store.currentAction = action || 'auth'
     store.authDisabled = false
-    store.restoreDisabled = false
   }
 }
 
@@ -233,7 +238,6 @@ export async function startAuth() {
   store.authRunning = true
   store.currentAction = 'auth'
   store.authDisabled = false
-  store.restoreDisabled = false
   _operationId += 1 // 前端预占纪元：后端 start_operation 会再分配并覆盖
   _lastPct = 0
   setStatus('running', '认证中...', '正在准备...', 'loader')
@@ -254,7 +258,6 @@ export async function startRestore() {
   store.authRunning = true
   store.currentAction = 'restore'
   store.authDisabled = false
-  store.restoreDisabled = false
   _operationId += 1 // 前端预占纪元：后端 start_operation 会再分配并覆盖
   _lastPct = 0
   setStatus('running', '恢复中...', '正在恢复正常网络模式...', 'loader')
@@ -356,6 +359,7 @@ export function collectFormConfig() {
     auth_total_timeout: Number(f.auth_total_timeout || 90),
     warp_auto_reconnect: !!f.warp_auto_reconnect,
     warp_reconnect_delay: Number(f.warp_reconnect_delay || 20),
+    reconnect_workflow: String(f.reconnect_workflow || 'default_auth'),
     auth_button_workflow: String(f.auth_button_workflow || 'default_auth'),
     restore_button_workflow: String(f.restore_button_workflow || ''),
     exit_hook_workflow: String(f.exit_hook_workflow || ''),
@@ -474,13 +478,36 @@ export async function startUpdate() {
   }, 400)
 }
 
+// ===== WiFi 持续扫描（Python evaluate_js → onWifiScanUpdate）=====
+export function handleWifiScanUpdate(data) {
+  if (!data) return
+  const networks = Array.isArray(data.networks) ? data.networks.filter(Boolean) : []
+  store.wifiScan = {
+    active: data.status === 'scanning',
+    networks,
+    count: typeof data.count === 'number' ? data.count : networks.length,
+    status: data.status || '',
+  }
+}
+
+// ===== 全局 toast（Python evaluate_js → onToast）：免流失效等需立即看到的通知 =====
+export function handleToast(data) {
+  if (!data || !data.message) return
+  ui.toast(String(data.message), data.kind === 'error' ? 'error' : (data.kind || 'info'))
+}
+
 // ===== 网络详情 =====
 export async function refreshNetworkDetail() {
+  // 资源守卫：详情探测很重（ipconfig/getmac/netsh/warp-cli 全套），
+  // 窗口隐藏到托盘时跳过，恢复可见时由各视图的 visibilitychange 立即补刷
+  if (document.hidden) return
   const a = api()
   if (!a) return
   try {
     const data = await a.get_network_detail()
-    const hasData = data && (data.ipv4 || data.ipv6 || data.mac || data.wifi_ssid)
+    // 有线联网时 wifi_ssid 为空，但 link_type / 有线网卡名也算有效数据
+    const hasData = data && (data.ipv4 || data.ipv6 || data.mac || data.wifi_ssid
+      || data.wired_interface || data.link_type)
     if (!hasData) {
       store.detail = null
       store.detailCollapsed = true

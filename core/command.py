@@ -19,12 +19,16 @@ from core.state import _auth_cancelled
 logger = logging.getLogger('wifi_tray')
 
 
-def run_command(cmd, shell=True, timeout=30):
+def run_command(cmd, shell=True, timeout=30, cancellable=True):
     """Execute a bounded command and return ``(code, stdout, stderr)``.
 
     List commands always bypass the shell, so arguments such as SSIDs and file
     paths cannot be reinterpreted as command operators. Temporary binary files
     avoid pipe deadlocks and work reliably in elevated/windowless processes.
+
+    cancellable=False 用于后台探测/链路检测：这类命令与认证工作流无关，
+    不应被全局取消标志（_auth_cancelled）误杀——否则取消操作期间
+    链路检测会退化成默认值（曾导致纯有线机器被误判为 wireless）。
     """
     effective_shell = bool(shell and isinstance(cmd, str))
     display = cmd if isinstance(cmd, str) else ' '.join(map(str, cmd))
@@ -42,7 +46,7 @@ def run_command(cmd, shell=True, timeout=30):
                 startupinfo=si, creationflags=subprocess.CREATE_NO_WINDOW)
             deadline = time.monotonic() + max(0.1, float(timeout))
             while proc.poll() is None:
-                if _auth_cancelled.is_set():
+                if cancellable and _auth_cancelled.is_set():
                     cancelled = True
                     proc.kill()
                     break

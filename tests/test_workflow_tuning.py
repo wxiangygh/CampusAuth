@@ -158,6 +158,61 @@ class WorkflowTuningStoreTests(unittest.TestCase):
         self.assertEqual(steps[0]['timeout'], 15.0)
 
 
+class ResetTuningTests(unittest.TestCase):
+    """三级调优重置：全部 / 单工作流 / 单节点。"""
+
+    def _store(self):
+        temp = Path(tempfile.mkdtemp()) / 'tuning.json'
+        store = WorkflowTuningStore(temp)
+        store.record('wf_a', 's1', 2.0, 0, True, timeout=10.0)
+        store.record('wf_a', 's2', 2.0, 0, True, timeout=10.0)
+        store.record('wf_b', 's1', 2.0, 0, True, timeout=10.0)
+        return store
+
+    def test_clear_step_only_removes_that_node(self):
+        store = self._store()
+        self.assertTrue(store.clear_step('wf_a', 's1'))
+        self.assertEqual(store.stats('wf_a', 's1'), {'runs': 0})
+        self.assertNotIn('s1', store.workflow_stats('wf_a'))
+        self.assertIn('s2', store.workflow_stats('wf_a'))
+        self.assertIn('s1', store.workflow_stats('wf_b'))
+
+    def test_clear_step_unknown_returns_false(self):
+        store = self._store()
+        self.assertFalse(store.clear_step('wf_a', 'missing'))
+        self.assertFalse(store.clear_step('nope', 's1'))
+
+    def test_clear_workflow_keeps_other_workflows(self):
+        store = self._store()
+        self.assertEqual(store.clear_workflow('wf_a'), 2)
+        self.assertEqual(store.workflow_stats('wf_a'), {})
+        self.assertEqual(len(store.workflow_stats('wf_b')), 1)
+
+    def test_clear_all_empties_everything(self):
+        store = self._store()
+        self.assertEqual(store.clear_all(), (2, 3))
+        self.assertEqual(store.workflow_stats('wf_a'), {})
+        self.assertEqual(store.workflow_stats('wf_b'), {})
+        # 清空后持久化生效：重新加载仍为空
+        reloaded = WorkflowTuningStore(store.path)
+        self.assertEqual(reloaded.workflow_stats('wf_a'), {})
+
+    def test_reset_stops_producing_suggestions(self):
+        store = self._store()
+        for _ in range(10):
+            store.record('wf_a', 's1', 2.0, 0, True, timeout=10.0)
+        self.assertIsNotNone(store.suggest_timeout('wf_a', 's1', current=30.0))
+        store.clear_step('wf_a', 's1')
+        self.assertIsNone(store.suggest_timeout('wf_a', 's1', current=30.0))
+        self.assertIsNone(store.suggest_retries('wf_a', 's1', current=0))
+
+    def test_record_after_reset_starts_fresh(self):
+        store = self._store()
+        store.clear_workflow('wf_a')
+        store.record('wf_a', 's1', 5.0, 0, True, timeout=10.0)
+        self.assertEqual(store.stats('wf_a', 's1')['runs'], 1)
+
+
 class RecordStepStatsTests(unittest.TestCase):
     """auth_workflow._record_step_stats 的样本入库规则。"""
 

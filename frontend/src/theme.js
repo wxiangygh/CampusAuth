@@ -1,10 +1,22 @@
 import { ref, computed, nextTick } from 'vue'
 import { darkTheme } from 'naive-ui'
+import { api } from './bridge'
 
 // ===== 主题模式：light / dark / system =====
 export const themeMode = ref(localStorage.getItem('cauth-theme') || 'system')
 
 const systemDark = ref(false)
+
+// 把当前主题与解析出的明暗同步给 Python 侧：托盘图标配色与更新安装器
+// 主题都依赖 ui_prefs.theme_dark（托盘无法感知 WebView 里的 system 模式）
+function persistThemePrefs() {
+  try {
+    api()?.save_ui_prefs?.({ theme: themeMode.value, theme_dark: isDark.value })?.catch?.(() => {})
+  } catch (e) {
+    /* 后端未就绪时静默，启动流程会再推送一次 */
+  }
+}
+
 try {
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
   systemDark.value = mq.matches
@@ -16,6 +28,7 @@ try {
     }
     applyThemeChange(() => {
       systemDark.value = e.matches
+      persistThemePrefs()
     })
   })
 } catch (e) {
@@ -125,5 +138,6 @@ export function setThemeMode(mode) {
   applyThemeChange(() => {
     themeMode.value = mode
     localStorage.setItem('cauth-theme', mode)
+    persistThemePrefs()
   })
 }

@@ -18,15 +18,20 @@ class StepSpec:
     timeout: float = 15.0
     retry_delay: float = 1.0
     continue_on_error: bool = False
+    # 每节点自定义配置（如 Portal 认证网址/按钮名/有线无线变体）。
+    # 通用执行参数之外的业务参数都放这里；非 Portal 节点通常为空 dict。
+    params: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "StepSpec":
+        raw_params = value.get("params")
         return cls(id=str(value.get("id", "")).strip(),
                    enabled=bool(value.get("enabled", True)),
                    retries=max(0, min(int(value.get("retries", 0)), 5)),
                    timeout=max(1.0, min(float(value.get("timeout", 15)), 180.0)),
                    retry_delay=max(0.0, min(float(value.get("retry_delay", 1)), 30.0)),
-                   continue_on_error=bool(value.get("continue_on_error", False)))
+                   continue_on_error=bool(value.get("continue_on_error", False)),
+                   params=dict(raw_params) if isinstance(raw_params, dict) else {})
 
 
 @dataclasses.dataclass
@@ -174,7 +179,13 @@ class WorkflowRunner:
                                      "total": total, "step_id": step.id, "attempt": attempt,
                                      "message": last.message})
                     break
-                if not (last.retryable and attempt <= step.retries and not context.cancelled()):
+                # 总时限耗尽后不再开启新的节点内重试：remaining 归零会把预算
+                # 塌缩到下限，只会空转（2026-09-06 日志：connect_warp 在总时限
+                # 到期后仍用 8s/5s 的塌缩预算空转了 2 轮）
+                deadline_gone = (context.overall_deadline is not None
+                                 and time.monotonic() >= context.overall_deadline)
+                if not (last.retryable and attempt <= step.retries
+                        and not context.cancelled() and not deadline_gone):
                     break
                 delay = min(step.retry_delay * (2 ** (attempt - 1)), 10.0, context.remaining(10.0))
                 context.publish({"type": "step", "status": "retrying", "step": index,

@@ -1,5 +1,5 @@
 import { h, reactive, computed } from 'vue'
-import { createDiscreteApi } from 'naive-ui'
+import { createDiscreteApi, NButton } from 'naive-ui'
 import { naiveTheme, themeOverrides } from './theme'
 
 // 独立挂载的 message / dialog，可在任何模块（含非组件上下文）中调用
@@ -37,9 +37,26 @@ export const ui = {
   message,
   dialog,
 
-  toast(msg, type = 'info') {
+  toast(msg, type = 'info', action = null) {
     const fn = message[type] || message.info
-    fn(String(msg ?? ''))
+    // action: { label, onClick } — 给错误/风险提示一条可见的修复动作，
+    // 错误类驻留更久（8s），常规 3s 自动消失
+    if (action && action.label) {
+      fn({
+        content: String(msg ?? ''),
+        duration: type === 'error' ? 8000 : 3000,
+        closable: true,
+        action: () =>
+          h(NButton, {
+            size: 'tiny',
+            quaternary: true,
+            type: type === 'error' ? 'error' : 'primary',
+            onClick: () => action.onClick?.(),
+          }, { default: () => String(action.label) }),
+      })
+    } else {
+      fn(String(msg ?? ''))
+    }
   },
 
   showLoading(text) {

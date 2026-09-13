@@ -68,3 +68,6 @@ Desktop.ini
 
 # 运行时自动调优数据（每台机器各不相同，不入库）
 workflow_tuning.json
+
+# superdesign 工作目录（设计草稿与临时文件不入库）
+.superdesign/

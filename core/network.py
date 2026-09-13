@@ -434,8 +434,11 @@ def get_mac_address():
         if line.strip():
             parts = line.split(',')
             mac = parts[0].strip().strip('"').replace('-', '')
-            return mac
-    return '000000000000'
+            # 中文 Windows 对无 MAC 的行输出「暂缺」等占位符；
+            # 只接受 12 位十六进制的真实 MAC（Portal 提交与详情展示都用它）
+            if mac and re.fullmatch(r'[0-9A-Fa-f]{12}', mac):
+                return mac
+    return ''
 
 
 def get_current_wifi_ssid():
@@ -692,6 +695,40 @@ def has_public_ipv6():
     return False, ''
 
 
+def has_ipv6_gateway():
+    """检测本机是否有 IPv6 默认网关（即收到过路由器 RA 宣告）。
+
+    解析 ipconfig 中「默认网关 / Default Gateway」行的地址值。任何 IPv6
+    网关（含链路本地 fe80）都算——Windows 只在收到带路由器生存期的 RA 时
+    才安装默认路由，fe80 网关正是「路由器在宣告」的证据；结合
+    has_public_ipv6 可区分两种失败形态：网络完全没发 IPv6（无网关），
+    vs 路由器宣告了自己却不分配全局地址（有网关、无公网地址——校园 AP
+    上游 IPv6 断供的典型形态，认证页仍显示历史租约）。
+
+    Returns:
+        tuple[bool, str]: (是否找到, 第一个 IPv6 网关地址)。未找到时空串。
+    """
+    code, output, _ = run_command('ipconfig', timeout=4)
+    if code != 0:
+        logger.debug("has_ipv6_gateway: ipconfig failed")
+        return False, ''
+    for line in output.split('\n'):
+        line_stripped = line.strip()
+        if ('默认网关' not in line_stripped
+                and 'Default Gateway' not in line_stripped):
+            continue
+        # 使用 ': '（冒号+空格）分割标签和值，避免误切 IPv6 地址内部冒号
+        parts = line_stripped.split(': ', 1)
+        if len(parts) < 2:
+            continue
+        gateway = parts[1].strip().split('%')[0]
+        # 有冒号 = IPv6 地址（v4 网关无冒号，直接排除）
+        if gateway and ':' in gateway:
+            logger.debug(f"has_ipv6_gateway: found IPv6 gateway: {gateway}")
+            return True, gateway
+    return False, ''
+
+
 def _wait_for_ipv6_ready(max_retries=20):
     """等待本机获取到 2001 开头的公网 IPv6 地址。
 
@@ -741,9 +778,29 @@ def is_warp_connected():
 
 
 def _check_internet(timeout=2):
-    try:
-        import socket
-        socket.create_connection(('8.8.8.8', 53), timeout=timeout)
-        return True
-    except Exception:
-        return False
+    """连通性探测：多目标、双栈，避免单一境外探测点造成误报。
+
+    校园网常见「境外 IP（8.8.8.8 等）不可达，但国内/IPv6 网络完全正常」，
+    只探测 8.8.8.8 会把在线状态误判为无网络连接。依次尝试：
+    - 国内公共 DNS 的 TCP 443/53（IPv4 字面量，不依赖 DNS 解析与系统代理）
+    - 公共 IPv6 字面量（本应用的核心场景即 IPv6 免流，v6 可达即算有网）
+    - 8.8.8.8 兜底（境外网络环境）
+    任一成功即视为有网络。在线时首个目标毫秒级返回；
+    全部失败（真的离线）时最坏约 6 个目标 × 超时，可接受。
+    """
+    import socket
+    targets = (
+        ('223.5.5.5', 443),       # 阿里 DNS（DoH over TCP 443）
+        ('119.29.29.29', 443),    # 腾讯 DNSPod
+        ('223.5.5.5', 53),
+        ('2400:3200::1', 443),    # 阿里 DNS IPv6
+        ('240c::6644', 53),       # CNNIC IPv6 anycast
+        ('8.8.8.8', 53),          # 境外兜底
+    )
+    for host, port in targets:
+        try:
+            socket.create_connection((host, port), timeout=timeout)
+            return True
+        except Exception:
+            continue
+    return False

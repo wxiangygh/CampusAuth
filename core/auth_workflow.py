@@ -14,7 +14,7 @@ from core.config import (
 )
 from core.network import (apply_link_exclusive, detect_link_type,
                           get_wifi_interface_name, get_wired_interface_name,
-                          has_public_ipv6, is_warp_connected,
+                          has_ipv6_gateway, has_public_ipv6, is_warp_connected,
                           prepare_wifi_connection)
 from core.warp_manager import (
     _set_warp_endpoint_ipv6, _set_warp_masque_mode, connect_warp_result,
@@ -375,6 +375,20 @@ def _wait_public_ipv6_action(context: WorkflowContext, step: StepSpec) -> StepRe
             return StepResult.ok(f'公网 IPv6 已就绪：{address}')
         if not _wait(context, 1.2):
             break
+    if context.cancelled():
+        return StepResult.fail('已取消', code='cancelled')
+    # 超时后区分网络侧的两种形态：完全没发 IPv6 vs 路由器宣告了网关但不分配
+    # 地址（后者校园 AP 上游断供时常见，认证页仍会显示历史租约的 IPv6）
+    try:
+        gateway_ok, _gateway = has_ipv6_gateway()
+    except Exception:
+        logger.exception('has_ipv6_gateway failed')
+        gateway_ok = False
+    if gateway_ok:
+        return StepResult.fail(
+            '已收到 IPv6 路由器宣告，但该网络未分配公网 IPv6 地址（前缀/DHCPv6 无下发，'
+            '多为此网络上游 IPv6 断供；认证页显示的 IPv6 可能是历史租约）',
+            code='ipv6_timeout', retryable=True)
     return StepResult.fail('在限定时间内未获取到公网 IPv6', code='ipv6_timeout', retryable=True)
 
 
@@ -416,12 +430,17 @@ def _portal_variant_configured(variant) -> bool:
     return bool(str(variant.get('server') or '').strip())
 
 
-def _resolve_portal_params(step: StepSpec, context) -> dict:
+def _resolve_portal_params(step: StepSpec, context, *,
+                           follow_current_link: bool = False) -> dict:
     """按 link_mode 选出有线/无线变体并补齐默认值。
 
     - link_mode 显式 wired/wireless 时优先采用（两套都配置时起区分作用）；
     - auto 时优先用工作流预扫描写入 context.data['link_type'] 的结果，
       避免同一工作流内二次探测导致前后不一致；无预扫描再现场检测；
+    - follow_current_link=True（Portal 注销专用）：无视 link_mode 与预扫描，
+      一律现场检测「当前实际链路」并选其变体——Portal 会话绑定在当前链路
+      的 IP 上，注销当前会话只能用当前链路的注销配置（用户有线在线时选了
+      无线工作流，注销执行的也必须是有线的注销）；
     - 选中的变体缺失**或实际未配置**（空 HTTP/无网址无按钮无步骤）时回退
       另一套已配置变体——不论 link_mode 是否显式。"自动检测选中一套空
       配置"正是回退要修的 bug（用户配置在有线，无线只有旧按钮名残留，
@@ -432,16 +451,20 @@ def _resolve_portal_params(step: StepSpec, context) -> dict:
     params = getattr(step, 'params', None) or {}
     data = getattr(context, 'data', None) or {}
     link_mode = str(params.get('link_mode') or 'auto').strip().lower()
-    if link_mode in ('wired', 'wireless'):
+    if follow_current_link:
+        link = None  # 统一走下方现场检测
+    elif link_mode in ('wired', 'wireless'):
         link = link_mode
     else:
         link = data.get('link_type')
         if link not in ('wired', 'wireless'):
-            try:
-                link = detect_link_type()
-            except Exception:
-                logger.exception('detect_link_type failed, fallback to wireless')
-                link = 'wireless'
+            link = None
+    if link is None:
+        try:
+            link = detect_link_type()
+        except Exception:
+            logger.exception('detect_link_type failed, fallback to wireless')
+            link = 'wireless'
     variant = params.get(link) if isinstance(params.get(link), dict) else None
     if not _portal_variant_configured(variant):
         other_link = 'wireless' if link == 'wired' else 'wired'
@@ -469,8 +492,9 @@ def _resolve_portal_params(step: StepSpec, context) -> dict:
         'fail_keyword': str(variant.get('fail_keyword') or '').strip(),
         'server': str(variant.get('server') or '').strip(),
     }
-    logger.info('[portal] 解析配置：链路=%s 方法=%s 网址=%s 点击步骤=%d',
-                resolved['link'], resolved['method'],
+    logger.info('[portal] 解析配置：链路=%s%s 方法=%s 网址=%s 点击步骤=%d',
+                resolved['link'], '（按当前链路）' if follow_current_link else '',
+                resolved['method'],
                 resolved['auth_url'] or '(空)', len(click_steps))
     return resolved
 
@@ -479,7 +503,9 @@ def _portal_login(context: WorkflowContext, step: StepSpec) -> StepResult:
     if _skip_if_ready(context):
         return StepResult.ok('WARP 已连接，无需重复 Portal 认证')
     _, _, portal_login, portal_logout = _auth_helpers()
-    resolved = _resolve_portal_params(step, context.config)
+    # 传 context（而非 context.config）：auto 模式优先用预扫描的链路类型，
+    # 与 IPv4/IPv6 等节点的选卡逻辑保持一致，避免二次探测结果漂移
+    resolved = _resolve_portal_params(step, context)
     if resolved['method'] == 'web':
         from core.portal_web import web_portal_submit
         success, message = web_portal_submit(
@@ -504,27 +530,59 @@ def _portal_login(context: WorkflowContext, step: StepSpec) -> StepResult:
     return StepResult.fail(message, code='portal_failed', retryable=retryable)
 
 
+def _apply_deferred_link_exclusive(context: WorkflowContext) -> None:
+    """注销完成后应用被推迟的链路隔离（见 run_auth_workflow 的推迟逻辑）。
+
+    纯记录型：失败只记警告，不抛异常——注销已成功，认证节点的错误信息
+    足以暴露链路不对的问题。
+    """
+    pending = context.data.pop('pending_link_exclusive', None)
+    if pending not in ('wired', 'wireless'):
+        return
+    if context.cancelled():
+        # 运行已取消：不再切换网卡，把机器留在当前链路上
+        logger.info('运行已取消，丢弃被推迟的链路隔离（%s）', pending)
+        return
+    try:
+        ok, msg = apply_link_exclusive(pending)
+    except Exception:
+        logger.exception('注销后应用链路隔离（%s）失败', pending)
+        return
+    logger.info('注销完成，应用链路隔离（%s）：%s', pending, msg)
+    if not ok:
+        logger.warning('注销后链路隔离失败：%s（后续节点按现状执行）', msg)
+
+
 def _portal_logout_action(context: WorkflowContext, step: StepSpec) -> StepResult:
     _, _, _, portal_logout = _auth_helpers()
-    resolved = _resolve_portal_params(step, context)
-    if resolved['method'] == 'web':
-        from core.portal_web import web_portal_submit
-        success, _message = web_portal_submit(
-            resolved['auth_url'], context.config.get('username', ''),
-            context.config.get('password', ''), resolved['button_name'],
-            user_selector=resolved['user_selector'], pass_selector=resolved['pass_selector'],
-            success_keyword=resolved['success_keyword'], fail_keyword=resolved['fail_keyword'],
-            click_steps=resolved['click_steps'],
-            timeout=min(step.timeout, context.remaining()), cancelled=context.cancelled)
-    else:
-        effective = {**context.config, **_server_to_ip_port(resolved['server'])}
-        success = portal_logout(effective, timeout=min(6, context.remaining()))
-    if context.cancelled():
-        return StepResult.fail('已取消', code='cancelled')
-    if success:
-        return StepResult.ok('Portal 已注销')
-    # Logout is best-effort in a re-auth workflow; login can still replace the session.
-    return StepResult.ok('Portal 注销未确认，继续执行后续步骤', code='logout_unconfirmed')
+    # 注销必须注销「当前正在使用的链路」上的会话：Portal 会话绑定当前链路
+    # 的 IP，用工作流指定的另一条链路的变体去注销只会失败。因此这里无视
+    # link_mode，一律按现场检测的当前链路选变体（有线在线 + 无线工作流
+    # = 执行有线的注销，反之同理）。
+    resolved = _resolve_portal_params(step, context, follow_current_link=True)
+    try:
+        if resolved['method'] == 'web':
+            from core.portal_web import web_portal_submit
+            success, _message = web_portal_submit(
+                resolved['auth_url'], context.config.get('username', ''),
+                context.config.get('password', ''), resolved['button_name'],
+                user_selector=resolved['user_selector'], pass_selector=resolved['pass_selector'],
+                success_keyword=resolved['success_keyword'], fail_keyword=resolved['fail_keyword'],
+                click_steps=resolved['click_steps'],
+                timeout=min(step.timeout, context.remaining()), cancelled=context.cancelled)
+        else:
+            effective = {**context.config, **_server_to_ip_port(resolved['server'])}
+            success = portal_logout(effective, timeout=min(6, context.remaining()))
+        if context.cancelled():
+            return StepResult.fail('已取消', code='cancelled')
+        if success:
+            return StepResult.ok('Portal 已注销')
+        # Logout is best-effort in a re-auth workflow; login can still replace the session.
+        return StepResult.ok('Portal 注销未确认，继续执行后续步骤', code='logout_unconfirmed')
+    finally:
+        # 「注销 + 重新认证」且指定链路 ≠ 当前链路时，隔离被推迟到这里执行：
+        # 注销先走当前链路，随后再切到工作流指定的链路做认证
+        _apply_deferred_link_exclusive(context)
 
 
 def _configure_ipv6(context: WorkflowContext, step: StepSpec) -> StepResult:
@@ -944,28 +1002,28 @@ def _publish(event):
     push_runner_event(event)
 
 
-_PORTAL_STEP_IDS = ('portal_login', 'portal_logout')
-
-
 def _resolve_workflow_link(steps) -> tuple[str, bool]:
-    """从 steps 提取链路类型，返回 (link_type, explicit)。
+    """从 steps 提取「认证链路」，返回 (link_type, explicit)。
 
-    以第一个 Portal 节点的 params.link_mode 为准：
+    以第一个 portal_login 节点的 params.link_mode 为准。注销节点不参与
+    预扫描：注销一律按「当前实际链路」执行（见 _portal_logout_action），
+    它的 link_mode 不再代表工作流的认证链路——否则「注销(auto) + 认证
+    (无线)」的工作流会被预扫描成有线，既不做无线隔离，WiFi 连接也被跳过。
     - 显式 wired/wireless → (该值, True)；
-    - auto / 无 params / 无 Portal 节点 → (detect_link_type(), False)。
+    - auto / 无 params / 无 Portal 认证节点 → (detect_link_type(), False)。
 
     explicit=True 时调用方执行链路隔离（禁用另一类型网卡）；
     auto 仅用于 IPv4/IPv6 等节点选网卡，不动系统网卡状态（兼容旧工作流）。
     """
     for item in steps:
-        if not isinstance(item, dict) or item.get('id') not in _PORTAL_STEP_IDS:
+        if not isinstance(item, dict) or item.get('id') != 'portal_login':
             continue
         params = item.get('params')
         mode = str(params.get('link_mode') or '').strip().lower() \
             if isinstance(params, dict) else ''
         if mode in ('wired', 'wireless'):
             return mode, True
-        break  # 以第一个 Portal 节点为准
+        break  # 以第一个 Portal 认证节点为准
     try:
         return detect_link_type(), False
     except Exception:
@@ -1004,6 +1062,34 @@ def resolve_global_nodes(steps, node_globals):
     return resolved
 
 
+def _plan_link_isolation(workflow, link_type: str, link_explicit: bool,
+                         current_link: str) -> str:
+    """决定工作流开始时的链路隔离策略，返回 'now' | 'defer' | 'none'。
+
+    - auto（非显式）：不动网卡（兼容旧行为）→ none；
+    - 显式链路 + 纯注销工作流（无 portal_login）：隔离只会在注销前禁掉
+      正在使用的网卡（有线在线 + 无线注销工作流 = 网线被禁，注销请求
+      本身都发不出去），永不隔离 → none。注销节点自身按当前链路选变体；
+    - 显式链路 + 注销 + 重新认证：指定链路与当前链路一致时照常立即隔离
+      （now）；不一致时推迟到注销完成后应用（defer，由
+      _portal_logout_action 末尾消费 pending_link_exclusive）——注销先
+      走当前链路，认证部分再切到指定链路；
+    - 显式链路 + 纯认证：立即隔离（now，与原行为一致）。
+    """
+    def _has(step_id: str) -> bool:
+        return any(isinstance(item, dict) and item.get('id') == step_id
+                   and item.get('enabled', True) for item in workflow)
+
+    if not link_explicit:
+        return 'none'
+    has_logout, has_login = _has('portal_logout'), _has('portal_login')
+    if has_logout and not has_login:
+        return 'none'
+    if has_logout:
+        return 'defer' if current_link != link_type else 'now'
+    return 'now'
+
+
 def run_auth_workflow(config=None, workflow=None, workflow_id=None, strict=True):
     """执行认证工作流。
 
@@ -1038,14 +1124,33 @@ def run_auth_workflow(config=None, workflow=None, workflow_id=None, strict=True)
     # 预扫描链路类型：IPv4/IPv6 等节点据此选网卡；
     # 用户显式指定连接方式时先做链路隔离（只保留指定类型网卡工作），
     # 避免 WiFi+网线双开时流量走错网卡导致认证页打不开/填不进。
+    # 例外见 _plan_link_isolation：注销按「当前链路」执行，因此纯注销
+    # 不隔离；「注销+重认证」指定链路与当前链路不一致时，隔离推迟到
+    # 注销完成后应用（否则会在注销前把正在使用的网卡禁掉）。
     link_type, link_explicit = _resolve_workflow_link(workflow)
     context.data['link_type'] = link_type
+    current_link = link_type
     if link_explicit:
+        try:
+            current_link = detect_link_type()
+        except Exception:
+            logger.exception('detect_link_type failed, fallback to wireless')
+            current_link = 'wireless'
+    plan = _plan_link_isolation(workflow, link_type, link_explicit, current_link)
+    if plan == 'now':
         link_ok, link_msg = apply_link_exclusive(link_type)
         if not link_ok:
             app_state.update_operation(kind='auth', status='error', message=link_msg)
             return False, link_msg
         logger.info('工作流链路=%s（用户指定），%s', link_type, link_msg)
+    elif plan == 'defer':
+        context.data['pending_link_exclusive'] = link_type
+        logger.info('工作流链路=%s（用户指定），但当前实际链路=%s：'
+                    '注销将按当前链路执行，网卡隔离推迟到注销完成后应用',
+                    link_type, current_link)
+    elif link_explicit:
+        logger.info('工作流链路=%s（用户指定的纯注销流程）：不做网卡隔离，'
+                    '注销按当前实际链路执行', link_type)
     else:
         logger.info('工作流链路=%s（自动检测，未做网卡隔离）', link_type)
     try:

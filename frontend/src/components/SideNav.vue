@@ -1,9 +1,22 @@
 <script setup>
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onMounted } from 'vue'
 import { store, closeUpdate, startUpdate } from '../store'
 import { themeMode, setThemeMode } from '../theme'
 import { api } from '../bridge'
 import AppIcon from './AppIcon.vue'
+
+// 左下角显示当前版本号（简洁、排查问题时直接可读）
+const appVersion = ref('')
+
+onMounted(() => {
+  try {
+    api()?.get_app_info?.()?.then((info) => {
+      if (info && info.version) appVersion.value = String(info.version)
+    })?.catch?.(() => {})
+  } catch (e) {
+    /* 后端未就绪时留空 */
+  }
+})
 
 const NAV_ITEMS = [
   { key: 'home', label: '主页', icon: 'home', hint: '状态与认证' },
@@ -121,7 +134,7 @@ watch(
           <AppIcon :name="m.icon" :size="14" />
         </button>
       </div>
-      <div class="nav-footer-text">CAuth · Campus Network Assistant</div>
+      <div class="nav-footer-text" v-if="appVersion">v{{ appVersion }}</div>
     </div>
   </aside>
 </template>

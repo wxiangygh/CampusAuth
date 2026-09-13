@@ -14,8 +14,10 @@ export const store = reactive({
   authRunning: false,
   currentAction: null, // 'auth' | 'restore'
   status: { state: 'idle', title: '一键认证', subtitle: '点击下方按钮开始认证', icon: 'wifi' },
-  progress: { visible: false, pct: 0, label: '' },
+  progress: { visible: false, pct: 0, label: '', detail: '', step: 0, total: 0 },
   authDisabled: false,
+  // 免流开始时刻（客户端视角，本次运行内有效）：驱动主页「已持续 X」元信息
+  freeSince: null,
 
   // 设置表单（auto_save_form 契约字段；auto_startup 走独立 API）
   form: {
@@ -76,8 +78,8 @@ export function setStatus(state, title, subtitle, iconKey) {
   store.status = { state, title, subtitle, icon: iconKey }
 }
 
-function showProgress(pct, label) {
-  store.progress = { visible: true, pct, label }
+function showProgress(pct, label, detail = '') {
+  store.progress = { visible: true, pct, label, detail, step: store.progress.step, total: store.progress.total }
 }
 
 function hideProgress() {
@@ -87,6 +89,12 @@ function hideProgress() {
 export function updateStatusFromCheck(status) {
   if (!status || store.authRunning) return
   hideProgress()
+  // 免流持续计时：进入免流记起点，跌出即清零（本次运行内有效）
+  if (status.warp_free) {
+    if (!store.freeSince) store.freeSince = Date.now()
+  } else {
+    store.freeSince = null
+  }
   // 恢复网络按钮始终可点：任何网络状态下都允许主动恢复（后端有操作抢占）
   if (status.status === 'connected') {
     // 本应用核心目标是免流：WARP 走 IPv6 底层才算免流成功
@@ -107,8 +115,11 @@ export function updateStatusFromCheck(status) {
   } else if (status.status === 'normal') {
     setStatus('normal', '正常模式', status.message || '', 'check')
     store.authDisabled = false
+  } else if (status.status === 'disconnected') {
+    setStatus('idle', '无网络连接', '请检查网线或 WiFi；校园网需先完成认证', 'wifi')
+    store.authDisabled = false
   } else {
-    setStatus('idle', '校园网助手', '点击下方按钮开始认证', 'wifi')
+    setStatus('idle', '待机', '点击下方按钮开始认证', 'wifi')
     store.authDisabled = false
   }
 }
@@ -137,13 +148,13 @@ export function finishAuth(success, message, action, opId) {
   const isCancelled = message === '已取消'
   if (success) {
     setStatus(kind === 'restore' ? 'normal' : 'success', kind === 'restore' ? '恢复成功' : '认证成功', message || '', 'check')
-    showProgress(100, '完成')
+    showProgress(100, '完成', message || '')
   } else if (isCancelled) {
     setStatus('idle', '已取消', '操作已取消', 'wifi')
-    showProgress(100, '已取消')
+    showProgress(100, '已取消', '已在当前节点停止')
   } else {
     setStatus('error', kind === 'restore' ? '恢复失败' : '认证失败', message || '', 'cross')
-    showProgress(100, '失败')
+    showProgress(100, '失败', message || '')
   }
 
   setTimeout(() => {
@@ -187,7 +198,9 @@ export function handleAuthProgress(data) {
 
   const label = action === 'restore' ? '恢复中' : '认证中'
   setStatus('running', label + '...', message || '', 'loader')
-  showProgress(pct, label)
+  showProgress(pct, label, message || '')
+  store.progress.step = step || 0
+  store.progress.total = total || 0
   startParticles()
 
   // 后端自动认证时前端未感知，此处进入运行态；运行期间保持按钮可点击（点击即抢占）
@@ -493,7 +506,12 @@ export function handleWifiScanUpdate(data) {
 // ===== 全局 toast（Python evaluate_js → onToast）：免流失效等需立即看到的通知 =====
 export function handleToast(data) {
   if (!data || !data.message) return
-  ui.toast(String(data.message), data.kind === 'error' ? 'error' : (data.kind || 'info'))
+  const kind = data.kind === 'error' ? 'error' : (data.kind || 'info')
+  // 免流失效是计费风险：给一条可见的修复动作，而不是让用户自己找按钮
+  const action = kind === 'error'
+    ? { label: '重新认证', onClick: () => { startAuth() } }
+    : null
+  ui.toast(String(data.message), kind, action)
 }
 
 // ===== 网络详情 =====

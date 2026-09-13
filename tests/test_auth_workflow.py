@@ -333,5 +333,35 @@ class ConnectWarpActionTests(unittest.TestCase):
                         f'expected a disconnect command, got: {commands}')
 
 
+class WaitPublicIpv6DiagnosticTests(unittest.TestCase):
+    """wait_public_ipv6 超时后按「有无 IPv6 网关（RA 宣告）」区分失败原因。
+
+    背景（2026-09-07）：宿舍 AP 上游 IPv6 断供——WLAN 有 fe80 默认网关
+    但无全局地址，DHCPv6 renew 信号灯超时；认证页仍显示历史租约的 IPv6。
+    有网关 + 无公网地址 = 网络侧未下发前缀，必须与「完全没发 IPv6」区分。
+    """
+
+    def _run(self, gateway_present):
+        from core.auth_workflow import _wait_public_ipv6_action
+        context = WorkflowContext(config={}, cancelled=lambda: False)
+        step = StepSpec.from_dict({'id': 'wait_public_ipv6'})
+        with patch('core.auth_workflow.has_public_ipv6', return_value=(False, '')),              patch('core.auth_workflow._wait', return_value=False),              patch('core.auth_workflow.has_ipv6_gateway',
+                   return_value=(gateway_present, 'fe80::a4f:aff:fec8:6c79')):
+            return _wait_public_ipv6_action(context, step)
+
+    def test_gateway_present_reports_no_prefix_assigned(self):
+        result = self._run(True)
+        self.assertFalse(result.success)
+        self.assertIn('路由器宣告', result.message)
+        self.assertIn('未分配公网 IPv6', result.message)
+
+    def test_no_gateway_keeps_generic_timeout(self):
+        result = self._run(False)
+        self.assertFalse(result.success)
+        self.assertIn('未获取到公网 IPv6', result.message)
+        self.assertNotIn('路由器宣告', result.message)
+
+
+
 if __name__ == '__main__':
     unittest.main()

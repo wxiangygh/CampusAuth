@@ -3,7 +3,8 @@ import sys
 import unittest
 from unittest import mock
 
-from core.auth_workflow import (_interface, _resolve_portal_params,
+from core.auth_workflow import (_apply_deferred_link_exclusive, _interface,
+                                _plan_link_isolation, _resolve_portal_params,
                                 _resolve_workflow_link, _server_to_ip_port)
 from core.network import (_wlan_connected, _list_physical_adapters,
                           apply_link_exclusive, detect_link_type)
@@ -350,12 +351,28 @@ class ResolveWorkflowLinkTests(unittest.TestCase):
             link, explicit = _resolve_workflow_link(steps)
         self.assertEqual((link, explicit), ('wired', False))
 
-    def test_first_portal_node_decides(self):
-        # 多个 Portal 节点时以第一个为准
+    def test_login_node_decides_logout_ignored(self):
+        # 认证链路只看 portal_login：注销节点（按当前链路执行）的 link_mode
+        # 不再代表工作流链路——否则「注销(auto)+认证(无线)」会被预扫描成有线
         steps = [{'id': 'portal_logout', 'params': {'link_mode': 'wireless'}},
                  {'id': 'portal_login', 'params': {'link_mode': 'wired'}}]
         link, explicit = _resolve_workflow_link(steps)
+        self.assertEqual((link, explicit), ('wired', True))
+
+    def test_reauth_logout_auto_login_wireless(self):
+        # 用户场景：原为有线，选了无线认证。预扫描必须取认证节点的 wireless，
+        # 才能在注销（按当前有线）后做无线隔离并连接 WiFi
+        steps = [{'id': 'portal_logout', 'params': {'link_mode': 'auto'}},
+                 {'id': 'portal_login', 'params': {'link_mode': 'wireless'}}]
+        link, explicit = _resolve_workflow_link(steps)
         self.assertEqual((link, explicit), ('wireless', True))
+
+    def test_pure_logout_workflow_is_always_auto(self):
+        # 纯注销工作流：注销节点不参与预扫描 → 一律现场检测（不显式隔离）
+        steps = [{'id': 'portal_logout', 'params': {'link_mode': 'wireless'}}]
+        with mock.patch('core.auth_workflow.detect_link_type', return_value='wired'):
+            link, explicit = _resolve_workflow_link(steps)
+        self.assertEqual((link, explicit), ('wired', False))
 
     def test_no_portal_node_uses_detection(self):
         with mock.patch('core.auth_workflow.detect_link_type', return_value='wireless'):
@@ -367,6 +384,145 @@ class ResolveWorkflowLinkTests(unittest.TestCase):
         with mock.patch('core.auth_workflow.detect_link_type', return_value='wireless'):
             link, explicit = _resolve_workflow_link(steps)
         self.assertEqual((link, explicit), ('wireless', False))
+
+
+class LogoutFollowsCurrentLinkTests(unittest.TestCase):
+    """注销按「当前实际链路」选变体：无视 link_mode 与预扫描（follow_current_link）。
+
+    Portal 会话绑定当前链路的 IP：用户有线在线时选了无线工作流，
+    注销执行的也必须是有线的注销；反之同理。
+    """
+
+    def test_logout_wired_current_ignores_wireless_mode(self):
+        step = StepSpec.from_dict({'id': 'portal_logout', 'params': {
+            'link_mode': 'wireless',
+            'wireless': {'method': 'web', 'auth_url': 'http://w'},
+            'wired': {'method': 'http', 'server': '10.0.0.1:801'}}})
+        with mock.patch('core.auth_workflow.detect_link_type', return_value='wired'):
+            resolved = _resolve_portal_params(step, {}, follow_current_link=True)
+        self.assertEqual(resolved['link'], 'wired')
+        self.assertEqual(resolved['method'], 'http')
+        self.assertEqual(resolved['server'], '10.0.0.1:801')
+
+    def test_logout_wireless_current_ignores_wired_mode(self):
+        step = StepSpec.from_dict({'id': 'portal_logout', 'params': {
+            'link_mode': 'wired',
+            'wired': {'method': 'web', 'auth_url': 'http://wd'},
+            'wireless': {'method': 'web', 'auth_url': 'http://wl'}}})
+        with mock.patch('core.auth_workflow.detect_link_type', return_value='wireless'):
+            resolved = _resolve_portal_params(step, {}, follow_current_link=True)
+        self.assertEqual(resolved['link'], 'wireless')
+        self.assertEqual(resolved['auth_url'], 'http://wl')
+
+    def test_logout_ignores_prescanned_link_too(self):
+        # 预扫描写了 wireless（来自工作流显式 link_mode），当前实际有线：
+        # 注销仍按现场检测的有线执行
+        context = WorkflowContext(config={}, cancelled=lambda: False)
+        context.data['link_type'] = 'wireless'
+        step = StepSpec.from_dict({'id': 'portal_logout', 'params': {
+            'wireless': {'method': 'web', 'auth_url': 'http://w'},
+            'wired': {'method': 'http', 'server': '10.0.0.1:801'}}})
+        with mock.patch('core.auth_workflow.detect_link_type', return_value='wired'):
+            resolved = _resolve_portal_params(step, context, follow_current_link=True)
+        self.assertEqual(resolved['link'], 'wired')
+
+    def test_logout_unconfigured_current_variant_still_falls_back(self):
+        # 当前链路的变体未配置时仍回退另一套（保证注销可执行）
+        step = StepSpec.from_dict({'id': 'portal_logout', 'params': {
+            'wireless': {'method': 'web', 'auth_url': 'http://w'}}})
+        with mock.patch('core.auth_workflow.detect_link_type', return_value='wired'):
+            resolved = _resolve_portal_params(step, {}, follow_current_link=True)
+        self.assertEqual(resolved['link'], 'wired')
+        self.assertEqual(resolved['method'], 'web')
+        self.assertEqual(resolved['auth_url'], 'http://w')
+
+    def test_login_default_keeps_explicit_mode(self):
+        # 认证节点（follow_current_link 默认 False）行为不变：显式链路直接生效
+        step = StepSpec.from_dict({'id': 'portal_login', 'params': {
+            'link_mode': 'wireless',
+            'wireless': {'method': 'web', 'auth_url': 'http://w'}}})
+        with mock.patch('core.auth_workflow.detect_link_type') as det:
+            resolved = _resolve_portal_params(step, {}, follow_current_link=False)
+        det.assert_not_called()
+        self.assertEqual(resolved['link'], 'wireless')
+
+
+class PlanLinkIsolationTests(unittest.TestCase):
+    """_plan_link_isolation：纯注销不隔离；注销+重认证链路不一致时推迟。"""
+
+    def test_explicit_auth_only_applies_now(self):
+        wf = [{'id': 'portal_login', 'params': {'link_mode': 'wired'}}]
+        self.assertEqual(_plan_link_isolation(wf, 'wired', True, 'wired'), 'now')
+        self.assertEqual(_plan_link_isolation(wf, 'wired', True, 'wireless'), 'now')
+
+    def test_auto_never_isolates(self):
+        wf = [{'id': 'portal_login'}]
+        self.assertEqual(_plan_link_isolation(wf, 'wireless', False, 'wireless'), 'none')
+
+    def test_pure_logout_never_isolates(self):
+        # 纯注销工作流：即使显式指定链路也不动网卡（隔离会把正在使用的
+        # 链路禁掉，注销请求本身都发不出去）
+        wf = [{'id': 'portal_logout', 'params': {'link_mode': 'wireless'}}]
+        self.assertEqual(_plan_link_isolation(wf, 'wireless', True, 'wired'), 'none')
+        self.assertEqual(_plan_link_isolation(wf, 'wireless', True, 'wireless'), 'none')
+
+    def test_reauth_mismatch_defers(self):
+        wf = [{'id': 'portal_logout'},
+              {'id': 'portal_login', 'params': {'link_mode': 'wireless'}}]
+        self.assertEqual(_plan_link_isolation(wf, 'wireless', True, 'wired'), 'defer')
+
+    def test_reauth_match_applies_now(self):
+        wf = [{'id': 'portal_logout'},
+              {'id': 'portal_login', 'params': {'link_mode': 'wired'}}]
+        self.assertEqual(_plan_link_isolation(wf, 'wired', True, 'wired'), 'now')
+
+    def test_disabled_logout_counts_as_absent(self):
+        wf = [{'id': 'portal_logout', 'enabled': False},
+              {'id': 'portal_login', 'params': {'link_mode': 'wired'}}]
+        self.assertEqual(_plan_link_isolation(wf, 'wired', True, 'wireless'), 'now')
+
+
+class DeferredLinkExclusiveTests(unittest.TestCase):
+    """_apply_deferred_link_exclusive：注销完成后应用被推迟的链路隔离。"""
+
+    def test_applies_pending_and_clears(self):
+        context = WorkflowContext(config={}, cancelled=lambda: False)
+        context.data['pending_link_exclusive'] = 'wired'
+        with mock.patch('core.auth_workflow.apply_link_exclusive',
+                        return_value=(True, '已切换')) as excl:
+            _apply_deferred_link_exclusive(context)
+        excl.assert_called_once_with('wired')
+        self.assertNotIn('pending_link_exclusive', context.data)
+
+    def test_noop_without_pending(self):
+        context = WorkflowContext(config={}, cancelled=lambda: False)
+        with mock.patch('core.auth_workflow.apply_link_exclusive') as excl:
+            _apply_deferred_link_exclusive(context)
+        excl.assert_not_called()
+
+    def test_invalid_pending_ignored(self):
+        context = WorkflowContext(config={}, cancelled=lambda: False)
+        context.data['pending_link_exclusive'] = 'auto'
+        with mock.patch('core.auth_workflow.apply_link_exclusive') as excl:
+            _apply_deferred_link_exclusive(context)
+        excl.assert_not_called()
+
+    def test_failure_does_not_raise(self):
+        context = WorkflowContext(config={}, cancelled=lambda: False)
+        context.data['pending_link_exclusive'] = 'wireless'
+        with mock.patch('core.auth_workflow.apply_link_exclusive',
+                        return_value=(False, '未找到无线网卡')):
+            _apply_deferred_link_exclusive(context)  # 不应抛异常
+        self.assertNotIn('pending_link_exclusive', context.data)
+
+    def test_cancelled_run_discards_pending(self):
+        # 运行已取消：不再切换网卡，把机器留在当前链路上
+        context = WorkflowContext(config={}, cancelled=lambda: True)
+        context.data['pending_link_exclusive'] = 'wireless'
+        with mock.patch('core.auth_workflow.apply_link_exclusive') as excl:
+            _apply_deferred_link_exclusive(context)
+        excl.assert_not_called()
+        self.assertNotIn('pending_link_exclusive', context.data)
 
 
 class InterfaceByLinkTests(unittest.TestCase):

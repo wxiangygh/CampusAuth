@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { NButton, NInput, NSelect, NCheckbox, NTag, NPagination } from 'naive-ui'
+import { NButton, NInput, NSelect, NCheckbox, NTag, NPagination, NModal } from 'naive-ui'
 import { api } from '../bridge'
 import { store } from '../store'
 import { ui } from '../ui'
@@ -8,6 +8,7 @@ import { fuzzyMatch, paginate } from '../utils'
 import { sortBy, compareText, compareDomain } from '../utils/sortlists'
 import AppIcon from '../components/AppIcon.vue'
 import SortToggle from '../components/SortToggle.vue'
+import ConfigViewer from './ConfigViewer.vue'
 
 // ===== 状态 =====
 const subtab = ref('domain')
@@ -39,6 +40,7 @@ const rulesSortDir = ref(1)
 
 // IP 排除
 const ipRanges = ref([])
+const ipPage = ref(1)
 const ipInput = ref('')
 const ipPrefix = ref('auto')
 const ipRoute = ref('ipv4')
@@ -54,6 +56,7 @@ const recommendSortDir = ref(1)
 
 // DNS Fallback（作为"已配置的排除规则"的第三个子tab）
 const dnsList = ref([])
+const dnsPage = ref(1)
 const dnsInput = ref('')
 const dnsSortDir = ref(1)
 
@@ -61,14 +64,26 @@ const dnsSortDir = ref(1)
 // 生产环境（pywebview）由后端 open_traffic_config_window 创建独立子窗口；
 // 浏览器 dev 预览回退为 window.open 同源弹窗，可拖出主窗口、独立关闭。
 let viewerPopup = null
+const viewerVisible = ref(false)
+const openingViewer = ref(false)
 
-function openConfigViewer() {
+async function openConfigViewer() {
+  if (openingViewer.value) return
   const a = api()
   if (a && typeof a.open_traffic_config_window === 'function') {
-    a.open_traffic_config_window().catch((e) => {
+    openingViewer.value = true
+    try {
+      const result = await a.open_traffic_config_window()
+      if (result?.embedded || result?.success === false) {
+        viewerVisible.value = true
+        if (result?.success === false) ui.toast('独立窗口打开失败，已切换应用内查看', 'warning')
+      }
+    } catch (e) {
       console.error('open_traffic_config_window failed:', e)
-      ui.toast('打开分流配置窗口失败: ' + e, 'error')
-    })
+      viewerVisible.value = true
+    } finally {
+      openingViewer.value = false
+    }
     return
   }
   const base = window.location.href.split('#')[0]
@@ -117,6 +132,17 @@ const pagedRules = computed(() => paginate(sortedRules.value, rules.page, rules.
 
 const sortedIpRanges = computed(() => sortBy(ipRanges.value, (x) => x.cidr || '', ipSortDir.value, compareText))
 const sortedDnsList = computed(() => sortBy(dnsList.value, (x) => x.domain || '', dnsSortDir.value, compareDomain))
+const pagedIpRanges = computed(() => paginate(sortedIpRanges.value, ipPage.value, rules.pageSize))
+const pagedDnsList = computed(() => paginate(sortedDnsList.value, dnsPage.value, rules.pageSize))
+
+// 删除末页最后一项、同步或修改每页条数后，页码始终保持有效。
+watch(() => [ipRanges.value.length, dnsList.value.length, filteredRules.value.length, rules.pageSize], () => {
+  ipPage.value = Math.min(ipPage.value, Math.max(1, Math.ceil(ipRanges.value.length / rules.pageSize)))
+  dnsPage.value = Math.min(dnsPage.value, Math.max(1, Math.ceil(dnsList.value.length / rules.pageSize)))
+  rules.page = Math.min(rules.page, Math.max(1, Math.ceil(filteredRules.value.length / rules.pageSize)))
+})
+watch(ipSortDir, () => { ipPage.value = 1 })
+watch(dnsSortDir, () => { dnsPage.value = 1 })
 
 const routeOptions = [
   { label: '走 IPv6 校园网', value: 'ipv6' },
@@ -631,16 +657,17 @@ function persistPageSize(size) {
 }
 
 function onLearnedPageSize(size) {
-  learnedPage.pageSize = size
-  learnedPage.page = 1
-  rules.pageSize = size
-  persistPageSize(size)
+  onRulesPageSize(size)
 }
 
 function onRulesPageSize(size) {
   rules.pageSize = size
   rules.page = 1
   learnedPage.pageSize = size
+  learnedPage.page = 1
+  ipPage.value = 1
+  dnsPage.value = 1
+  store.pageSize = size
   persistPageSize(size)
 }
 
@@ -652,6 +679,8 @@ watch(
     learnedPage.page = 1
     rules.pageSize = sz
     rules.page = 1
+    ipPage.value = 1
+    dnsPage.value = 1
   }
 )
 
@@ -872,7 +901,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="rule-list">
           <div v-if="!ipRanges.length" class="empty-hint">暂无 IP 排除规则</div>
-          <div v-for="r in sortedIpRanges" :key="r.cidr" class="rule-item">
+          <div v-for="r in pagedIpRanges" :key="r.cidr" class="rule-item">
             <div class="rule-header">
               <span class="rule-domain mono">
                 {{ r.cidr }}
@@ -895,6 +924,9 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
+        <n-pagination v-if="ipRanges.length" class="pager" size="small" :page="ipPage" :page-size="rules.pageSize"
+          :item-count="ipRanges.length" :page-sizes="[10, 20, 50, 100]" show-size-picker
+          @update:page="(p) => (ipPage = p)" @update:page-size="onRulesPageSize" />
       </div>
 
       <!-- DNS Fallback 子页 -->
@@ -925,7 +957,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="rule-list">
           <div v-if="!dnsList.length" class="empty-hint">暂无 DNS fallback 域名</div>
-          <div v-for="d in sortedDnsList" :key="d.domain" class="rule-item">
+          <div v-for="d in pagedDnsList" :key="d.domain" class="rule-item">
             <div class="rule-header">
               <span class="rule-domain mono">{{ d.domain }}</span>
               <div class="rule-actions">
@@ -939,8 +971,16 @@ onBeforeUnmount(() => {
             <div class="rule-meta">添加时间: {{ d.added_at || '未知' }}</div>
           </div>
         </div>
+        <n-pagination v-if="dnsList.length" class="pager" size="small" :page="dnsPage" :page-size="rules.pageSize"
+          :item-count="dnsList.length" :page-sizes="[10, 20, 50, 100]" show-size-picker
+          @update:page="(p) => (dnsPage = p)" @update:page-size="onRulesPageSize" />
       </div>
     </section>
+    <n-modal v-model:show="viewerVisible">
+      <div style="width: min(1100px, 94vw); height: 82vh; overflow: hidden; border-radius: 12px">
+        <ConfigViewer v-if="viewerVisible" embedded @close="viewerVisible = false" />
+      </div>
+    </n-modal>
   </div>
 </template>
 

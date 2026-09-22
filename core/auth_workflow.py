@@ -7,6 +7,7 @@ import time
 import core.state
 from core.app_state import app_state
 from core.command import run_command
+from core.dns_settings import dns_settings
 from core.config import (
     DEFAULT_AUTH_WORKFLOW, DEFAULT_PORTAL_LOGOUT_WORKFLOW,
     DEFAULT_REAUTH_WORKFLOW, DEFAULT_RESTART_WARP_WORKFLOW,
@@ -57,7 +58,7 @@ WORKFLOW_CATALOG = {
     },
     'configure_ipv6_dns': {
         'name': '设置 IPv6 DNS',
-        'description': '将 WiFi 接口 DNS 设置为 Cloudflare IPv6 地址。',
+        'description': '使用设置页配置的 IPv6 DNS；留空时使用自动获取。',
         'group': 'IPv4 / IPv6',
     },
     'reset_ipv6_dns': {
@@ -338,17 +339,23 @@ def _configure_ipv6_dns_action(context: WorkflowContext, step: StepSpec) -> Step
     interface_name, error = _interface(context, step)
     if error:
         return error
-    primary = f'netsh interface ipv6 set dnsservers "{interface_name}" static 2606:4700:4700::1111 primary'
-    secondary = f'netsh interface ipv6 add dnsservers "{interface_name}" 2606:4700:4700::1001 index=2'
+    servers = dns_settings(get_config())['ipv6_servers']
+    if not servers:
+        return _reset_ipv6_dns_action(context, step)
+    primary = f'netsh interface ipv6 set dnsservers "{interface_name}" static {servers[0]} primary validate=no'
     code, _, error_text = run_command(primary, timeout=_command_timeout(context, 5))
     if code != 0:
         return StepResult.fail(f'IPv6 DNS 设置失败：{error_text.strip()[:120]}',
                                code='ipv6_dns_failed', retryable=True)
-    run_command(secondary, timeout=_command_timeout(context, 5))
-
     def restore_dns():
         _reset_ipv6_dns_command(interface_name)
     context.add_rollback('restore_ipv6_dns', restore_dns)
+    for index, server in enumerate(servers[1:], 2):
+        secondary = f'netsh interface ipv6 add dnsservers "{interface_name}" {server} index={index} validate=no'
+        code, _, error_text = run_command(secondary, timeout=_command_timeout(context, 5))
+        if code != 0:
+            return StepResult.fail(f'备用 IPv6 DNS 设置失败：{error_text.strip()[:120]}',
+                                   code='ipv6_dns_failed', retryable=True)
     return StepResult.ok('IPv6 DNS 已设置')
 
 

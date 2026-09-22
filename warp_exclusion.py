@@ -225,14 +225,15 @@ class DnsMonitor:
 def _make_dns_resolver():
     """创建 DNS 解析器，使用国内公共 DNS 绕过 WARP DNS 劫持。
     WARP 会接管系统 DNS，导致 socket.getaddrinfo 无法获取真实 AAAA 记录。
-    使用 dnspython 直接查询 114.114.114.114 / 223.5.5.5，获取真实记录。
+    使用设置页保存的 DNS 服务器直接查询，获取真实记录。
     返回 (resolver, dns_module) 或 (None, None)
     """
     try:
         import dns.resolver
-        resolver = dns.resolver.Resolver()
-        # 使用国内公共 DNS，避免 WARP DNS 劫持
-        resolver.nameservers = ['114.114.114.114', '223.5.5.5']
+        from core.config import get_config
+        from core.dns_settings import dns_settings
+        resolver = dns.resolver.Resolver(configure=False)
+        resolver.nameservers = dns_settings(get_config())['servers']
         resolver.timeout = 3
         resolver.lifetime = 5
         return resolver, dns

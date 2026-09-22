@@ -13,8 +13,12 @@ import { sortBy, compareDomain } from '../utils/sortlists'
 import AppIcon from '../components/AppIcon.vue'
 import SortToggle from '../components/SortToggle.vue'
 
+const props = defineProps({ embedded: Boolean })
+const emit = defineEmits(['close'])
+
 const loading = ref(false)
 const loadedAt = ref('')
+const loadError = ref('')
 
 const state = reactive({
   domains: [],   // WARP tunnel host 域名排除规则
@@ -40,24 +44,31 @@ const hasAny = computed(() =>
 
 async function refresh() {
   loading.value = true
+  loadError.value = ''
   try {
     const a = api()
     const [domains, ipInfo, dns] = await Promise.all([
-      a.get_warp_ranges().catch(() => []),
-      a.get_cli_ip_ranges().catch(() => ({ active_ipv6: [], legacy: [] })),
-      a.get_dns_fallback_list().catch(() => []),
+      a.get_warp_ranges(),
+      a.get_cli_ip_ranges(),
+      a.get_dns_fallback_list(),
     ])
     state.domains = domains || []
     state.ipv6 = (ipInfo && ipInfo.active_ipv6) || []
     state.legacy = (ipInfo && ipInfo.legacy) || []
     state.dns = dns || []
     loadedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+  } catch (e) {
+    loadError.value = '读取分流配置失败：' + (e.message || String(e))
   } finally {
     loading.value = false
   }
 }
 
 function closeWindow() {
+  if (props.embedded) {
+    emit('close')
+    return
+  }
   const a = api()
   if (a && typeof a.close_traffic_config_window === 'function') {
     a.close_traffic_config_window().catch(() => {})
@@ -87,11 +98,11 @@ async function cleanupLegacyRules() {
 }
 
 onMounted(async () => {
-  document.title = '当前分流配置 - CampusAuth'
+  if (!props.embedded) document.title = '当前分流配置 - CampusAuth'
   try {
     await waitForApi(15000)
   } catch (e) {
-    ui.toast('API 加载超时: ' + e.message, 'error')
+    loadError.value = 'API 加载超时：' + e.message
     return
   }
   await refresh()
@@ -99,10 +110,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <n-config-provider :theme="naiveTheme" :theme-overrides="themeOverrides">
-    <div class="viewer-shell" :data-theme="isDark ? 'dark' : 'light'">
+  <n-config-provider :theme="naiveTheme" :theme-overrides="themeOverrides" :style="embedded ? { height: '100%' } : {}">
+    <div class="viewer-shell" :style="embedded ? { height: '100%' } : {}" :data-theme="isDark ? 'dark' : 'light'">
       <!-- 标题栏：pywebview-drag-region 支持拖动整个悬浮窗 -->
-      <div class="viewer-titlebar pywebview-drag-region">
+      <div class="viewer-titlebar" :class="{ 'pywebview-drag-region': !embedded }">
         <div class="viewer-title-left">
           <AppIcon name="globe" :size="14" />
           <span class="viewer-title-text">当前分流配置</span>
@@ -119,6 +130,7 @@ onMounted(async () => {
       </div>
 
       <!-- 三列分栏 -->
+      <div v-if="loadError" role="alert" style="padding: 12px; color: #e88080">{{ loadError }}</div>
       <div class="viewer-body">
         <section class="viewer-col">
           <div class="col-head">
@@ -182,7 +194,7 @@ onMounted(async () => {
 
       <div class="viewer-statusbar">
         <span v-if="loading">加载中...</span>
-        <span v-else-if="hasAny">数据为 WARP 实时状态，可拖动窗口标题栏移动位置</span>
+        <span v-else-if="hasAny">{{ embedded ? '数据为 WARP 实时状态' : '数据为 WARP 实时状态，可拖动窗口标题栏移动位置' }}</span>
         <span v-else>暂无数据，请点击右上角刷新</span>
       </div>
     </div>

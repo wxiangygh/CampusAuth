@@ -495,6 +495,28 @@ class ApiBridge:
     def load_config(self):
         return CONFIG_STORE.snapshot(include_revision=True)
 
+    def get_dns_settings(self):
+        from core.dns_settings import DNS_PRESETS, dns_settings
+        return {**dns_settings(CONFIG_STORE.snapshot()), 'presets': DNS_PRESETS}
+
+    def save_dns_settings(self, settings):
+        from core.dns_settings import DNS_PRESETS, validate_servers
+        try:
+            if not isinstance(settings, dict):
+                raise ValueError('DNS 设置格式无效')
+            preset = settings.get('preset', 'custom')
+            if preset not in {p['id'] for p in DNS_PRESETS} | {'custom'}:
+                raise ValueError('未知的 DNS 预选项')
+            saved = CONFIG_STORE.patch({
+                'dns_preset': preset,
+                'dns_servers': validate_servers(settings.get('servers')),
+                'dns_ipv6_servers': validate_servers(settings.get('ipv6_servers'), ipv6_only=True),
+            })
+            return {'success': True, 'message': 'DNS 设置已保存',
+                    'revision': saved.get('_revision')}
+        except (TypeError, ValueError, OSError) as exc:
+            return {'success': False, 'message': f'DNS 设置保存失败：{exc}'}
+
     # ===== 应用更新（GitHub Releases）=====
     def get_app_info(self):
         """应用版本与安装位置（设置页展示用）。"""
@@ -711,6 +733,10 @@ class ApiBridge:
 
     def open_traffic_config_window(self):
         """打开"当前分流配置"悬浮窗（分流规则 tab 前端按钮调用）。"""
+        # Windows 10 的部分 WebView2 环境无法可靠创建第二个窗口。
+        # 复用主窗口已工作的渲染器，避免用户点击后没有响应。
+        if sys.platform == 'win32' and sys.getwindowsversion().build < 22000:
+            return {'success': True, 'embedded': True}
         app = core.state._tray_app_instance
         if not app:
             return {'success': False, 'message': '应用实例不可用'}
@@ -2335,7 +2361,7 @@ class TrayApp:
             if not os.path.isfile(html_file):
                 return {'success': False, 'message': '前端资源缺失，无法打开悬浮窗'}
             if not self._html_url:
-                self._html_url = f'file:///{html_file.replace(chr(92), "/")}'
+                self._html_url = Path(html_file).resolve().as_uri()
 
             # 悬浮窗初始位置：主窗口左上角右下偏移，制造"浮在主窗口旁"的层次感
             x = y = None
@@ -2898,7 +2924,7 @@ class TrayApp:
         logical_y = round(wy / scale)
 
         try:
-            html_url = f'file:///{html_file.replace(chr(92), "/")}'
+            html_url = Path(html_file).resolve().as_uri()
             if html_file == dist_index:
                 # 悬浮窗复用同一份 Vue 前端（#viewer hash 路由）
                 self._html_url = html_url

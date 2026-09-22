@@ -144,6 +144,9 @@ DEFAULT_CONFIG = {
     # warp=Traffic and DNS（校园网推荐）；tunnel_only=Traffic only
     "warp_connect_mode": "auto",
     "warp_cli_path": "", "silent_startup": False,
+    "dns_preset": "legacy",
+    "dns_servers": ["114.114.114.114", "223.5.5.5"],
+    "dns_ipv6_servers": ["2606:4700:4700::1111", "2606:4700:4700::1001"],
     # 启动时自动检测 GitHub Releases 更新
     "auto_check_update": True,
     # 按运行数据自动调优各工作流节点的超时与重试设置

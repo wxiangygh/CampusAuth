@@ -76,9 +76,59 @@ function snapshot() {
   return { workflows: clone(workflows), active_workflow_id: activeId, revision: ++revision }
 }
 
+// DNS设置 tab 的 dev 预览数据：全局服务器 + 定向解析规则
+const mockDns = {
+  preset: 'legacy',
+  servers: ['114.114.114.114', '223.5.5.5'],
+  ipv6_servers: ['2606:4700:4700::1111', '2606:4700:4700::1001'],
+  presets: [
+    { id: 'legacy', label: '默认（114 DNS + 阿里云）', servers: ['114.114.114.114', '223.5.5.5'], ipv6_servers: ['2606:4700:4700::1111', '2606:4700:4700::1001'] },
+    { id: 'google', label: '国外 · Google 公共 DNS', servers: ['8.8.8.8', '8.8.4.4'], ipv6_servers: ['2001:4860:4860::8888'] },
+  ],
+}
+let mockDnsBindings = [
+  { target: 'github.com', servers: ['8.8.8.8'], enabled: true },
+  { target: '2400:3200::/32', servers: ['223.5.5.5', '223.6.6.6'], enabled: false },
+]
+// NRPT（系统级策略）下发状态
+const mockNrpt = { applied: 0, updated_at: '' }
+
 const api = {
   get_ui_prefs: () => delay({}),
   save_ui_prefs: () => delay({}),
+  get_dns_settings: () => delay({ ...clone(mockDns) }),
+  save_dns_settings: (settings) => {
+    Object.assign(mockDns, {
+      preset: settings.preset,
+      servers: String(settings.servers || '').split(/[\s,，]+/).filter(Boolean),
+      ipv6_servers: String(settings.ipv6_servers || '').split(/[\s,，]+/).filter(Boolean),
+    })
+    return delay({ success: true, message: 'DNS 设置已保存', revision: ++revision })
+  },
+  get_dns_bindings: () => delay({ bindings: clone(mockDnsBindings) }),
+  save_dns_bindings: (bindings) => {
+    mockDnsBindings = clone(bindings || []).map((r) => ({
+      target: String(r.target || '').trim().toLowerCase(),
+      servers: String(r.servers || '').split(/[\s,，]+/).filter(Boolean),
+      enabled: !!r.enabled,
+    }))
+    return delay({ success: true, message: '定向解析规则已保存，下次解析即生效', revision: ++revision })
+  },
+  get_dns_nrpt_status: () => delay({
+    enabled_bindings: mockDnsBindings.filter((r) => r.enabled).length,
+    applied: mockNrpt.applied,
+    system_rules: mockNrpt.applied,
+    updated_at: mockNrpt.updated_at,
+  }),
+  apply_dns_bindings_to_system: () => {
+    mockNrpt.applied = mockDnsBindings.filter((r) => r.enabled).length
+    mockNrpt.updated_at = new Date().toLocaleString('zh-CN', { hour12: false })
+    return delay({ success: true, message: `已下发 ${mockNrpt.applied} 条规则到系统（NRPT）` })
+  },
+  clear_dns_bindings_from_system: () => {
+    mockNrpt.applied = 0
+    return delay({ success: true, message: '已清除系统级解析规则' })
+  },
   get_workflow_catalog: () =>
     delay({ steps: clone(CATALOG), workflows: clone(workflows), active_workflow_id: activeId }),
   list_workflows: () =>

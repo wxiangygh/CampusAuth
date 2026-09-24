@@ -167,19 +167,126 @@ const totalCount = computed(() =>
   ROUTE_ORDER.reduce((sum, key) => sum + (traffic.stats[key] || 0), 0)
 )
 
-// ===== 连接列表 =====
-const filteredConns = computed(() => {
-  let conns = traffic.cumulativeMode ? Array.from(cumulativeConns.values()) : traffic.conns
-  const kw = traffic.search.trim().toLowerCase()
-  if (kw) {
-    conns = conns.filter(
-      (c) =>
-        (c.process || '').toLowerCase().includes(kw) ||
-        (c.remote_ip || '').toLowerCase().includes(kw) ||
-        (c.hostname || '').toLowerCase().includes(kw)
-    )
+// ===== 连接类型筛选 =====
+// routeFilter 是全局筛选；procFilter 按进程单独筛选，非空即覆盖全局（空 = 跟随全局）。
+// 用"覆盖"而不是"与全局求交"：求交会让用户看到空列表却查不出是哪一层筛掉的。
+const routeFilter = reactive(new Set())
+const procFilter = reactive(new Map())
+
+function effectiveFilter(proc) {
+  const own = procFilter.get(proc)
+  return own && own.size ? own : routeFilter
+}
+
+function toggleRouteFilter(key) {
+  if (routeFilter.has(key)) routeFilter.delete(key)
+  else routeFilter.add(key)
+  persistFilters()
+}
+
+function toggleProcRouteFilter(proc, key) {
+  let set = procFilter.get(proc)
+  if (!set) {
+    set = reactive(new Set())
+    procFilter.set(proc, set)
   }
-  return conns
+  if (set.has(key)) set.delete(key)
+  else set.add(key)
+  // 全部取消后删掉条目，该进程回到"跟随全局"
+  if (!set.size) procFilter.delete(proc)
+  persistFilters()
+}
+
+function clearProcFilter(proc) {
+  procFilter.delete(proc)
+  persistFilters()
+}
+
+function clearAllFilters() {
+  routeFilter.clear()
+  procFilter.clear()
+  persistFilters()
+}
+
+// 筛选偏好走现成的 ui_prefs 通路（后端 save_ui_prefs 白名单需同步放行这两个键）
+let persistTimer = null
+
+function persistFilters() {
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = setTimeout(() => {
+    persistTimer = null
+    const own = {}
+    for (const [proc, set] of procFilter) if (set.size) own[proc] = Array.from(set)
+    api()?.save_ui_prefs({
+      traffic_route_filter: Array.from(routeFilter),
+      traffic_proc_filter: own,
+    })?.catch?.(() => {})
+  }, 400)
+}
+
+function restoreFilters(prefs) {
+  if (!prefs) return
+  for (const key of prefs.traffic_route_filter || []) {
+    if (ROUTE_ORDER.includes(key)) routeFilter.add(key)
+  }
+  const own = prefs.traffic_proc_filter
+  if (!own || typeof own !== 'object') return
+  for (const [proc, keys] of Object.entries(own)) {
+    const valid = (Array.isArray(keys) ? keys : []).filter((k) => ROUTE_ORDER.includes(k))
+    if (valid.length) procFilter.set(proc, reactive(new Set(valid)))
+  }
+}
+
+// 只列出"当前可能出现"的类型：WARP 底层固定后另有两类恒为 0，摆出来是噪音
+const routeChips = computed(() =>
+  ROUTE_ORDER.filter((key) => routeFilter.has(key) || (traffic.stats[key] || 0) > 0)
+)
+
+function flowRouteClass(key) {
+  const selected = routeFilter.has(key)
+  return {
+    active: (traffic.stats[key] || 0) > 0,
+    selected,
+    dimmed: routeFilter.size > 0 && !selected,
+  }
+}
+
+function flowRouteTitle(key) {
+  return routeFilter.has(key) ? '取消「只看这一类」' : `只看 ${ROUTE_LABEL[key]} 的连接`
+}
+
+function procTagTitle(key) {
+  return `只看 ${ROUTE_LABEL[key] || key} 的连接（仅该进程，再点取消）`
+}
+
+// ===== 连接列表 =====
+const searchedConns = computed(() => {
+  const conns = traffic.cumulativeMode ? Array.from(cumulativeConns.values()) : traffic.conns
+  const kw = traffic.search.trim().toLowerCase()
+  if (!kw) return conns
+  return conns.filter(
+    (c) =>
+      (c.process || '').toLowerCase().includes(kw) ||
+      (c.remote_ip || '').toLowerCase().includes(kw) ||
+      (c.hostname || '').toLowerCase().includes(kw)
+  )
+})
+
+const filteredConns = computed(() => {
+  if (!routeFilter.size && !procFilter.size) return searchedConns.value
+  return searchedConns.value.filter((c) => {
+    const set = effectiveFilter(c.process || 'unknown')
+    return !set.size || set.has(c.route_type || 'ipv4')
+  })
+})
+
+// 有连接但被类型筛选全部挡掉的进程：不提示会被误认为进程消失
+const hiddenProcNames = computed(() => {
+  if (!routeFilter.size && !procFilter.size) return []
+  const visible = new Set(filteredConns.value.map((c) => c.process || 'unknown'))
+  const all = new Set()
+  for (const c of searchedConns.value) all.add(c.process || 'unknown')
+  return Array.from(all).filter((name) => !visible.has(name))
 })
 
 // 进程名 → 图标 data URL（大小写不敏感查表）
@@ -224,17 +331,36 @@ function toggleAllCollapse() {
   else for (const g of groupedConns.value) expandedGroups.add(g.name)
 }
 
-// 折叠状态下分组内看不到任何路由信息，给一个按数量排序的概要（最多 3 类）
-function routeSummary(group) {
-  const counts = {}
-  for (const c of group.items) {
+// 每个进程"有哪些类型、各多少条"必须按**筛选前**的全量统计：
+// 否则筛中某类后其他类的入口会一起消失，用户没法再切回别的类型
+const procTypeCounts = computed(() => {
+  const m = new Map()
+  for (const c of searchedConns.value) {
+    const proc = c.process || 'unknown'
+    let counts = m.get(proc)
+    if (!counts) {
+      counts = {}
+      m.set(proc, counts)
+    }
     const key = c.route_type || 'ipv4'
     counts[key] = (counts[key] || 0) + 1
   }
-  return Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([key, n]) => ({ key, n }))
+  return m
+})
+
+function routeTags(proc) {
+  const counts = procTypeCounts.value.get(proc) || {}
+  const own = procFilter.get(proc)
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1])
+  if (own && own.size) {
+    entries.sort((a, b) => (own.has(b[0]) ? 1 : 0) - (own.has(a[0]) ? 1 : 0) || b[1] - a[1])
+  }
+  return entries.slice(0, 4).map(([key, n]) => ({ key, n }))
+}
+
+function procTypeTotal(proc) {
+  const counts = procTypeCounts.value.get(proc) || {}
+  return Object.values(counts).reduce((sum, n) => sum + n, 0)
 }
 
 function toggleConn(id, checked) {
@@ -375,6 +501,11 @@ watch(
   () => store.apiReady,
   async (ready) => {
     if (!ready) return
+    try {
+      restoreFilters(await api().get_ui_prefs())
+    } catch (e) {
+      console.warn('restore traffic filters failed:', e)
+    }
     await nextTick()
     await refreshFast()
     refreshSlow()
@@ -439,7 +570,8 @@ onBeforeUnmount(() => {
             <span class="flow-tunnel-sub mono">{{ traffic.warpUnderlay === 'ipv6' ? 'IPv6' : 'IPv4' }}</span>
           </div>
           <div class="flow-route" v-for="key in ['ipv4_warp', 'ipv4_warp_ipv6', 'ipv6_warp', 'ipv6_warp_ipv4']"
-            :key="key" :class="{ active: (traffic.stats[key] || 0) > 0 }">
+            :key="key" :class="flowRouteClass(key)" role="button" :title="flowRouteTitle(key)"
+            @click="toggleRouteFilter(key)">
             <span class="flow-route-label">{{ ROUTE_LABEL[key] }}</span>
             <i class="flow-route-line"></i>
             <span class="flow-route-num mono">{{ traffic.stats[key] || 0 }}</span>
@@ -448,8 +580,8 @@ onBeforeUnmount(() => {
         <div class="flow-lines" aria-hidden="true"><i></i><i></i></div>
         <div class="flow-direct">
           <div class="flow-direct-caption">直连</div>
-          <div class="flow-route" v-for="key in ['ipv4', 'ipv6']" :key="key"
-            :class="{ active: (traffic.stats[key] || 0) > 0 }">
+          <div class="flow-route" v-for="key in ['ipv4', 'ipv6']" :key="key" :class="flowRouteClass(key)"
+            role="button" :title="flowRouteTitle(key)" @click="toggleRouteFilter(key)">
             <span class="flow-route-label">{{ ROUTE_LABEL[key] }}</span>
             <i class="flow-route-line"></i>
             <span class="flow-route-num mono">{{ traffic.stats[key] || 0 }}</span>
@@ -495,10 +627,30 @@ onBeforeUnmount(() => {
     </div>
     <div class="loading-bar" :class="{ active: traffic.loadingFast }"></div>
 
+    <!-- 类型筛选条：概览里点同类也可切换，这里给一个常驻入口 -->
+    <div class="tv-filter-row" v-if="routeChips.length">
+      <span class="tv-filter-label">连接类型</span>
+      <button v-for="key in routeChips" :key="key" class="route-chip" :class="{ on: routeFilter.has(key) }"
+        :title="flowRouteTitle(key)" @click="toggleRouteFilter(key)">
+        {{ ROUTE_LABEL[key] }}<span class="route-chip-num mono">{{ traffic.stats[key] || 0 }}</span>
+      </button>
+      <button v-if="routeFilter.size" class="route-chip route-chip-clear" @click="clearAllFilters">清除筛选</button>
+      <span v-if="procFilter.size" class="tv-filter-note">
+        {{ procFilter.size }} 个进程单独筛选中
+      </span>
+    </div>
+
     <!-- 连接分组列表 -->
     <section class="conn-panel">
       <div v-if="!groupedConns.length" class="empty-hint">
         {{ traffic.cumulativeMode ? '暂无累计连接' : '暂无活动连接' }}
+      </div>
+      <div v-if="hiddenProcNames.length" class="filter-hidden-hint">
+        <span>
+          {{ hiddenProcNames.length }} 个进程没有匹配类型的连接（{{ hiddenProcNames.slice(0, 3).join('、')
+          }}{{ hiddenProcNames.length > 3 ? ' …' : '' }}）
+        </span>
+        <button @click="clearAllFilters">清除筛选</button>
       </div>
       <div v-for="group in groupedConns" :key="group.name" class="proc-group"
         :class="{ collapsed: !expandedGroups.has(group.name) }">
@@ -515,11 +667,22 @@ onBeforeUnmount(() => {
             <span v-else class="proc-icon-fallback">{{ (group.name[0] || '?').toUpperCase() }}</span>
           </span>
           <span class="proc-name">{{ group.name }}</span>
-          <span class="proc-count">{{ group.items.length }}</span>
-          <span v-if="!expandedGroups.has(group.name)" class="proc-summary">
-            <span v-for="s in routeSummary(group)" :key="s.key" class="proc-summary-tag">
-              {{ ROUTE_LABEL[s.key] || ROUTE_LABEL.ipv4 }} {{ s.n }}
-            </span>
+          <span class="proc-count">{{ group.items.length }}<template
+            v-if="procFilter.has(group.name)">/{{ procTypeTotal(group.name) }}</template></span>
+          <template v-if="procFilter.has(group.name)">
+            <span class="proc-filter-badge">单独筛选中</span>
+            <button class="proc-follow" title="取消该进程的单独筛选，改用上方全局筛选" @click.stop="clearProcFilter(group.name)">
+              跟随全局
+            </button>
+          </template>
+          <!-- 类型入口常驻：折叠/展开都要能切，且列表来自筛选前的统计 -->
+          <span class="proc-summary">
+            <button v-for="s in routeTags(group.name)" :key="s.key" class="proc-summary-tag"
+              :class="{ on: effectiveFilter(group.name).has(s.key) }" :title="procTagTitle(s.key)"
+              @click.stop="toggleProcRouteFilter(group.name, s.key)">
+              <span class="tag-label">{{ ROUTE_LABEL[s.key] || ROUTE_LABEL.ipv4 }}</span>
+              <span class="tag-num mono">{{ s.n }}</span>
+            </button>
           </span>
         </div>
         <div class="proc-group-body">
@@ -532,7 +695,11 @@ onBeforeUnmount(() => {
               <span class="conn-hostname">{{ c.hostname || '(无域名)' }}</span>
               <span class="conn-ip mono">{{ c.remote_ip }}:{{ c.remote_port }}</span>
             </span>
-            <span class="conn-tag">{{ ROUTE_LABEL[c.route_type] || ROUTE_LABEL.ipv4 }}</span>
+            <span class="conn-tag" :class="{ on: effectiveFilter(group.name).has(c.route_type || 'ipv4') }"
+              :title="procTagTitle(c.route_type || 'ipv4')"
+              @click.stop="toggleProcRouteFilter(group.name, c.route_type || 'ipv4')">
+              {{ ROUTE_LABEL[c.route_type] || ROUTE_LABEL.ipv4 }}
+            </span>
           </div>
         </div>
       </div>
@@ -754,6 +921,32 @@ onBeforeUnmount(() => {
   text-align: right;
 }
 
+/* 概览行即筛选入口：点谁看谁，所以 hover/选中/被排除三种状态要能区分 */
+.flow-route {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.flow-route:hover {
+  background: var(--bg-hover);
+}
+
+.flow-route.selected {
+  background: var(--accent-dim);
+  opacity: 1;
+}
+
+.flow-route.selected .flow-route-label {
+  color: var(--text-primary);
+}
+
+.flow-route.dimmed {
+  opacity: 0.32;
+}
+
 /* ===== 工具栏 ===== */
 .tv-toolbar {
   display: flex;
@@ -774,6 +967,91 @@ onBeforeUnmount(() => {
 
 .tv-toolbar-spacer {
   flex: 1;
+}
+
+/* ===== 类型筛选条 ===== */
+.tv-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: -4px;
+}
+
+.tv-filter-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-right: 2px;
+}
+
+.route-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.route-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.route-chip.on {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--text-primary);
+}
+
+.route-chip-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.route-chip-clear {
+  border-style: dashed;
+  color: var(--text-tertiary);
+}
+
+.tv-filter-note {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-left: 4px;
+}
+
+.filter-hidden-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--bg-panel);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+
+.filter-hidden-hint button {
+  font: inherit;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.filter-hidden-hint button:hover {
+  text-decoration: underline;
 }
 
 .loading-bar {
@@ -881,7 +1159,9 @@ onBeforeUnmount(() => {
   line-height: 1;
 }
 
-/* 折叠时补一行路由概要，避免全折叠状态下完全看不到路由信息 */
+/* 折叠时补一行路由概要，避免全折叠状态下完全看不到路由信息。
+   类型名与数字必须一眼分得开：名称 10px/tertiary，数字 12px/700/等宽/primary，
+   选中态只加边框与底色，不引入类型颜色（本视图刻意单色，标签即语义） */
 .proc-summary {
   display: flex;
   align-items: center;
@@ -891,12 +1171,63 @@ onBeforeUnmount(() => {
 }
 
 .proc-summary-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
   font-size: 10px;
   color: var(--text-tertiary);
+  background: transparent;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 5px;
   padding: 1px 6px;
   white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, opacity 0.15s;
+}
+
+.proc-summary-tag:hover {
+  border-color: var(--border-strong);
+}
+
+.proc-summary-tag .tag-num {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  min-width: 1ch;
+  text-align: right;
+}
+
+.proc-summary-tag.on {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--text-primary);
+}
+
+.proc-filter-badge {
+  font-size: 10px;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.proc-follow {
+  font: inherit;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  padding: 1px 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.proc-follow:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 /* 刷新按钮：纯图标、无底色，与主题背景融为一体；加载时图标自旋，尺寸不变 */
@@ -995,6 +1326,19 @@ onBeforeUnmount(() => {
   padding: 2px 8px;
   white-space: nowrap;
   flex-shrink: 0;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.conn-tag:hover {
+  border-color: var(--accent);
+}
+
+/* 该进程正在单独筛选，且此类型在筛选内 */
+.conn-tag.on {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--text-primary);
 }
 
 .conn-row.selected .conn-tag {

@@ -517,6 +517,47 @@ class ApiBridge:
         except (TypeError, ValueError, OSError) as exc:
             return {'success': False, 'message': f'DNS 设置保存失败：{exc}'}
 
+    def get_dns_bindings(self):
+        """定向解析规则：哪些域名 / IP / 网段用哪台 DNS 解析。"""
+        from core.dns_settings import dns_bindings
+        return {'bindings': dns_bindings(CONFIG_STORE.snapshot())}
+
+    def save_dns_bindings(self, bindings):
+        from core.dns_settings import validate_bindings
+        try:
+            saved = CONFIG_STORE.patch(
+                {'dns_bindings': validate_bindings(bindings or [])})
+            return {'success': True, 'message': '定向解析规则已保存，下次解析即生效',
+                    'revision': saved.get('_revision')}
+        except (TypeError, ValueError, OSError) as exc:
+            return {'success': False, 'message': f'定向解析规则保存失败：{exc}'}
+
+    def get_dns_nrpt_status(self):
+        """系统级（NRPT）解析策略现状，供 DNS设置页展示。"""
+        from core.dns_nrpt import overview
+        from core.dns_settings import dns_bindings
+        config = CONFIG_STORE.snapshot()
+        return overview(dns_bindings(config), config.get('dns_nrpt_state'))
+
+    def apply_dns_bindings_to_system(self):
+        """把启用中的定向解析规则下发到 Windows NRPT（需管理员权限）。"""
+        from core.dns_nrpt import sync
+        from core.dns_settings import dns_bindings
+        config = CONFIG_STORE.snapshot()
+        ok, message, state = sync(dns_bindings(config), config.get('dns_nrpt_state'))
+        if ok:
+            CONFIG_STORE.patch({'dns_nrpt_state': state})
+        return {'success': ok, 'message': message}
+
+    def clear_dns_bindings_from_system(self):
+        """移除本应用下发到 NRPT 的规则（不动其他来源的策略）。"""
+        from core.dns_nrpt import clear
+        config = CONFIG_STORE.snapshot()
+        ok, message, state = clear(config.get('dns_nrpt_state'))
+        if ok:
+            CONFIG_STORE.patch({'dns_nrpt_state': state})
+        return {'success': ok, 'message': message}
+
     # ===== 应用更新（GitHub Releases）=====
     def get_app_info(self):
         """应用版本与安装位置（设置页展示用）。"""
@@ -2007,7 +2048,8 @@ class ApiBridge:
         """保存界面偏好，包括分页、视图模式、详情折叠状态、当前标签页和主题。"""
         try:
             allowed = {'page_size', 'traffic_subview', 'network_detail_collapsed',
-                       'active_tab', 'theme', 'theme_dark'}
+                       'active_tab', 'theme', 'theme_dark',
+                       'traffic_route_filter', 'traffic_proc_filter'}
             clean = {key: value for key, value in (prefs or {}).items() if key in allowed}
             if clean.get('theme') not in ('light', 'dark', 'system'):
                 clean.pop('theme', None)
@@ -2038,12 +2080,18 @@ class ApiBridge:
                 'network_detail_collapsed': bool(prefs.get('network_detail_collapsed', False)),
                 'active_tab': prefs.get('active_tab', 'home'),
                 'theme': prefs.get('theme', 'system'),
+                # 流量页的类型筛选：全局一组 + 按进程单独一组
+                'traffic_route_filter': [str(x) for x in
+                                         (prefs.get('traffic_route_filter') or []) if x],
+                'traffic_proc_filter': prefs.get('traffic_proc_filter')
+                if isinstance(prefs.get('traffic_proc_filter'), dict) else {},
             }
             if result['page_size'] not in (10, 20, 50, 100):
                 result['page_size'] = 20
             if result['traffic_subview'] not in ('list', 'canvas'):
                 result['traffic_subview'] = 'list'
-            if result['active_tab'] not in ('home', 'workflow', 'warp', 'traffic', 'settings'):
+            if result['active_tab'] not in ('home', 'workflow', 'warp', 'traffic',
+                                            'dns', 'settings'):
                 result['active_tab'] = 'home'
             if result['theme'] not in ('light', 'dark', 'system'):
                 result['theme'] = 'system'

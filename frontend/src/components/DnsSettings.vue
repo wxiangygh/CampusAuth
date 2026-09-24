@@ -80,7 +80,7 @@ watch(() => store.apiReady, ready => { if (ready) load() }, { immediate: true })
 </template>
 
 <style scoped>
-.dns-settings { padding: 20px; margin-bottom: 16px; }
+.dns-settings { padding: 20px; }
 .dns-settings label { display: block; margin: 12px 0 8px; font-size: 13px; }
 .dns-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .dns-settings p { font-size: 12px; opacity: .7; line-height: 1.7; }

@@ -222,96 +222,86 @@ class DnsMonitor:
 #           强制浏览器走 IPv6 校园网直连。
 # IPv4 路由：走校园网 IPv4 直连。
 
-def _make_dns_resolver():
-    """创建 DNS 解析器，使用国内公共 DNS 绕过 WARP DNS 劫持。
-    WARP 会接管系统 DNS，导致 socket.getaddrinfo 无法获取真实 AAAA 记录。
-    使用设置页保存的 DNS 服务器直接查询，获取真实记录。
-    返回 (resolver, dns_module) 或 (None, None)
+def _servers_for(target, addresses=()):
+    """解析 target（域名，或已知的解析结果地址）应使用的 DNS 服务器。
+    优先用「DNS设置」页绑定的定向解析服务器，其次用全局 DNS 设置；
+    两者都取不到时返回 []，由调用方退回系统解析器。
     """
     try:
-        import dns.resolver
         from core.config import get_config
-        from core.dns_settings import dns_settings
-        resolver = dns.resolver.Resolver(configure=False)
-        resolver.nameservers = dns_settings(get_config())['servers']
-        resolver.timeout = 3
-        resolver.lifetime = 5
-        return resolver, dns
+        from core.dns_settings import binding_servers, dns_bindings, dns_settings
+        config = get_config()
+        return (binding_servers(dns_bindings(config), target, addresses)
+                or dns_settings(config)['servers'])
+    except Exception as e:
+        logger.warning(f'Failed to resolve configured DNS servers: {e}')
+        return []
+
+
+def _query_records(domain, rtype, nameservers):
+    """向指定服务器查询 A / AAAA 记录，返回地址列表。
+    dnspython 不可用或未取到服务器时退回 getaddrinfo（结果可能已被 WARP 改写）。
+    """
+    family = socket.AF_INET if rtype == 'A' else socket.AF_INET6
+    resolver = None
+    try:
+        import dns.resolver
+        if nameservers:
+            resolver = dns.resolver.Resolver(configure=False)
+            resolver.nameservers = nameservers
+            resolver.timeout = 3
+            resolver.lifetime = 5
     except ImportError:
         logger.warning('dnspython not available, DNS resolution may be inaccurate')
-        return None, None
+    addrs = set()
+    if resolver is None:
+        try:
+            for result in socket.getaddrinfo(domain, None, family):
+                addrs.add(result[4][0])
+        except Exception as e:
+            logger.debug(f'No {rtype} records for {domain} (socket fallback): {e}')
+        return list(addrs)
+    try:
+        for rdata in resolver.resolve(domain, rtype):
+            addrs.add(str(rdata))
+        logger.debug(f'{rtype} records for {domain} via {nameservers}: {sorted(addrs)}')
+    except Exception as e:
+        logger.debug(f'No {rtype} records for {domain}: {type(e).__name__}: {e}')
+    return list(addrs)
+
+
+def _resolve_records(domain, rtype):
+    """解析域名的 A / AAAA 记录，按 DNS 设置页的绑定规则选择解析服务器。
+    若首轮结果地址落在某条 IP/网段绑定内，改用该绑定重查一次，
+    以纠正被污染或路由不佳的应答。
+    """
+    servers = _servers_for(domain)
+    addrs = _query_records(domain, rtype, servers)
+    bound = _servers_for(domain, addrs)
+    if addrs and bound and bound != servers:
+        retried = _query_records(domain, rtype, bound)
+        if retried:
+            return retried
+    return addrs
 
 
 def _resolve_ipv6_prefixes(domain):
     """解析域名的 AAAA 记录，提取 /32 或 /48 前缀（用于 IPv6 CIDR 排除）。
-    使用 dnspython 直接查询国内 DNS，绕过 WARP DNS 劫持。
     返回 CIDR 列表，如 ['240e:97d::/32', '240e:97d:10::/48']
     """
     prefixes = set()
-    resolver, dns_mod = _make_dns_resolver()
-    if resolver is None:
-        # 回退到 socket.getaddrinfo（可能不准确）
-        try:
-            results = socket.getaddrinfo(domain, None, socket.AF_INET6)
-            for result in results:
-                ip = result[4][0]
-                parts = ip.split(':')
-                if len(parts) >= 4:
-                    prefixes.add(':'.join(parts[:2]) + '::/32')
-                    prefixes.add(':'.join(parts[:3]) + '::/48')
-        except Exception as e:
-            logger.debug(f'No AAAA records for {domain} (socket fallback): {e}')
-        return list(prefixes)
-
-    # 使用 dnspython 查询 AAAA 记录
-    try:
-        answers = resolver.resolve(domain, 'AAAA')
-        for rdata in answers:
-            ip = str(rdata)
-            parts = ip.split(':')
-            if len(parts) >= 4:
-                # 提取 /32 和 /48 前缀，覆盖同网段的 CDN IP 轮换
-                prefixes.add(':'.join(parts[:2]) + '::/32')
-                prefixes.add(':'.join(parts[:3]) + '::/48')
-        logger.debug(f'AAAA records for {domain} (dnspython): {[str(r) for r in answers]}')
-    except dns_mod.resolver.NoAnswer:
-        logger.debug(f'No AAAA records for {domain}: server returned no answer')
-    except dns_mod.resolver.NXDOMAIN:
-        logger.debug(f'No AAAA records for {domain}: domain does not exist')
-    except Exception as e:
-        logger.debug(f'No AAAA records for {domain}: {type(e).__name__}: {e}')
+    for ip in _resolve_records(domain, 'AAAA'):
+        parts = ip.split(':')
+        if len(parts) >= 4:
+            # 提取 /32 和 /48 前缀，覆盖同网段的 CDN IP 轮换
+            prefixes.add(':'.join(parts[:2]) + '::/32')
+            prefixes.add(':'.join(parts[:3]) + '::/48')
     return list(prefixes)
 
 
 def _resolve_ipv4_addresses(domain):
-    """解析域名的 A 记录，返回 IPv4 地址列表。
-    使用 dnspython 直接查询国内 DNS，绕过 WARP DNS 劫持。
-    """
-    addrs = set()
-    resolver, dns_mod = _make_dns_resolver()
-    if resolver is None:
-        # 回退到 socket.getaddrinfo
-        try:
-            results = socket.getaddrinfo(domain, None, socket.AF_INET)
-            for result in results:
-                addrs.add(result[4][0])
-        except Exception as e:
-            logger.debug(f'No A records for {domain} (socket fallback): {e}')
-        return list(addrs)
-
-    # 使用 dnspython 查询 A 记录
-    try:
-        answers = resolver.resolve(domain, 'A')
-        for rdata in answers:
-            addrs.add(str(rdata))
-        logger.debug(f'A records for {domain} (dnspython): {list(addrs)}')
-    except dns_mod.resolver.NoAnswer:
-        logger.debug(f'No A records for {domain}: server returned no answer')
-    except dns_mod.resolver.NXDOMAIN:
-        logger.debug(f'No A records for {domain}: domain does not exist')
-    except Exception as e:
-        logger.debug(f'No A records for {domain}: {type(e).__name__}: {e}')
-    return list(addrs)
+    """解析域名的 A 记录，返回 IPv4 地址列表。"""
+    return _resolve_records(domain, 'A')
 
 
 # Hosts 文件管理：强制域名解析到 IPv6 地址
@@ -450,32 +440,8 @@ def _run_elevated_copy(src, dst):
 
 
 def _resolve_ipv6_addresses(domain):
-    """解析域名的 AAAA 记录，返回 IPv6 地址列表（完整地址，非前缀）。
-    使用 dnspython 直接查询国内 DNS，绕过 WARP DNS 劫持。
-    """
-    addrs = set()
-    resolver, dns_mod = _make_dns_resolver()
-    if resolver is None:
-        try:
-            results = socket.getaddrinfo(domain, None, socket.AF_INET6)
-            for result in results:
-                addrs.add(result[4][0])
-        except Exception as e:
-            logger.debug(f'No AAAA records for {domain} (socket fallback): {e}')
-        return list(addrs)
-
-    try:
-        answers = resolver.resolve(domain, 'AAAA')
-        for rdata in answers:
-            addrs.add(str(rdata))
-        logger.debug(f'AAAA addresses for {domain} (dnspython): {list(addrs)}')
-    except dns_mod.resolver.NoAnswer:
-        logger.debug(f'No AAAA records for {domain}: server returned no answer')
-    except dns_mod.resolver.NXDOMAIN:
-        logger.debug(f'No AAAA records for {domain}: domain does not exist')
-    except Exception as e:
-        logger.debug(f'No AAAA records for {domain}: {type(e).__name__}: {e}')
-    return list(addrs)
+    """解析域名的 AAAA 记录，返回 IPv6 地址列表（完整地址，非前缀）。"""
+    return _resolve_records(domain, 'AAAA')
 
 
 def _add_ipv4_firewall_block(domain, ipv4_addrs):

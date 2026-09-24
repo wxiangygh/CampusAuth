@@ -19,6 +19,8 @@ a = Analysis(
         'core.config', 'core.secrets', 'core.app_state', 'core.workflow', 'core.auth_workflow', 'core.status',
         'core.updater', 'core.version', 'core.reconnect_watchdog',
         'core.newest_first_log', 'core.portal_web',
+        # 仅被函数体内的延迟引用命中，显式列出避免打包遗漏
+        'core.dns_settings', 'core.dns_nrpt',
     ],
     hookspath=[],
     hooksconfig={},

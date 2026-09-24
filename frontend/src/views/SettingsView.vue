@@ -7,7 +7,6 @@ import { ui } from '../ui'
 import { sortBy } from '../utils/sortlists'
 import SortToggle from '../components/SortToggle.vue'
 import TrayMenuOrderModal from '../components/TrayMenuOrderModal.vue'
-import DnsSettings from '../components/DnsSettings.vue'
 
 // ===== 托盘工作流顺序（类托盘菜单弹窗，拖动调整原生托盘菜单顺序）=====
 const trayOrderVisible = ref(false)
@@ -333,7 +332,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="settings-view">
-    <DnsSettings />
     <section class="card settings-card">
       <div class="section-title">基本设置</div>
 

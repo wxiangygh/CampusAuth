@@ -23,6 +23,7 @@ const NAV_ITEMS = [
   { key: 'workflow', label: '工作流', icon: 'workflow', hint: '节点编排' },
   { key: 'warp', label: '分流规则', icon: 'globe', hint: 'WARP 排除' },
   { key: 'traffic', label: '流量监控', icon: 'activity', hint: '活动连接' },
+  { key: 'dns', label: 'DNS设置', icon: 'dns', hint: '解析与定向绑定' },
   { key: 'settings', label: '设置', icon: 'settings', hint: '基本配置' },
 ]
 

@@ -14,7 +14,7 @@ if (!isViewer) {
   window.onWifiScanUpdate = handleWifiScanUpdate
   window.onToast = handleToast
   window.switchTab = (name) => {
-    if (['home', 'workflow', 'warp', 'traffic', 'settings'].includes(name)) store.activeTab = name
+    if (['home', 'workflow', 'warp', 'traffic', 'dns', 'settings'].includes(name)) store.activeTab = name
   }
 }
 

@@ -147,6 +147,12 @@ DEFAULT_CONFIG = {
     "dns_preset": "legacy",
     "dns_servers": ["114.114.114.114", "223.5.5.5"],
     "dns_ipv6_servers": ["2606:4700:4700::1111", "2606:4700:4700::1001"],
+    # 定向解析规则：[{target, servers, enabled}]，target 为域名 / IP / CIDR，
+    # 命中后该目标的解析改用 servers；未命中的目标仍用上面的 dns_servers。
+    "dns_bindings": [],
+    # 已下发到 Windows NRPT 的规则记录：{names, namespaces, targets, updated_at}
+    # 只存本应用写入的规则标识，用于精确清理，不含用户手工添加的策略。
+    "dns_nrpt_state": None,
     # 启动时自动检测 GitHub Releases 更新
     "auto_check_update": True,
     # 按运行数据自动调优各工作流节点的超时与重试设置

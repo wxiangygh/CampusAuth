@@ -12,6 +12,7 @@ import HomeView from './views/HomeView.vue'
 import WorkflowView from './views/WorkflowView.vue'
 import WarpView from './views/WarpView.vue'
 import TrafficView from './views/TrafficView.vue'
+import DnsView from './views/DnsView.vue'
 import SettingsView from './views/SettingsView.vue'
 
 // 最小尺寸：MIN_W/MIN_H 为 CSS 像素（设计值）；resize_move_window/SetWindowPos
@@ -26,13 +27,13 @@ const MIN_H_PX = Math.round(MIN_H * (window.devicePixelRatio || 1))
 watch(
   () => store.activeTab,
   (name) => {
-    if (['home', 'workflow', 'warp', 'traffic', 'settings'].includes(name)) {
+    if (['home', 'workflow', 'warp', 'traffic', 'dns', 'settings'].includes(name)) {
       bridgeApi()?.save_ui_prefs({ active_tab: name })?.catch(() => {})
     }
   }
 )
 
-// 每个 tab 独立的滚动进度：五个视图共用 .app-content 这一个滚动容器，
+// 每个 tab 独立的滚动进度：六个视图共用 .app-content 这一个滚动容器，
 // 切换时先记下旧 tab 的 scrollTop，再恢复新 tab 上次滚到的位置。
 // 视图均为 v-show 常驻挂载，切回时内容高度已就绪，恢复无需等渲染。
 const contentRef = ref(null)
@@ -242,7 +243,7 @@ onMounted(async () => {
       const prefs = await bridgeApi().get_ui_prefs()
       if (prefs.page_size) store.pageSize = prefs.page_size
       store.detailUserCollapsed = !!prefs.network_detail_collapsed
-      if (['home', 'workflow', 'warp', 'traffic', 'settings'].includes(prefs.active_tab)) {
+      if (['home', 'workflow', 'warp', 'traffic', 'dns', 'settings'].includes(prefs.active_tab)) {
         store.activeTab = prefs.active_tab
       }
       if (['light', 'dark', 'system'].includes(prefs.theme)) setThemeMode(prefs.theme)
@@ -276,6 +277,7 @@ onBeforeUnmount(() => {
           <WorkflowView v-show="store.activeTab === 'workflow'" />
           <WarpView v-show="store.activeTab === 'warp'" />
           <TrafficView v-show="store.activeTab === 'traffic'" />
+          <DnsView v-show="store.activeTab === 'dns'" />
           <SettingsView v-show="store.activeTab === 'settings'" />
         </main>
       </div>

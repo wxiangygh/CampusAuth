@@ -10,6 +10,7 @@
 import base64
 import ctypes
 import logging
+import os
 import struct
 import threading
 import zlib
@@ -63,6 +64,7 @@ class _BITMAPINFOHEADER(ctypes.Structure):
 _shell32 = ctypes.windll.shell32
 _user32 = ctypes.windll.user32
 _gdi32 = ctypes.windll.gdi32
+_version = ctypes.windll.version
 
 _shell32.ExtractIconExW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32,
                                     ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p),
@@ -206,6 +208,65 @@ def get_process_icon(exe_path):
     with _lock:
         _cache[key] = url
     return url
+
+
+def _extract_version_string(exe_path, field):
+    """从 exe 的版本资源里读一个字符串字段（ProductName/FileDescription 等）；读不到返回 None。"""
+    size = _version.GetFileVersionInfoSizeW(exe_path, None)
+    if not size:
+        return None
+    buf = ctypes.create_string_buffer(size)
+    if not _version.GetFileVersionInfoW(exe_path, 0, size, buf):
+        return None
+    # 语言/代码页表：取第一组，缺失时退回 en-US + Unicode CP
+    trans = ctypes.c_void_p()
+    trans_len = ctypes.c_uint()
+    lang, cp = 0x0409, 0x04B0
+    if _version.VerQueryValueW(buf, r'\VarFileInfo\Translation',
+                               ctypes.byref(trans), ctypes.byref(trans_len)) and trans_len.value >= 4:
+        pair = ctypes.cast(trans, ctypes.POINTER(ctypes.c_uint16 * 2)).contents
+        lang, cp = pair[0], pair[1]
+    ptr = ctypes.c_void_p()
+    n = ctypes.c_uint()
+    sub = f'\\StringFileInfo\\{lang:04x}{cp:04x}\\{field}'
+    if not _version.VerQueryValueW(buf, sub, ctypes.byref(ptr), ctypes.byref(n)) or not ptr.value or n.value < 2:
+        return None
+    return ctypes.wstring_at(ptr, n.value - 1).strip() or None
+
+
+_APP_NAME_FIELDS = ('ProductName', 'FileDescription', 'InternalName')
+
+
+def get_process_app_name(exe_path):
+    """exe 的展示名：版本资源 ProductName → FileDescription → InternalName → 文件名主干；都没有返回 None。"""
+    if not exe_path:
+        return None
+    key = 'name:' + exe_path.lower()
+    with _lock:
+        if key in _cache:
+            return _cache[key]
+    name = None
+    try:
+        for field in _APP_NAME_FIELDS:
+            name = _extract_version_string(exe_path, field)
+            if name:
+                break
+    except Exception as e:
+        logger.debug('read version info failed for %s: %s', exe_path, e)
+        name = None
+    if not name:
+        try:
+            name = os.path.splitext(os.path.basename(exe_path))[0] or None
+        except Exception:
+            name = None
+    with _lock:
+        _cache[key] = name
+    return name
+
+
+def get_process_app_info(exe_path):
+    """一次拿齐 {name, icon}，供排除规则的"应用名/图标"预填与自动识别。"""
+    return {'name': get_process_app_name(exe_path), 'icon': get_process_icon(exe_path)}
 
 
 def clear_icon_cache():

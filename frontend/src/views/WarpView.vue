@@ -8,6 +8,8 @@ import { fuzzyMatch, paginate } from '../utils'
 import { sortBy, compareText, compareDomain } from '../utils/sortlists'
 import AppIcon from '../components/AppIcon.vue'
 import SortToggle from '../components/SortToggle.vue'
+import AppAvatar from '../components/AppAvatar.vue'
+import ExclusionFormModal from '../components/ExclusionFormModal.vue'
 import ConfigViewer from './ConfigViewer.vue'
 
 // ===== 状态 =====
@@ -128,12 +130,128 @@ const filteredRules = computed(() => {
 // 域名排除：按 d.domain 排序，*.x.com 与 x.com 同组、裸域名在前
 const sortedRules = computed(() => sortBy(filteredRules.value, (x) => x.domain, rulesSortDir.value, compareDomain))
 
-const pagedRules = computed(() => paginate(sortedRules.value, rules.page, rules.pageSize))
-
 const sortedIpRanges = computed(() => sortBy(ipRanges.value, (x) => x.cidr || '', ipSortDir.value, compareText))
 const sortedDnsList = computed(() => sortBy(dnsList.value, (x) => x.domain || '', dnsSortDir.value, compareDomain))
-const pagedIpRanges = computed(() => paginate(sortedIpRanges.value, ipPage.value, rules.pageSize))
-const pagedDnsList = computed(() => paginate(sortedDnsList.value, dnsPage.value, rules.pageSize))
+
+// ===== 按应用名分组 =====
+// 同一应用名下的多条规则（域名/IP/DNS）归到一组；没填应用名的条目以目标值自成一组，
+// 这样旧配置（无元数据）仍是一条一组、展示不丢失。
+function groupByApp(list, keyField) {
+  const groups = []
+  const index = new Map()
+  for (const item of list) {
+    const app = (item.app_name || '').trim()
+    const title = app || item[keyField] || '(未命名)'
+    let g = index.get(title)
+    if (!g) {
+      g = { title, named: !!app, icon: null, items: [] }
+      index.set(title, g)
+      groups.push(g)
+    }
+    if (!g.icon) g.icon = item.icon || item.icon_url || null
+    g.items.push(item)
+  }
+  groups.sort((a, b) => (a.named === b.named ? compareText(a.title, b.title) : a.named ? -1 : 1))
+  return groups
+}
+
+const domainGroups = computed(() => groupByApp(sortedRules.value, 'domain'))
+const ipGroups = computed(() => groupByApp(sortedIpRanges.value, 'cidr'))
+const dnsGroups = computed(() => groupByApp(sortedDnsList.value, 'domain'))
+const pagedDomainGroups = computed(() => paginate(domainGroups.value, rules.page, rules.pageSize))
+const pagedIpGroups = computed(() => paginate(ipGroups.value, ipPage.value, rules.pageSize))
+const pagedDnsGroups = computed(() => paginate(dnsGroups.value, dnsPage.value, rules.pageSize))
+
+// ===== 添加/编辑元数据弹窗 =====
+const formModal = reactive({
+  show: false,
+  kind: 'domain',
+  mode: 'add',
+  target: '',
+  targets: [],
+  route: 'ipv6',
+  meta: {},
+})
+
+function openAddModal(kind, opts = {}) {
+  formModal.kind = kind
+  formModal.mode = 'add'
+  formModal.target = opts.target || ''
+  formModal.targets = opts.targets || []
+  formModal.route = opts.route || (kind === 'ip' ? 'ipv4' : 'ipv6')
+  formModal.meta = {
+    app_name: opts.app_name || '',
+    icon: opts.icon || '',
+    icon_exe: '',
+    icon_url: opts.icon || null,
+    note: opts.note || '',
+  }
+  formModal.show = true
+}
+
+function openMetaModal(kind, entry) {
+  formModal.kind = kind
+  formModal.mode = 'meta'
+  formModal.target = entry.domain || entry.cidr || ''
+  formModal.targets = []
+  formModal.meta = {
+    app_name: entry.app_name || '',
+    icon: entry.icon || '',
+    icon_exe: entry.icon_exe || '',
+    icon_url: entry.icon_url || null,
+    note: entry.note || '',
+  }
+  formModal.show = true
+}
+
+// 从进程反查应用名/图标后打开添加弹窗（流量页与推荐列表共用）
+async function openAddFromProcess(kind, target, process, route) {
+  let meta = {}
+  try {
+    const info = await api().resolve_app_info(process || '')
+    meta = { app_name: info.name || '', icon: info.icon || '' }
+  } catch (e) {
+    meta = {}
+  }
+  openAddModal(kind, { target, route, ...meta })
+}
+
+async function onFormSubmit(payload) {
+  ui.showLoading('保存中...')
+  try {
+    let r
+    if (payload.mode === 'meta') {
+      r = await api().update_exclusion_meta(
+        payload.kind, formModal.target, payload.app_name, payload.icon, payload.icon_exe, payload.note)
+    } else if (payload.kind === 'domain') {
+      const list = payload.targets.length ? payload.targets : [payload.target]
+      let okCount = 0
+      let failCount = 0
+      let lastMsg = ''
+      for (const t of list) {
+        const res = await api().add_domain(t, payload.route, payload.app_name, payload.icon, payload.icon_exe, payload.note)
+        if (res.success) okCount++
+        else failCount++
+        lastMsg = res.message
+      }
+      if (okCount) checkedDomains.clear()
+      r = { success: failCount === 0, message: list.length === 1 ? lastMsg : `添加完成: ${okCount} 成功, ${failCount} 失败` }
+    } else if (payload.kind === 'ip') {
+      r = await api().add_ip_range(payload.target, payload.route, payload.app_name, payload.icon, payload.icon_exe, payload.note)
+    } else {
+      r = await api().add_dns_fallback(payload.target, payload.app_name, payload.icon, payload.icon_exe, payload.note)
+    }
+    ui.toast(r.message, r.success ? 'success' : 'error')
+    if (r.success) {
+      await loadRules()
+      await loadIpRanges()
+      await loadDnsFallbackRules()
+    }
+  } catch (e) {
+    ui.toast('保存失败: ' + e, 'error')
+  }
+  ui.hideLoading()
+}
 
 // 删除末页最后一项、同步或修改每页条数后，页码始终保持有效。
 watch(() => [ipRanges.value.length, dnsList.value.length, filteredRules.value.length, rules.pageSize], () => {
@@ -260,23 +378,8 @@ async function addSelectedDomains() {
     ui.toast('请至少选择一个域名', 'error')
     return
   }
-  const route = domainRoute.value
-  ui.showLoading(`正在添加 ${selected.length} 个域名...`)
-  let okCount = 0
-  let failCount = 0
-  for (const domain of selected) {
-    try {
-      const r = await api().add_domain(domain, route)
-      if (r.success) okCount++
-      else failCount++
-    } catch (e) {
-      failCount++
-    }
-  }
-  ui.hideLoading()
-  ui.toast(`添加完成: ${okCount} 成功, ${failCount} 失败`, failCount ? 'error' : 'success')
-  checkedDomains.clear()
-  await loadRules()
+  // 学习模式只知道域名、不知道归属应用，统一弹窗补应用名/图标/备注后批量写入
+  openAddModal('domain', { targets: selected.map((d) => d.domain || d), route: 'ipv6' })
 }
 
 // ===== 域名排除规则 =====
@@ -291,25 +394,7 @@ async function loadRules() {
 }
 
 async function addDomainManually() {
-  const domain = domainInput.value.trim()
-  if (!domain) {
-    ui.toast('请输入域名', 'error')
-    return
-  }
-  ui.showLoading('正在添加域名...')
-  try {
-    const r = await api().add_domain(domain, domainRoute.value)
-    if (r.success) {
-      domainInput.value = ''
-      ui.toast(r.message, 'success')
-      await loadRules()
-    } else {
-      ui.toast(r.message, 'error')
-    }
-  } catch (e) {
-    ui.toast('添加失败: ' + e, 'error')
-  }
-  ui.hideLoading()
+  openAddModal('domain', { target: domainInput.value.trim(), route: domainRoute.value })
 }
 
 async function setDomainRoute(domain, route) {
@@ -419,21 +504,7 @@ async function addIpRangeManually() {
     ui.toast('请输入 IP 或 CIDR', 'error')
     return
   }
-  const cidr = buildCidr(rawValue, ipPrefix.value)
-  ui.showLoading('正在添加 IP 范围...')
-  try {
-    const r = await api().add_ip_range(cidr, ipRoute.value)
-    if (r.success) {
-      ipInput.value = ''
-      ui.toast(r.message, 'success')
-      await loadIpRanges()
-    } else {
-      ui.toast(r.message, 'error')
-    }
-  } catch (e) {
-    ui.toast('添加失败: ' + e, 'error')
-  }
-  ui.hideLoading()
+  openAddModal('ip', { target: buildCidr(rawValue, ipPrefix.value), route: ipRoute.value })
 }
 
 async function removeIpRange(cidr) {
@@ -511,16 +582,9 @@ async function loadTrafficForExclude() {
   recommendLoading.value = false
 }
 
-async function addRecommendedCidr(cidr, route) {
-  ui.showLoading('正在添加排除规则...')
-  try {
-    const r = await api().add_ip_range(cidr, route)
-    ui.toast(r.message, r.success ? 'success' : 'error')
-    if (r.success) await loadIpRanges()
-  } catch (e) {
-    ui.toast('添加失败: ' + e, 'error')
-  }
-  ui.hideLoading()
+async function addRecommendedCidr(cidr, route, process) {
+  // 推荐列表来自实时连接，能反查进程 → 预填应用名与图标
+  await openAddFromProcess('ip', cidr, process, route)
 }
 
 // ===== IPv4 启用/禁用 =====
@@ -597,18 +661,7 @@ async function addDnsFallbackManually() {
     ui.toast('域名格式无效', 'error')
     return
   }
-  ui.showLoading('添加 DNS fallback 域名中...')
-  try {
-    const r = await api().add_dns_fallback(domain)
-    ui.toast(r.message, r.success ? 'success' : 'error')
-    if (r.success) {
-      dnsInput.value = ''
-      await loadDnsFallbackRules()
-    }
-  } catch (e) {
-    ui.toast('添加失败: ' + e, 'error')
-  }
-  ui.hideLoading()
+  openAddModal('dns', { target: domain })
 }
 
 async function removeDnsFallback(domain) {
@@ -810,32 +863,41 @@ onBeforeUnmount(() => {
         <div class="rule-list">
           <div v-if="!rules.list.length" class="empty-hint">暂无排除规则，请通过学习模式或手动添加</div>
           <div v-else-if="!filteredRules.length" class="empty-hint">无匹配的规则</div>
-          <div v-for="d in pagedRules" :key="d.domain" class="rule-item">
-            <div class="rule-header">
-              <span class="rule-domain mono">
-                {{ d.domain }}
-                <n-tag size="tiny" :bordered="false" type="info" v-if="(d.route || 'ipv6') === 'ipv4'">IPv4</n-tag>
-                <n-tag size="tiny" :bordered="false" type="success" v-else>IPv6</n-tag>
-              </span>
-              <div class="rule-actions">
-                <n-tag size="small" :type="d.enabled ? 'success' : 'default'">{{ d.enabled ? '已启用' : '已禁用' }}</n-tag>
-                <n-button size="tiny" quaternary @click="setDomainRoute(d.domain, (d.route || 'ipv6') === 'ipv4' ? 'ipv6' : 'ipv4')">
-                  {{ (d.route || 'ipv6') === 'ipv4' ? '切IPv6' : '切IPv4' }}
-                </n-button>
-                <n-button size="tiny" quaternary @click="toggleDomain(d.domain, !d.enabled)">
-                  {{ d.enabled ? '禁用' : '启用' }}
-                </n-button>
-                <n-button size="tiny" quaternary type="error" @click="removeDomain(d.domain)">删除</n-button>
-              </div>
+          <div v-for="g in pagedDomainGroups" :key="g.title" class="app-group">
+            <div class="app-group-head">
+              <AppAvatar :name="g.title" :icon="g.icon" :size="20" />
+              <span class="app-group-title">{{ g.title }}</span>
+              <span class="app-group-count">{{ g.items.length }}</span>
             </div>
-            <div class="rule-meta">
-              添加时间: {{ d.added_at || '未知' }} | 路由: {{ (d.route || 'ipv6') === 'ipv4' ? 'IPv4 校园网直连' : 'IPv6 校园网直连' }}
+            <div v-for="d in g.items" :key="d.domain" class="rule-item">
+              <div class="rule-header">
+                <span class="rule-domain mono">
+                  {{ d.domain }}
+                  <n-tag size="tiny" :bordered="false" type="info" v-if="(d.route || 'ipv6') === 'ipv4'">IPv4</n-tag>
+                  <n-tag size="tiny" :bordered="false" type="success" v-else>IPv6</n-tag>
+                </span>
+                <div class="rule-actions">
+                  <n-tag size="small" :type="d.enabled ? 'success' : 'default'">{{ d.enabled ? '已启用' : '已禁用' }}</n-tag>
+                  <n-button size="tiny" quaternary @click="setDomainRoute(d.domain, (d.route || 'ipv6') === 'ipv4' ? 'ipv6' : 'ipv4')">
+                    {{ (d.route || 'ipv6') === 'ipv4' ? '切IPv6' : '切IPv4' }}
+                  </n-button>
+                  <n-button size="tiny" quaternary @click="toggleDomain(d.domain, !d.enabled)">
+                    {{ d.enabled ? '禁用' : '启用' }}
+                  </n-button>
+                  <n-button size="tiny" quaternary @click="openMetaModal('domain', d)">信息</n-button>
+                  <n-button size="tiny" quaternary type="error" @click="removeDomain(d.domain)">删除</n-button>
+                </div>
+              </div>
+              <div class="rule-meta">
+                添加时间: {{ d.added_at || '未知' }} | 路由: {{ (d.route || 'ipv6') === 'ipv4' ? 'IPv4 校园网直连' : 'IPv6 校园网直连' }}
+                <span v-if="d.note" class="rule-note">｜备注: {{ d.note }}</span>
+              </div>
             </div>
           </div>
         </div>
 
         <n-pagination v-if="filteredRules.length" class="pager" size="small" :page="rules.page" :page-size="rules.pageSize"
-          :item-count="filteredRules.length" :page-sizes="[10, 20, 50, 100]" show-size-picker
+          :item-count="domainGroups.length" :page-sizes="[10, 20, 50, 100]" show-size-picker
           @update:page="(p) => (rules.page = p)" @update:page-size="onRulesPageSize" />
       </div>
 
@@ -885,11 +947,11 @@ onBeforeUnmount(() => {
               </div>
               <div class="recommend-ops">
                 <n-button size="tiny"
-                  @click="addRecommendedCidr(buildCidr(c.ip, String(c.ip.includes(':') ? 32 : 24)), c.ip.includes(':') ? 'ipv6' : 'ipv4')"
+                  @click="addRecommendedCidr(buildCidr(c.ip, String(c.ip.includes(':') ? 32 : 24)), c.ip.includes(':') ? 'ipv6' : 'ipv4', c.process)"
                   :title="`添加 /${c.ip.includes(':') ? 32 : 24} 网段`">
                   /{{ c.ip.includes(':') ? 32 : 24 }}
                 </n-button>
-                <n-button size="tiny" @click="addRecommendedCidr(c.ip + (c.ip.includes(':') ? '/128' : '/32'), c.ip.includes(':') ? 'ipv6' : 'ipv4')"
+                <n-button size="tiny" @click="addRecommendedCidr(c.ip + (c.ip.includes(':') ? '/128' : '/32'), c.ip.includes(':') ? 'ipv6' : 'ipv4', c.process)"
                   title="添加单 IP">单IP</n-button>
               </div>
             </div>
@@ -901,31 +963,40 @@ onBeforeUnmount(() => {
         </div>
         <div class="rule-list">
           <div v-if="!ipRanges.length" class="empty-hint">暂无 IP 排除规则</div>
-          <div v-for="r in pagedIpRanges" :key="r.cidr" class="rule-item">
-            <div class="rule-header">
-              <span class="rule-domain mono">
-                {{ r.cidr }}
-                <n-tag size="tiny" :bordered="false" type="info" v-if="(r.route || 'ipv4') === 'ipv4'">IPv4</n-tag>
-                <n-tag size="tiny" :bordered="false" type="success" v-else>IPv6</n-tag>
-              </span>
-              <div class="rule-actions">
-                <n-tag size="small" :type="r.enabled ? 'success' : 'default'">{{ r.enabled ? '已启用' : '已禁用' }}</n-tag>
-                <n-button size="tiny" quaternary @click="setIpRangeRoute(r.cidr, (r.route || 'ipv4') === 'ipv4' ? 'ipv6' : 'ipv4')">
-                  {{ (r.route || 'ipv4') === 'ipv4' ? '切IPv6' : '切IPv4' }}
-                </n-button>
-                <n-button size="tiny" quaternary @click="toggleIpRange(r.cidr, !r.enabled)">
-                  {{ r.enabled ? '禁用' : '启用' }}
-                </n-button>
-                <n-button size="tiny" quaternary type="error" @click="removeIpRange(r.cidr)">删除</n-button>
-              </div>
+          <div v-for="g in pagedIpGroups" :key="g.title" class="app-group">
+            <div class="app-group-head">
+              <AppAvatar :name="g.title" :icon="g.icon" :size="20" />
+              <span class="app-group-title">{{ g.title }}</span>
+              <span class="app-group-count">{{ g.items.length }}</span>
             </div>
-            <div class="rule-meta">
-              路由: {{ (r.route || 'ipv4') === 'ipv4' ? 'IPv4 校园网直连' : 'IPv6 校园网直连' }}
+            <div v-for="r in g.items" :key="r.cidr" class="rule-item">
+              <div class="rule-header">
+                <span class="rule-domain mono">
+                  {{ r.cidr }}
+                  <n-tag size="tiny" :bordered="false" type="info" v-if="(r.route || 'ipv4') === 'ipv4'">IPv4</n-tag>
+                  <n-tag size="tiny" :bordered="false" type="success" v-else>IPv6</n-tag>
+                </span>
+                <div class="rule-actions">
+                  <n-tag size="small" :type="r.enabled ? 'success' : 'default'">{{ r.enabled ? '已启用' : '已禁用' }}</n-tag>
+                  <n-button size="tiny" quaternary @click="setIpRangeRoute(r.cidr, (r.route || 'ipv4') === 'ipv4' ? 'ipv6' : 'ipv4')">
+                    {{ (r.route || 'ipv4') === 'ipv4' ? '切IPv6' : '切IPv4' }}
+                  </n-button>
+                  <n-button size="tiny" quaternary @click="toggleIpRange(r.cidr, !r.enabled)">
+                    {{ r.enabled ? '禁用' : '启用' }}
+                  </n-button>
+                  <n-button size="tiny" quaternary @click="openMetaModal('ip', r)">信息</n-button>
+                  <n-button size="tiny" quaternary type="error" @click="removeIpRange(r.cidr)">删除</n-button>
+                </div>
+              </div>
+              <div class="rule-meta">
+                路由: {{ (r.route || 'ipv4') === 'ipv4' ? 'IPv4 校园网直连' : 'IPv6 校园网直连' }}
+                <span v-if="r.note" class="rule-note">｜备注: {{ r.note }}</span>
+              </div>
             </div>
           </div>
         </div>
         <n-pagination v-if="ipRanges.length" class="pager" size="small" :page="ipPage" :page-size="rules.pageSize"
-          :item-count="ipRanges.length" :page-sizes="[10, 20, 50, 100]" show-size-picker
+          :item-count="ipGroups.length" :page-sizes="[10, 20, 50, 100]" show-size-picker
           @update:page="(p) => (ipPage = p)" @update:page-size="onRulesPageSize" />
       </div>
 
@@ -957,25 +1028,39 @@ onBeforeUnmount(() => {
         </div>
         <div class="rule-list">
           <div v-if="!dnsList.length" class="empty-hint">暂无 DNS fallback 域名</div>
-          <div v-for="d in pagedDnsList" :key="d.domain" class="rule-item">
-            <div class="rule-header">
-              <span class="rule-domain mono">{{ d.domain }}</span>
-              <div class="rule-actions">
-                <n-tag size="small" :type="d.enabled !== false ? 'success' : 'default'">{{ d.enabled !== false ? '已启用' : '已禁用' }}</n-tag>
-                <n-button size="tiny" quaternary @click="toggleDnsFallback(d.domain, d.enabled === false)">
-                  {{ d.enabled !== false ? '禁用' : '启用' }}
-                </n-button>
-                <n-button size="tiny" quaternary type="error" @click="removeDnsFallback(d.domain)">删除</n-button>
+          <div v-for="g in pagedDnsGroups" :key="g.title" class="app-group">
+            <div class="app-group-head">
+              <AppAvatar :name="g.title" :icon="g.icon" :size="20" />
+              <span class="app-group-title">{{ g.title }}</span>
+              <span class="app-group-count">{{ g.items.length }}</span>
+            </div>
+            <div v-for="d in g.items" :key="d.domain" class="rule-item">
+              <div class="rule-header">
+                <span class="rule-domain mono">{{ d.domain }}</span>
+                <div class="rule-actions">
+                  <n-tag size="small" :type="d.enabled !== false ? 'success' : 'default'">{{ d.enabled !== false ? '已启用' : '已禁用' }}</n-tag>
+                  <n-button size="tiny" quaternary @click="toggleDnsFallback(d.domain, d.enabled === false)">
+                    {{ d.enabled !== false ? '禁用' : '启用' }}
+                  </n-button>
+                  <n-button size="tiny" quaternary @click="openMetaModal('dns', d)">信息</n-button>
+                  <n-button size="tiny" quaternary type="error" @click="removeDnsFallback(d.domain)">删除</n-button>
+                </div>
+              </div>
+              <div class="rule-meta">
+                添加时间: {{ d.added_at || '未知' }}
+                <span v-if="d.note" class="rule-note">｜备注: {{ d.note }}</span>
               </div>
             </div>
-            <div class="rule-meta">添加时间: {{ d.added_at || '未知' }}</div>
           </div>
         </div>
         <n-pagination v-if="dnsList.length" class="pager" size="small" :page="dnsPage" :page-size="rules.pageSize"
-          :item-count="dnsList.length" :page-sizes="[10, 20, 50, 100]" show-size-picker
+          :item-count="dnsGroups.length" :page-sizes="[10, 20, 50, 100]" show-size-picker
           @update:page="(p) => (dnsPage = p)" @update:page-size="onRulesPageSize" />
       </div>
     </section>
+    <ExclusionFormModal v-model:show="formModal.show" :kind="formModal.kind" :mode="formModal.mode"
+      :target="formModal.target" :targets="formModal.targets" :route="formModal.route" :meta="formModal.meta"
+      @submit="onFormSubmit" />
     <n-modal v-model:show="viewerVisible">
       <div style="width: min(1100px, 94vw); height: 82vh; overflow: hidden; border-radius: 12px">
         <ConfigViewer v-if="viewerVisible" embedded @close="viewerVisible = false" />
@@ -1158,6 +1243,41 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 8px;
   margin-top: 10px;
+}
+
+/* 按应用名分组：组头 = 图标 + 应用名 + 条数 */
+.app-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app-group + .app-group {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.app-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.app-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.app-group-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.rule-note {
+  color: var(--text-tertiary);
 }
 
 .rule-item {

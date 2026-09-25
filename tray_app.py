@@ -1807,10 +1807,12 @@ class ApiBridge:
         return get_exclusion_manager()
 
     def get_exclusion_config(self):
-        return self._get_mgr().get_config()
+        from warp_exclusion import enrich_config_icons
+        return enrich_config_icons(self._get_mgr().get_config())
 
-    def add_domain(self, domain, route='ipv6'):
-        ok, msg, info = self._get_mgr().add_domain(domain, route=route)
+    def add_domain(self, domain, route='ipv6', app_name=None, icon=None, icon_exe=None, note=None):
+        ok, msg, info = self._get_mgr().add_domain(
+            domain, route=route, app_name=app_name, icon=icon, icon_exe=icon_exe, note=note)
         return {'success': ok, 'message': msg, 'info': info}
 
     def remove_domain(self, domain):
@@ -1825,8 +1827,9 @@ class ApiBridge:
         ok, msg = self._get_mgr().set_domain_route(domain, route)
         return {'success': ok, 'message': msg}
 
-    def add_ip_range(self, cidr, route='ipv4'):
-        ok, msg, info = self._get_mgr().add_ip_range(cidr, route=route)
+    def add_ip_range(self, cidr, route='ipv4', app_name=None, icon=None, icon_exe=None, note=None):
+        ok, msg, info = self._get_mgr().add_ip_range(
+            cidr, route=route, app_name=app_name, icon=icon, icon_exe=icon_exe, note=note)
         return {'success': ok, 'message': msg, 'info': info}
 
     def remove_ip_range(self, cidr):
@@ -1961,9 +1964,53 @@ class ApiBridge:
         ok, msg, details = warp_cleanup_cli_ip_ranges()
         return {'success': ok, 'message': msg, 'details': details}
 
-    def add_dns_fallback(self, domain):
-        ok, msg, info = self._get_mgr().add_dns_fallback(domain)
+    def add_dns_fallback(self, domain, app_name=None, icon=None, icon_exe=None, note=None):
+        ok, msg, info = self._get_mgr().add_dns_fallback(
+            domain, app_name=app_name, icon=icon, icon_exe=icon_exe, note=note)
         return {'success': ok, 'message': msg, 'info': info}
+
+    def update_exclusion_meta(self, kind, key, app_name=None, icon=None, icon_exe=None, note=None):
+        """修改排除条目的应用名/图标/备注（kind: domain/ip/dns）；None 不改动、空串清空。"""
+        ok, msg, info = self._get_mgr().update_entry_meta(
+            kind, key, app_name=app_name, icon=icon, icon_exe=icon_exe, note=note)
+        return {'success': ok, 'message': msg, 'info': info}
+
+    def resolve_app_info(self, process):
+        """按进程名解析展示名与图标，供流量页添加排除时预填。
+        进程名 → 活动连接的 exe 路径 → 版本信息应用名 + 图标；解析不到返回空值。
+        """
+        name = (process or '').strip()
+        if not name:
+            return {'name': '', 'icon': None, 'exe': ''}
+        exe = ''
+        icon = None
+        try:
+            from traffic_monitor import get_traffic_status_fast
+            data = get_traffic_status_fast() or {}
+            for conn in data.get('connections') or []:
+                if (conn.get('process') or '').lower() == name.lower():
+                    exe = conn.get('process_path') or ''
+                    icon = (data.get('icons') or {}).get(conn.get('process'))
+                    break
+        except Exception as e:
+            logger.warning(f'resolve_app_info: traffic lookup failed: {e}')
+        if not exe:
+            try:
+                import psutil
+                for proc in psutil.process_iter(['name', 'exe']):
+                    try:
+                        if (proc.info['name'] or '').lower() == name.lower() and proc.info['exe']:
+                            exe = proc.info['exe']
+                            break
+                    except Exception:
+                        continue
+            except Exception as e:
+                logger.warning(f'resolve_app_info: psutil lookup failed: {e}')
+        if not exe:
+            return {'name': '', 'icon': icon, 'exe': ''}
+        from core.proc_icon import get_process_app_name, get_process_icon
+        app_name = get_process_app_name(exe) or ''
+        return {'name': app_name, 'icon': icon or get_process_icon(exe), 'exe': exe}
 
     def remove_dns_fallback(self, domain):
         ok, msg = self._get_mgr().remove_dns_fallback(domain)

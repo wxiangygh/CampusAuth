@@ -7,6 +7,7 @@ import { ui } from '../ui'
 import { sortBy } from '../utils/sortlists'
 import AppIcon from '../components/AppIcon.vue'
 import SortToggle from '../components/SortToggle.vue'
+import ExclusionFormModal from '../components/ExclusionFormModal.vue'
 
 // 6 类路由：标签即语义，不再依赖颜色区分（单色设计）
 const ROUTE_ORDER = ['ipv4', 'ipv6', 'ipv4_warp', 'ipv4_warp_ipv6', 'ipv6_warp', 'ipv6_warp_ipv4']
@@ -368,8 +369,7 @@ function toggleConn(id, checked) {
   else selectedConns.delete(id)
 }
 
-function toggleGroup(proc, checked) {
-  const items = filteredConns.value.filter((c) => (c.process || 'unknown') === proc)
+function toggleGroup(proc, checked) {  const items = filteredConns.value.filter((c) => (c.process || 'unknown') === proc)
   for (const c of items) {
     if (checked) selectedConns.add(connId(c))
     else selectedConns.delete(connId(c))
@@ -520,6 +520,88 @@ function onVisibilityChange() {
   }
 }
 
+// ===== 一键加入排除 =====
+// 从连接反推排除目标：有域名就归并到注册域（域名排除），没有就用单 IP（IP 排除）；
+// 应用名与图标由后端按进程 exe 的版本信息/图标自动识别，识别不到再由用户手填。
+const excludeModal = reactive({
+  show: false,
+  kind: 'auto',
+  targets: [],
+  route: 'ipv6',
+  meta: {},
+})
+
+function baseDomain(host) {
+  const h = (host || '').trim().toLowerCase().replace(/\.$/, '')
+  if (!h || h.includes(':') || /^\d+\.\d+\.\d+\.\d+$/.test(h)) return ''
+  const parts = h.split('.')
+  return parts.length <= 2 ? h : parts.slice(-2).join('.')
+}
+
+// 连接 → 排除目标：有域名归并到注册域（域名排除），没有就用单 IP（IP 排除）
+function connTarget(c) {
+  const host = baseDomain(c.hostname)
+  if (host) return host
+  const v6 = (c.remote_ip || '').includes(':')
+  return `${c.remote_ip}/${v6 ? 128 : 32}`
+}
+
+async function openExcludeModal(targets, route, process) {
+  const fallbackIcon = procIcon(process) || ''
+  const meta = { app_name: '', icon: fallbackIcon, icon_exe: '', icon_url: fallbackIcon || null, note: '' }
+  try {
+    const info = await api().resolve_app_info(process || '')
+    meta.app_name = info.name || ''
+    if (info.icon) {
+      meta.icon = info.icon
+      meta.icon_url = info.icon
+    }
+  } catch (e) {
+    // 识别失败不阻塞：用户可在弹窗里手填应用名
+  }
+  excludeModal.kind = 'auto'
+  excludeModal.targets = targets
+  excludeModal.route = route
+  excludeModal.meta = meta
+  excludeModal.show = true
+}
+
+function excludeConn(c, process) {
+  const target = connTarget(c)
+  const route = target.includes('/') ? (c.remote_ip || '').includes(':') ? 'ipv6' : 'ipv4' : 'ipv6'
+  return openExcludeModal([target], route, process)
+}
+
+// 整组排除：组内往往有多个域名/多个 IP，目标不在弹窗里展示，共用应用名与备注
+function excludeGroup(group) {
+  const targets = Array.from(new Set(group.items.map(connTarget)))
+  const hasV6 = group.items.some((c) => (c.remote_ip || '').includes(':'))
+  return openExcludeModal(targets, hasV6 ? 'ipv6' : 'ipv4', group.name)
+}
+
+async function onExcludeSubmit(payload) {
+  ui.showLoading('正在添加排除规则...')
+  try {
+    let okCount = 0
+    let failCount = 0
+    for (const t of payload.targets) {
+      // 带 / 的是 CIDR → IP 排除；否则域名排除
+      const r = t.includes('/')
+        ? await api().add_ip_range(t, payload.route, payload.app_name, payload.icon, payload.icon_exe, payload.note)
+        : await api().add_domain(t, payload.route, payload.app_name, payload.icon, payload.icon_exe, payload.note)
+      if (r.success) okCount++
+      else failCount++
+    }
+    ui.toast(
+      payload.targets.length > 1 ? `添加完成: ${okCount} 成功, ${failCount} 失败` : failCount ? '添加失败' : '已添加',
+      failCount ? 'error' : 'success'
+    )
+  } catch (e) {
+    ui.toast('添加失败: ' + e, 'error')
+  }
+  ui.hideLoading()
+}
+
 onMounted(() => {
   if (store.activeTab === 'traffic' && traffic.autoRefresh) startAutoRefresh()
   updateBarCenter()
@@ -667,6 +749,8 @@ onBeforeUnmount(() => {
             <span v-else class="proc-icon-fallback">{{ (group.name[0] || '?').toUpperCase() }}</span>
           </span>
           <span class="proc-name">{{ group.name }}</span>
+          <button class="proc-exclude" title="把该进程的全部连接加入 WARP 排除（共用应用名与备注，自动预填图标）"
+            @click.stop="excludeGroup(group)">排除</button>
           <span class="proc-count">{{ group.items.length }}<template
             v-if="procFilter.has(group.name)">/{{ procTypeTotal(group.name) }}</template></span>
           <template v-if="procFilter.has(group.name)">
@@ -700,10 +784,17 @@ onBeforeUnmount(() => {
               @click.stop="toggleProcRouteFilter(group.name, c.route_type || 'ipv4')">
               {{ ROUTE_LABEL[c.route_type] || ROUTE_LABEL.ipv4 }}
             </span>
+            <button class="conn-exclude" title="把这条连接加入 WARP 排除" @click.stop="excludeConn(c, group.name)">
+              排除
+            </button>
           </div>
         </div>
       </div>
     </section>
+
+    <ExclusionFormModal v-model:show="excludeModal.show" kind="domain" mode="add"
+      :targets="excludeModal.targets" :route="excludeModal.route" :meta="excludeModal.meta"
+      @submit="onExcludeSubmit" />
 
     <!-- 选中操作条（悬浮固定在窗口底部，相对列表列居中） -->
     <!-- defer：.app-shell 由同一组件树渲染，初次挂载时尚未入文档，延迟解析目标避免 Teleport 失效 -->
@@ -1127,6 +1218,45 @@ onBeforeUnmount(() => {
 }
 
 /* 进程图标：由后端从 exe 提取，尺寸固定保证无图标时行高不跳动 */
+.proc-exclude {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.proc-exclude:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong, var(--border));
+}
+
+.conn-exclude {
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.conn-row:hover .conn-exclude {
+  opacity: 1;
+}
+
+.conn-exclude:hover {
+  color: var(--text-primary);
+  border-color: var(--border);
+  background: var(--bg-elevated);
+}
+
 .proc-icon-box {
   width: 16px;
   height: 16px;

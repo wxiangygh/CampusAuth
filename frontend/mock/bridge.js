@@ -467,8 +467,11 @@ function findBy(list, key, value) {
 
 Object.assign(api, {
   get_exclusion_config: () => delay(clone(exclusion)),
-  add_domain: (domain, route) => {
-    exclusion.domains.push({ domain, route: route || 'ipv6', enabled: true, added_at: '2026-09-03 21:00' })
+  add_domain: (domain, route, appName, icon, iconExe, note) => {
+    exclusion.domains.push({
+      domain, route: route || 'ipv6', enabled: true, added_at: '2026-09-03 21:00',
+      app_name: appName || undefined, icon: icon || undefined, note: note || undefined,
+    })
     if (route !== 'ipv4' && !warpTunnelHosts.includes(domain)) warpTunnelHosts.push(domain)
     return delay({ success: true, message: `已添加 ${domain}` })
   },
@@ -487,8 +490,11 @@ Object.assign(api, {
     if (d) d.route = route
     return delay({ success: true, message: '路由已切换' })
   },
-  add_ip_range: (cidr, route) => {
-    exclusion.ip_ranges.push({ cidr, route: route || 'ipv4', enabled: true })
+  add_ip_range: (cidr, route, appName, icon, iconExe, note) => {
+    exclusion.ip_ranges.push({
+      cidr, route: route || 'ipv4', enabled: true,
+      app_name: appName || undefined, icon: icon || undefined, note: note || undefined,
+    })
     return delay({ success: true, message: `已添加 ${cidr}` })
   },
   remove_ip_range: (cidr) => {
@@ -563,10 +569,35 @@ Object.assign(api, {
     warpCliRanges.legacy = []
     return delay({ success: true, message: '旧版规则残留已清理', details: [] })
   },
-  add_dns_fallback: (domain) => {
-    exclusion.dns_fallback.push({ domain, enabled: true, added_at: '2026-09-03 21:00' })
+  add_dns_fallback: (domain, appName, icon, iconExe, note) => {
+    exclusion.dns_fallback.push({
+      domain, enabled: true, added_at: '2026-09-03 21:00',
+      app_name: appName || undefined, icon: icon || undefined, note: note || undefined,
+    })
     if (!warpDnsFallback.includes(domain)) warpDnsFallback.push(domain)
     return delay({ success: true, message: `已添加 ${domain}` })
+  },
+  update_exclusion_meta: (kind, key, appName, icon, iconExe, note) => {
+    const table = { domain: ['domains', 'domain'], ip: ['ip_ranges', 'cidr'], dns: ['dns_fallback', 'domain'] }[kind]
+    if (!table) return delay({ success: false, message: '未知类型' })
+    const [listKey, keyField] = table
+    const entry = findBy(exclusion[listKey], keyField, key)
+    if (!entry) return delay({ success: false, message: `${key} 不存在` })
+    for (const [field, value] of [['app_name', appName], ['note', note], ['icon', icon], ['icon_exe', iconExe]]) {
+      if (value === null || value === undefined) continue
+      if (String(value).trim() === '') delete entry[field]
+      else entry[field] = value
+    }
+    return delay({ success: true, message: '已保存' })
+  },
+  resolve_app_info: (process) => {
+    const known = {
+      'chrome.exe': { name: 'Google Chrome' },
+      'msedge.exe': { name: 'Microsoft Edge' },
+      'Douyin.exe': { name: '抖音' },
+    }
+    const hit = known[process || ''] || {}
+    return delay({ name: hit.name || '', icon: null, exe: '' })
   },
   remove_dns_fallback: (domain) => {
     exclusion.dns_fallback = exclusion.dns_fallback.filter((d) => d.domain !== domain)

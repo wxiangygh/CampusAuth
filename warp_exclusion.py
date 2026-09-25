@@ -121,6 +121,45 @@ def wildcard_host(host):
     return WILDCARD_PREFIX + host
 
 
+# ---------------------------------------------------------------------------
+# 排除条目的应用元数据（应用名 / 图标 / 备注）
+# 应用名用于分组展示与识别归属；图标优先用户自定义 data URL，其次 icon_exe 现解析；
+# 两者都没有时前端回退为应用名首字母占位。
+# ---------------------------------------------------------------------------
+_META_FIELDS = ('app_name', 'icon', 'icon_exe', 'note')
+_META_LIMITS = {'app_name': 40, 'note': 200}
+_ICON_MAX_LEN = 300_000  # data URL 上限，防止配置被超大图片撑爆
+
+
+def sanitize_meta(app_name=None, icon=None, icon_exe=None, note=None):
+    """整理用户填写的元数据，返回只含有效字段的 dict（空值不入配置）。"""
+    meta = {}
+    name = (app_name or '').strip()
+    if name:
+        meta['app_name'] = name[:_META_LIMITS['app_name']]
+    note_v = (note or '').strip()
+    if note_v:
+        meta['note'] = note_v[:_META_LIMITS['note']]
+    icon_v = (icon or '').strip()
+    if icon_v.startswith('data:image/') and len(icon_v) <= _ICON_MAX_LEN:
+        meta['icon'] = icon_v
+    exe_v = (icon_exe or '').strip()
+    if exe_v and os.path.isfile(exe_v):
+        meta['icon_exe'] = exe_v
+    return meta
+
+
+def enrich_config_icons(cfg):
+    """为含 icon_exe 的条目附加 icon_url（解析失败为 None），前端可直接渲染。"""
+    from core.proc_icon import get_process_icon
+    for key in ('domains', 'ip_ranges', 'dns_fallback'):
+        for entry in cfg.get(key) or []:
+            exe = entry.get('icon_exe')
+            if exe:
+                entry['icon_url'] = get_process_icon(exe)
+    return cfg
+
+
 def base_host(host):
     """去掉通配前缀：*.example.com -> example.com"""
     host = (host or '').strip().lower().rstrip('.')
@@ -1293,7 +1332,7 @@ class ExclusionManager:
     def _save_config(self, cfg):
         save_exclusion_config(cfg)
 
-    def add_domain(self, domain, route='ipv6'):
+    def add_domain(self, domain, route='ipv6', app_name=None, icon=None, icon_exe=None, note=None):
         """
         添加域名到排除列表并立即应用到WARP。
         route='ipv4': tunnel host add，走校园网 IPv4 直连
@@ -1335,6 +1374,7 @@ class ExclusionManager:
             }
             if blocked_ipv4:
                 entry['blocked_ipv4'] = blocked_ipv4
+            entry.update(sanitize_meta(app_name, icon, icon_exe, note))
             cfg['domains'].append(entry)
             self._save_config(cfg)
             logger.info(f'Added domain {domain} (route={actual_route})')
@@ -1472,7 +1512,7 @@ class ExclusionManager:
     # IP 范围排除管理（warp-cli tunnel ip add-range/remove-range）
     # ------------------------------------------------------------------
 
-    def add_ip_range(self, cidr, route='ipv4'):
+    def add_ip_range(self, cidr, route='ipv4', app_name=None, icon=None, icon_exe=None, note=None):
         """添加 IP/CIDR 到排除列表并立即应用到 WARP。
         route='ipv4': 标记为走 IPv4（CIDR 排除 WARP，配合全局 IPv4 阻止）
         route='ipv6': 标记为走 IPv6（CIDR 排除 WARP，走校园网 IPv6 直连）
@@ -1501,6 +1541,7 @@ class ExclusionManager:
                 'enabled': True,
                 'added_at': time.strftime('%Y-%m-%d %H:%M:%S'),
             }
+            entry.update(sanitize_meta(app_name, icon, icon_exe, note))
             cfg.setdefault('ip_ranges', []).append(entry)
             self._save_config(cfg)
             logger.info(f'Added IP range {cidr} (route={route})')
@@ -1574,6 +1615,37 @@ class ExclusionManager:
         results = [{'domain': d['domain'], 'success': True, 'message': '无需刷新'} for d in cfg['domains']]
         return True, '域名排除方案无需刷新', results
 
+    def update_entry_meta(self, kind, key, app_name=None, icon=None, icon_exe=None, note=None):
+        """修改已有排除条目的应用元数据（kind: domain / ip / dns）。
+        语义：None = 不改动；空串 = 清空该字段；非空 = 覆盖。
+        只动展示信息，不触碰 WARP 规则本身。返回 (success, message, entry)。
+        """
+        tables = {
+            'domain': ('domains', 'domain'),
+            'ip': ('ip_ranges', 'cidr'),
+            'dns': ('dns_fallback', 'domain'),
+        }
+        if kind not in tables:
+            return False, f'未知类型 {kind}', None
+        list_key, key_field = tables[kind]
+        with self._lock:
+            cfg = load_exclusion_config()
+            target = None
+            for entry in cfg.get(list_key) or []:
+                if entry.get(key_field) == key:
+                    target = entry
+                    break
+            if target is None:
+                return False, f'{key} 不存在', None
+            for field, value in (('app_name', app_name), ('note', note),
+                                 ('icon', icon), ('icon_exe', icon_exe)):
+                if value is not None and not str(value).strip():
+                    target.pop(field, None)
+            target.update(sanitize_meta(app_name, icon, icon_exe, note))
+            self._save_config(cfg)
+            logger.info(f'Updated meta for {kind}:{key}')
+            return True, '已保存', target
+
     def apply_to_warp(self, domain=None):
         """
         将排除规则应用到WARP。
@@ -1629,7 +1701,7 @@ class ExclusionManager:
     # 避免 WARP DNS 返回海外 CDN 节点导致中国用户访问被阻止。
     # 与 tunnel host 互补：tunnel host 排除流量，dns fallback 排除 DNS 查询。
 
-    def add_dns_fallback(self, domain):
+    def add_dns_fallback(self, domain, app_name=None, icon=None, icon_exe=None, note=None):
         """添加域名到 DNS fallback 列表并立即应用到 WARP。
         返回 (success, message, info)
         """
@@ -1651,6 +1723,7 @@ class ExclusionManager:
                 'enabled': True,
                 'added_at': time.strftime('%Y-%m-%d %H:%M:%S'),
             }
+            entry.update(sanitize_meta(app_name, icon, icon_exe, note))
             dns_list.append(entry)
             cfg['dns_fallback'] = dns_list
             self._save_config(cfg)

@@ -1849,22 +1849,44 @@ class ApiBridge:
         ok, msg, details = self._get_mgr().check_ipv6_support()
         return {'success': ok, 'message': msg, 'details': details}
 
+    @staticmethod
+    def _host_cidr(ip):
+        """单 IP → 主机路由 CIDR，写进 IP 排除表以便管理与清理。"""
+        return f'{ip}/128' if ':' in ip else f'{ip}/32'
+
+    def _lookup_hostnames(self, ips):
+        """用系统 DNS 缓存 + 反向解析补回 IP 对应的域名（流量页常常没有）。"""
+        if not ips:
+            return {}
+        try:
+            from traffic_monitor import get_traffic_status_slow
+            return get_traffic_status_slow([ip for ip in ips if ip]) or {}
+        except Exception as e:
+            logger.warning(f'Hostname lookup for {len(ips)} IPs failed: {e}')
+            return {}
+
     def set_connections_route(self, connections, route):
         """批量设置连接的路由类型。
         connections: [{hostname, remote_ip}, ...]
         route: 'ipv4' | 'ipv6' | 'warp'（warp=不直连，走WARP）
-        有域名的用域名排除，无域名的用 IP 排除。
+        有域名的用域名排除，无域名的先试着把域名找回来，仍找不到才按 IP 排除。
         修改后刷新 DNS 缓存，确保排除规则对新连接立即生效。
         """
-        from warp_exclusion import warp_add_ip, warp_remove_ip
+        from warp_exclusion import warp_remove_ip
         mgr = self._get_mgr()
         results = []
         need_flush_dns = False  # 是否需要刷新 DNS 缓存
+        # 地址族只能由「新建连接到 AAAA」决定，IP 规则无从要求 AAAA，
+        # 所以无域名的行先补一次域名，让它有机会走真正的 IPv6 路由。
+        host_by_ip = self._lookup_hostnames(
+            [conn.get('remote_ip') or '' for conn in connections
+             if not (conn.get('hostname') or '').strip()])
         for conn in connections:
-            hostname = (conn.get('hostname') or '').strip()
+            requested = (conn.get('hostname') or '').strip()
             remote_ip = (conn.get('remote_ip') or '').strip()
+            hostname = requested or host_by_ip.get(remote_ip, '')
             if not hostname and not remote_ip:
-                results.append({'hostname': hostname, 'remote_ip': remote_ip,
+                results.append({'hostname': requested, 'remote_ip': remote_ip,
                                 'success': False, 'message': '无域名和IP'})
                 continue
             try:
@@ -1873,7 +1895,11 @@ class ApiBridge:
                     if hostname:
                         ok, msg = mgr.remove_domain(hostname)
                     else:
-                        ok, msg = warp_remove_ip(remote_ip)
+                        cidr = self._host_cidr(remote_ip)
+                        ok, msg = mgr.remove_ip_range(cidr)
+                        if not ok:
+                            # 兼容旧版：早先用裸 warp-cli tunnel ip add 加的条目
+                            ok, msg = warp_remove_ip(remote_ip)
                     if ok:
                         need_flush_dns = True
                 else:
@@ -1883,13 +1909,20 @@ class ApiBridge:
                         mgr.remove_domain(hostname)
                         ok, msg, _ = mgr.add_domain(hostname, route=route)
                     else:
-                        ok, msg = warp_add_ip(remote_ip)
+                        # 只有 IP：能排除 WARP，但无从要求 AAAA —— 说清楚，别让
+                        # 「IPv6 直连」看起来做了它没做的事
+                        cidr = self._host_cidr(remote_ip)
+                        ok, msg, _ = mgr.add_ip_range(cidr, route=route)
+                        if not ok and '已存在' in msg:
+                            ok, msg = mgr.set_ip_range_route(cidr, route)
+                        if ok:
+                            msg = f'{msg}；该连接无域名，只能排除 WARP，换地址族需浏览器新建连接'
                     if ok:
                         need_flush_dns = True
             except Exception as e:
                 ok, msg = False, str(e)
-            results.append({'hostname': hostname, 'remote_ip': remote_ip,
-                            'success': ok, 'message': msg})
+            results.append({'hostname': requested, 'remote_ip': remote_ip,
+                            'success': ok, 'message': msg, 'used_target': hostname or remote_ip})
         # 刷新系统 DNS 缓存，让排除规则对新连接立即生效
         # WARP 的 tunnel host add 只对新 DNS 查询生效，旧缓存会导致流量仍走 WARP
         if need_flush_dns:

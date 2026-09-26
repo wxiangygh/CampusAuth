@@ -50,8 +50,10 @@ def list_rules():
     script = (
         '$r = @(Get-DnsClientNrptRule -EA SilentlyContinue | '
         'Select-Object Name,'
-        '@{n="Namespaces";e={,$_.Namespace -join ";"}},'
-        '@{n="Servers";e={,$_.NameServers -join ";"}}); '
+        # 这里不能用 ",@(...) -join"：前置逗号构造的数组会被 Select-Object 先字符串化，
+        # 读回来就成了字面量 System.String[]（2026-09-26 实测）
+        '@{n="Namespaces";e={(@($_.Namespace)) -join ";"}},'
+        '@{n="Servers";e={(@($_.NameServers)) -join ";"}}); '
         'if ($r) { ConvertTo-Json -InputObject $r -Compress }'
     )
     code, out, _ = run_powershell_simple(script, timeout=20)
@@ -144,9 +146,11 @@ def _sync_script(desired, stale_names, stale_namespaces):
         )
     for rule in desired:
         servers = ','.join(ps_quote(s) for s in rule['servers'])
+        # Add-DnsClientNrptRule 没有 -Force（只有 Remove- 有），带上会让整条
+        # 提权脚本在 $ErrorActionPreference=Stop 下抛错，一条都写不进去。
         lines.append(
             f'$r = Add-DnsClientNrptRule -Namespace {ps_quote(rule["namespace"])}'
-            f' -NameServers {servers} -PassThru -Force\n'
+            f' -NameServers {servers} -PassThru\n'
             'if ($r) { $names += $r.Name }'
         )
     lines.append('$payload = [pscustomobject]@{ok=$true; names=$names}')

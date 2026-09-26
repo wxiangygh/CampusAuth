@@ -45,6 +45,10 @@ const selectedConns = reactive(new Set())
 const expandedGroups = reactive(new Set())
 // 进程分组（以及组内连接）的排序方向：1 = A→Z，-1 = Z→A
 const procSortDir = ref(1)
+// connId → 用户刚设置的路由意图。列表里的标签是**实测**走向，而地址族要等应用
+// 断开旧连接、重新解析新建后才变，所以"设置成功"不等于"已经走 IPv6"，
+// 这个映射用来把两者区分开显示，实测追上意图后自动消失。
+const pendingRoute = reactive(new Map())
 
 let loadingSlow = false
 let autoTimer = null
@@ -92,6 +96,7 @@ async function refreshFast() {
       for (const c of traffic.conns) cumulativeConns.set(connId(c), c)
     }
     pruneSelection()
+    prunePending()
   } catch (e) {
     ui.toast('获取失败: ' + e, 'error')
   } finally {
@@ -135,6 +140,29 @@ function pruneSelection() {
     if (!visible.has(id)) toRemove.push(id)
   }
   for (const id of toRemove) selectedConns.delete(id)
+}
+
+// 实测已经追上意图（或连接已消失）就不再提示"待重连"
+function intentMet(intent, c) {
+  if (intent === 'warp') return !!c.is_warp
+  return c.route_type === intent
+}
+
+function prunePending() {
+  const live = new Map(searchedConns.value.map((c) => [connId(c), c]))
+  for (const [id, intent] of [...pendingRoute]) {
+    const c = live.get(id)
+    if (!c || intentMet(intent, c)) pendingRoute.delete(id)
+  }
+}
+
+function pendingOf(c) {
+  return pendingRoute.get(connId(c)) || ''
+}
+
+function pendingTitle(c) {
+  const want = ROUTE_ACTION_LABEL[pendingOf(c)] || pendingOf(c)
+  return `已设为${want}，但要等应用断开旧连接、重新解析新建后才会真的改换地址族`
 }
 
 // ===== 自动刷新 =====
@@ -403,15 +431,6 @@ function toggleCumulative(enabled) {
   }
 }
 
-// 根据路由选择推断修改后的 route_type（与后端分类逻辑一致）
-function inferRouteType(route, conn) {
-  const isIpv6 = (conn.remote_ip || '').includes(':') || conn.is_ipv6
-  if (route === 'ipv4') return 'ipv4'
-  if (route === 'ipv6') return 'ipv6'
-  if (traffic.warpUnderlay === 'ipv6') return isIpv6 ? 'ipv6_warp' : 'ipv6_warp_ipv4'
-  return isIpv6 ? 'ipv4_warp_ipv6' : 'ipv4_warp'
-}
-
 async function setRoute(route) {
   if (selectedConns.size === 0 || traffic.applying) return
   const conns = []
@@ -422,6 +441,9 @@ async function setRoute(route) {
   if (!conns.length) return
   return applyRoute(conns, route)
 }
+
+// 后端按实测结果分类，成功提示里只有这几种措辞不需要转给用户看
+const QUIET_MESSAGES = ['添加成功', '已存在', '删除成功', '不存在']
 
 async function applyRoute(conns, route) {
   if (!conns.length || !api()) return
@@ -440,20 +462,19 @@ async function applyRoute(conns, route) {
     let successCount = 0
     let failCount = 0
     const failMessages = []
+    const notes = []
     for (const r of results) {
       const matched = connIndex.find(
         (c) => (c.hostname || '') === r.hostname && c.remote_ip === r.remote_ip
       )
       if (r.success) {
         successCount++
-        // 乐观更新：仅对成功的连接更新类型
-        if (matched && traffic.cumulativeMode) {
-          const c = cumulativeConns.get(connId(matched))
-          if (c) {
-            c.route_type = inferRouteType(route, c)
-            c.is_warp = route === 'warp'
-            cumulativeConns.set(connId(matched), c)
-          }
+        // 只记下意图，不改实测标签：地址族要等应用新建连接后才变，
+        // 直接改写 route_type 会让列表显示一个还没发生的事实
+        if (matched) pendingRoute.set(connId(matched), route)
+        const msg = (r.message || '').trim()
+        if (msg && !QUIET_MESSAGES.includes(msg)) {
+          notes.push(`${r.hostname || r.remote_ip}: ${msg}`)
         }
       } else {
         failCount++
@@ -461,11 +482,15 @@ async function applyRoute(conns, route) {
       }
     }
     if (failCount === 0) {
-      ui.toast(`${routeLabel}: 全部成功 (${successCount}/${items.length})`, 'success')
+      ui.toast(
+        `${routeLabel}: 全部成功 (${successCount}/${items.length})` +
+          (notes.length ? `。${notes.slice(0, 2).join('; ')}` : ''),
+        'success'
+      )
     } else {
       ui.toast(`${routeLabel}: 成功 ${successCount}，失败 ${failCount}。${failMessages.slice(0, 2).join('; ')}`, 'error')
     }
-    // 防抖刷新：延迟获取后端实际数据覆盖乐观更新
+    // 防抖刷新：延迟获取后端实际数据，实测追上意图时"待重连"提示自动消失
     refreshDebounced(1200)
     if (failCount === 0) clearSelection()
   } catch (e) {
@@ -778,6 +803,9 @@ onBeforeUnmount(() => {
             <span class="conn-host">
               <span class="conn-hostname">{{ c.hostname || '(无域名)' }}</span>
               <span class="conn-ip mono">{{ c.remote_ip }}:{{ c.remote_port }}</span>
+            </span>
+            <span v-if="pendingOf(c)" class="conn-pending" :title="pendingTitle(c)">
+              已设 {{ ROUTE_ACTION_LABEL[pendingOf(c)] }}·待重连
             </span>
             <span class="conn-tag" :class="{ on: effectiveFilter(group.name).has(c.route_type || 'ipv4') }"
               :title="procTagTitle(c.route_type || 'ipv4')"
@@ -1462,6 +1490,17 @@ onBeforeUnmount(() => {
 
 .conn-tag:hover {
   border-color: var(--accent);
+}
+
+/* 「已设 X·待重连」：意图与实测不一致时的过渡提示，虚线以示它不是事实 */
+.conn-pending {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  border: 1px dashed var(--border-strong);
+  border-radius: 5px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* 该进程正在单独筛选，且此类型在筛选内 */
